@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
@@ -19,7 +17,7 @@ class RGBCameraNode(Node):
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 480)
 
-        # Get parameter values
+        # Parameter values
         device_path = self.get_parameter('device_path').value
         camera_id = device_path if device_path else self.get_parameter('camera_id').value
         frame_rate = self.get_parameter('frame_rate').value
@@ -30,18 +28,18 @@ class RGBCameraNode(Node):
         self.image_pub = self.create_publisher(Image, 'camera/image_raw', 10)
         self.camera_info_pub = self.create_publisher(CameraInfo, 'camera/camera_info', 10)
 
-        # Initialize CV bridge
+        # CV bridge init
         self.bridge = CvBridge()
 
         # Open camera
-        self.cap = cv2.VideoCapture(camera_id)
-        if not self.cap.isOpened():
+        self.capture = cv2.VideoCapture(camera_id)
+        if not self.capture.isOpened():
             self.get_logger().error(f'Failed to open camera {camera_id}')
             return
 
         # Set camera properties
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
         # Create camera info message
         self.camera_info = self.create_camera_info(width, height)
@@ -53,7 +51,7 @@ class RGBCameraNode(Node):
         self.get_logger().info(f'RGB Camera node started (camera_id={camera_id}, {width}x{height} @ {frame_rate}Hz)')
 
     def capture_frame(self):
-        ret, frame = self.cap.read()
+        ret, frame = self.capture.read()
 
         if not ret:
             self.get_logger().warn('Failed to capture frame')
@@ -64,10 +62,11 @@ class RGBCameraNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'camera_link'
 
-        # Publish image and camera info
-        self.image_pub.publish(msg)
         self.camera_info.header.stamp = msg.header.stamp
         self.camera_info.header.frame_id = msg.header.frame_id
+        
+        # Publish image and camera info
+        self.image_pub.publish(msg)
         self.camera_info_pub.publish(self.camera_info)
 
     def create_camera_info(self, width, height):
@@ -107,8 +106,8 @@ class RGBCameraNode(Node):
         return camera_info
 
     def destroy_node(self):
-        if self.cap.isOpened():
-            self.cap.release()
+        if self.capture.isOpened():
+            self.capture.release()
         super().destroy_node()
 
 

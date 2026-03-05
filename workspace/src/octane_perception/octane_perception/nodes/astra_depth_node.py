@@ -29,12 +29,12 @@ class AstraDepthNode(Node):
         
     # Callbacks for processing incoming messages
     def depth_callback(self, msg):
-        """Process and republish depth images"""
+        # Process and republish depth images
         self.depth_publisher.publish(msg)
         self.get_logger().info('Published depth image', once=True)
 
     def color_callback(self, msg):
-        """Process and republish color images"""
+        # Process and republish color images
         self.color_publisher.publish(msg)
         self.get_logger().info('Published color image', once=True)
 
