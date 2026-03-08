@@ -1,5 +1,6 @@
 .DS_Store
 .env
+docker_setup/fastdds_bridge.xml
 workspace/build/
 workspace/install/
 workspace/log/
