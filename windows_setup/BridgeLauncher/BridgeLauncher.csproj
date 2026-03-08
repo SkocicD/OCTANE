@@ -8,9 +8,6 @@
     <AssemblyName>BridgeLauncher</AssemblyName>
     <RootNamespace>BridgeLauncher</RootNamespace>
     <Platforms>x64</Platforms>
-    <!-- Single-file publish: bundles all DLLs + native libs into one exe -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 

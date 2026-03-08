@@ -6,7 +6,5 @@ workspace/install/
 workspace/log/
 windows_setup/fastdds_isaac_sim.xml
 # BridgeLauncher build output
-windows_setup/BridgeLauncher.exe
-windows_setup/BridgeLauncher.pdb
 windows_setup/BridgeLauncher/bin/
 windows_setup/BridgeLauncher/obj/
