@@ -26,21 +26,41 @@ Write-Host "Detecting container IP..." -ForegroundColor White
 
 $containerIP = $null
 try {
-    # hostname -I returns all container IPs. Docker Desktop always assigns the VM
-    # an IP in the 192.168.65.x subnet, so we filter for that specifically.
+    # hostname -I returns all container IPs. Docker Desktop assigns IPs in the
+    # 192.168.65.x subnet. We collect ALL of them and add each as a peer so
+    # Isaac Sim tries every candidate -- DDS will connect on whichever is active.
     $ipOutput = (docker exec ros2_bridge hostname -I 2>$null).Trim()
-    $containerIP = ($ipOutput.Split() | Where-Object { $_ -match '^192\.168\.65\.' })[0]
+    $containerIPs = @($ipOutput.Split() | Where-Object { $_ -match '^192\.168\.65\.' })
 } catch {}
 
-if (-not $containerIP) {
+if (-not $containerIPs -or $containerIPs.Count -eq 0) {
     Write-Error "Could not detect container IP. Make sure the ros2_bridge container is running first (bash run_bridge.sh in WSL2)."
     exit 1
 }
 
-Write-Host "Container IP detected: $containerIP" -ForegroundColor Green
+Write-Host "Container IPs detected: $($containerIPs -join ', ')" -ForegroundColor Green
 
-# 2. Generate FastDDS XML profile pointing Isaac Sim at the real container IP
+# 2. Generate FastDDS XML profile with a locator entry for each container IP
 $profilePath = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml"
+
+$locators = ""
+foreach ($ip in $containerIPs) {
+    $locators += @"
+
+                        <locator>
+                            <udpv4>
+                                <address>$ip</address>
+                                <port>7412</port>
+                            </udpv4>
+                        </locator>
+                        <locator>
+                            <udpv4>
+                                <address>$ip</address>
+                                <port>7410</port>
+                            </udpv4>
+                        </locator>
+"@
+}
 
 $xmlContent = @"
 <?xml version="1.0" encoding="UTF-8" ?>
@@ -49,19 +69,7 @@ $xmlContent = @"
         <participant profile_name="isaac_sim_bridge_windows" is_default_profile="true">
             <rtps>
                 <builtin>
-                    <initialPeersList>
-                        <locator>
-                            <udpv4>
-                                <address>$containerIP</address>
-                                <port>7412</port>
-                            </udpv4>
-                        </locator>
-                        <locator>
-                            <udpv4>
-                                <address>$containerIP</address>
-                                <port>7410</port>
-                            </udpv4>
-                        </locator>
+                    <initialPeersList>$locators
                     </initialPeersList>
                 </builtin>
             </rtps>
@@ -71,7 +79,7 @@ $xmlContent = @"
 "@
 
 $xmlContent | Set-Content -Path $profilePath -Encoding UTF8
-Write-Host "FastDDS profile written with container IP ($containerIP): $profilePath" -ForegroundColor Green
+Write-Host "FastDDS profile written: $profilePath" -ForegroundColor Green
 
 # 3. Set environment variables
 [System.Environment]::SetEnvironmentVariable("ROS_DOMAIN_ID",                  "0",                "User")
