@@ -124,40 +124,36 @@ public class BridgeManager : IDisposable
         var wslWorkspace = ToWslPath(Path.Combine(_repoRoot, "workspace"));
         var wslInstall   = ToWslPath(Path.Combine(_repoRoot, "workspace", "install", "setup.bash"));
 
-        // One-liner that sources everything and drops into interactive bash
-        var init =
-            $"source /opt/ros/humble/setup.bash; " +
-            $"source {wslInstall} 2>/dev/null; " +
-            $"cd {wslWorkspace}; " +
-            $"export RMW_IMPLEMENTATION=rmw_fastrtps_cpp; " +
-            $"export ROS_DOMAIN_ID=0; " +
-            $"echo ''; " +
-            $"echo '  ROS2 sourced | workspace ready | domain 0'; " +
-            $"echo ''; " +
-            $"exec bash";
+        // Write init to a temp script — avoids wt.exe treating semicolons as its own command separators
+        var tempScript    = Path.Combine(Path.GetTempPath(), "bridge_init.sh");
+        var wslTempScript = ToWslPath(tempScript);
+        File.WriteAllText(tempScript, string.Join("\n",
+            "#!/bin/bash",
+            "source /opt/ros/humble/setup.bash",
+            $"source {wslInstall} 2>/dev/null",
+            $"cd {wslWorkspace}",
+            "export RMW_IMPLEMENTATION=rmw_fastrtps_cpp",
+            "export ROS_DOMAIN_ID=0",
+            "echo ''",
+            "echo '  ROS2 sourced | workspace ready | domain 0'",
+            "echo ''",
+            "exec bash"
+        ));
 
         // Try Windows Terminal first, fall back to bare wsl.exe window
         try
         {
-            var psi = new ProcessStartInfo("wt.exe")
-            {
-                UseShellExecute = true
-            };
+            var psi = new ProcessStartInfo("wt.exe") { UseShellExecute = true };
             psi.ArgumentList.Add("wsl.exe");
             psi.ArgumentList.Add("bash");
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(init);
+            psi.ArgumentList.Add(wslTempScript);
             Process.Start(psi);
         }
         catch
         {
-            var psi = new ProcessStartInfo("wsl.exe")
-            {
-                UseShellExecute = true
-            };
+            var psi = new ProcessStartInfo("wsl.exe") { UseShellExecute = true };
             psi.ArgumentList.Add("bash");
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(init);
+            psi.ArgumentList.Add(wslTempScript);
             Process.Start(psi);
         }
     }
