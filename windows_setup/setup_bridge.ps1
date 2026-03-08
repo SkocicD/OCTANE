@@ -29,7 +29,7 @@ try {
     # "ip route get 1.1.1.1" returns the route used for outbound traffic, e.g.:
     # "1.1.1.1 via 192.168.65.1 dev eth0 src 192.168.65.3 uid 0"
     # We parse the value after "src".
-    $routeOutput = (wsl docker exec ros2_bridge ip route get 1.1.1.1 2>$null)
+    $routeOutput = (docker exec ros2_bridge ip route get 1.1.1.1 2>$null)
     if ($routeOutput -match 'src\s+(\d+\.\d+\.\d+\.\d+)') {
         $containerIP = $Matches[1]
     }
