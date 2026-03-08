@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+        <participant profile_name="isaac_sim_bridge_windows" is_default_profile="true">
+            <rtps>
+                <builtin>
+                    <!--
+                        WSL2 assigns a new IP on each restart.
+                        Run setup_bridge.ps1 before launching Isaac Sim to update WSL2_HOST.
+                        FastDDS expands $ENV{...} at runtime, so the XML itself never needs editing.
+                    -->
+                    <initialPeersList>
+                        <!-- WSL2 container host — SPDP well-known unicast ports for domain 0 -->
+                        <locator>
+                            <udpv4>
+                                <address>$ENV{WSL2_HOST}</address>
+                                <port>7412</port>
+                            </udpv4>
+                        </locator>
+                        <locator>
+                            <udpv4>
+                                <address>$ENV{WSL2_HOST}</address>
+                                <port>7410</port>
+                            </udpv4>
+                        </locator>
+                    </initialPeersList>
+                </builtin>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>
