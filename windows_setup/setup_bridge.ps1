@@ -24,9 +24,43 @@ if (-not $wsl2IP) {
 
 Write-Host "WSL2 IP detected: $wsl2IP" -ForegroundColor Green
 
-# 2. Set environment variables
+# 2. Generate FastDDS XML profile with the real WSL2 IP substituted in.
+# $ENV{VAR} expansion is not supported in FastDDS address fields (same issue as the
+# container side) so we write the IP directly into the XML here using PowerShell.
 $profilePath = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml"
 
+$xmlContent = @"
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+        <participant profile_name="isaac_sim_bridge_windows" is_default_profile="true">
+            <rtps>
+                <builtin>
+                    <initialPeersList>
+                        <locator>
+                            <udpv4>
+                                <address>$wsl2IP</address>
+                                <port>7412</port>
+                            </udpv4>
+                        </locator>
+                        <locator>
+                            <udpv4>
+                                <address>$wsl2IP</address>
+                                <port>7410</port>
+                            </udpv4>
+                        </locator>
+                    </initialPeersList>
+                </builtin>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>
+"@
+
+$xmlContent | Set-Content -Path $profilePath -Encoding UTF8
+Write-Host "FastDDS profile written: $profilePath" -ForegroundColor Green
+
+# 3. Set environment variables
 [System.Environment]::SetEnvironmentVariable("WSL2_HOST",                      $wsl2IP,            "User")
 [System.Environment]::SetEnvironmentVariable("ROS_DOMAIN_ID",                  "0",                "User")
 [System.Environment]::SetEnvironmentVariable("RMW_IMPLEMENTATION",             "rmw_fastrtps_cpp", "User")
