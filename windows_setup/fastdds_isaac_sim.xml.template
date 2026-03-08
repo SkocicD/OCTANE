@@ -1,31 +1,35 @@
 <?xml version="1.0" encoding="UTF-8" ?>
+<!--
+    NVIDIA-recommended FastDDS profile for Isaac Sim on Windows with WSL2 ROS2.
+
+    What this does:
+      - Disables shared memory transport (SHM causes crashes when Isaac Sim runs on a
+        different machine/process from the ROS2 participant)
+      - Forces UDPv4 as the only transport so DDS multicast reaches WSL2 over the
+        Hyper-V virtual switch that connects Windows <-> WSL2
+
+    What this does NOT need:
+      - initialPeersList / hardcoded IPs  (those caused Isaac Sim to crash)
+      - Any WSL2 or container IP          (multicast handles discovery automatically)
+
+    Written by setup_bridge.ps1. Re-run that script whenever you need to reset env vars
+    or after a fresh WSL2 install. The file itself never changes between runs.
+-->
 <dds>
     <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+        <transport_descriptors>
+            <transport_descriptor>
+                <transport_id>udpv4_transport</transport_id>
+                <type>UDPv4</type>
+            </transport_descriptor>
+        </transport_descriptors>
+
         <participant profile_name="isaac_sim_bridge_windows" is_default_profile="true">
             <rtps>
-                <builtin>
-                    <!--
-                        WSL2 assigns a new IP on each restart.
-                        Run setup_bridge.ps1 before launching Isaac Sim — it detects the
-                        current WSL2 IP and writes it directly into fastdds_isaac_sim.xml.
-                        fastdds_isaac_sim.xml is gitignored (machine-specific).
-                    -->
-                    <initialPeersList>
-                        <!-- WSL2 container host - SPDP well-known unicast ports for domain 0 -->
-                        <locator>
-                            <udpv4>
-                                <address>PLACEHOLDER_WSL2_HOST</address>
-                                <port>7412</port>
-                            </udpv4>
-                        </locator>
-                        <locator>
-                            <udpv4>
-                                <address>PLACEHOLDER_WSL2_HOST</address>
-                                <port>7410</port>
-                            </udpv4>
-                        </locator>
-                    </initialPeersList>
-                </builtin>
+                <userTransports>
+                    <transport_id>udpv4_transport</transport_id>
+                </userTransports>
+                <useBuiltinTransports>false</useBuiltinTransports>
             </rtps>
         </participant>
     </profiles>
