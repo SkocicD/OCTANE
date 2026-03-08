@@ -1,18 +1,19 @@
 services:
-  ros2:
+  ros2_bridge:
     build:
       context: ./docker_setup
       dockerfile: Dockerfile
-    image: ros2:latest
-    container_name: ros2
+    image: ros2_bridge:latest
+    container_name: ros2_bridge
     tty: true
     stdin_open: true
     command: bash
-    ports:
-      - "8000:5000"
-      - "5901:5901"
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/config/fastdds_bridge.xml
+      - ISAAC_SIM_HOST=${ISAAC_SIM_HOST}
     volumes:
       - ./workspace:/workspace
-    devices:
-      - /dev/bus/usb:/dev/bus/usb
-    privileged: true
+      - ./docker_setup/fastdds_bridge.xml:/config/fastdds_bridge.xml:ro
