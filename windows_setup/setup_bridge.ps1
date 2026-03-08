@@ -1,32 +1,47 @@
 # Isaac Sim ROS 2 Bridge - Windows Setup
 #
 # What this does:
-#   1. Detects the current WSL2 IP (changes on every WSL2 restart)
-#   2. Sets user-level environment variables Isaac Sim will read on next launch
-#   3. Adds a Windows Firewall inbound rule for DDS UDP traffic
+#   1. Gets the ros2_bridge container's actual IP (Docker Desktop assigns its own subnet)
+#   2. Writes Isaac Sim's FastDDS profile with that real container IP
+#   3. Sets user-level environment variables Isaac Sim will read on next launch
+#   4. Adds a Windows Firewall inbound rule for DDS UDP traffic
 #
+# IMPORTANT: Start the container first (bash run_bridge.sh in WSL2), then run this script.
 # Run with: Right-click -> "Run with PowerShell" (as Administrator for firewall step)
-# Re-run each time WSL2 restarts, then relaunch Isaac Sim.
+# Re-run each time WSL2 restarts or the container is recreated.
 
 $ErrorActionPreference = "Stop"
 
-# 1. Detect WSL2 IP
 Write-Host ""
 Write-Host "=== Isaac Sim Bridge Setup ===" -ForegroundColor Cyan
 Write-Host ""
 
-$wsl2IP = (wsl -- hostname -I 2>$null).Trim().Split()[0]
+# 1. Get the container's actual IP via docker inspect.
+# On Docker Desktop for Windows, network_mode:host does not share the Windows/WSL2 network
+# interface -- the container gets its own IP in the Docker Desktop VM subnet (192.168.65.x).
+# Isaac Sim must send DDS packets to this IP, not the WSL2 IP.
+Write-Host "Detecting container IP..." -ForegroundColor White
 
-if (-not $wsl2IP) {
-    Write-Error "Could not detect WSL2 IP. Make sure WSL2 is running (open a WSL terminal first)."
+$containerIP = $null
+try {
+    $containerIP = (docker inspect ros2_bridge --format "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" 2>$null).Trim()
+} catch {}
+
+# With network_mode:host the above may return empty -- fall back to hostname -I inside container
+if (-not $containerIP) {
+    try {
+        $containerIP = (docker exec ros2_bridge hostname -I 2>$null).Trim().Split()[0]
+    } catch {}
+}
+
+if (-not $containerIP) {
+    Write-Error "Could not detect container IP. Make sure the ros2_bridge container is running first (bash run_bridge.sh in WSL2)."
     exit 1
 }
 
-Write-Host "WSL2 IP detected: $wsl2IP" -ForegroundColor Green
+Write-Host "Container IP detected: $containerIP" -ForegroundColor Green
 
-# 2. Generate FastDDS XML profile with the real WSL2 IP substituted in.
-# $ENV{VAR} expansion is not supported in FastDDS address fields (same issue as the
-# container side) so we write the IP directly into the XML here using PowerShell.
+# 2. Generate FastDDS XML profile pointing Isaac Sim at the real container IP
 $profilePath = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml"
 
 $xmlContent = @"
@@ -39,13 +54,13 @@ $xmlContent = @"
                     <initialPeersList>
                         <locator>
                             <udpv4>
-                                <address>$wsl2IP</address>
+                                <address>$containerIP</address>
                                 <port>7412</port>
                             </udpv4>
                         </locator>
                         <locator>
                             <udpv4>
-                                <address>$wsl2IP</address>
+                                <address>$containerIP</address>
                                 <port>7410</port>
                             </udpv4>
                         </locator>
@@ -58,21 +73,19 @@ $xmlContent = @"
 "@
 
 $xmlContent | Set-Content -Path $profilePath -Encoding UTF8
-Write-Host "FastDDS profile written: $profilePath" -ForegroundColor Green
+Write-Host "FastDDS profile written with container IP ($containerIP): $profilePath" -ForegroundColor Green
 
 # 3. Set environment variables
-[System.Environment]::SetEnvironmentVariable("WSL2_HOST",                      $wsl2IP,            "User")
 [System.Environment]::SetEnvironmentVariable("ROS_DOMAIN_ID",                  "0",                "User")
 [System.Environment]::SetEnvironmentVariable("RMW_IMPLEMENTATION",             "rmw_fastrtps_cpp", "User")
 [System.Environment]::SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", $profilePath,       "User")
 
 Write-Host "Environment variables set (user-level):" -ForegroundColor Green
-Write-Host "  WSL2_HOST                      = $wsl2IP"
 Write-Host "  ROS_DOMAIN_ID                  = 0"
 Write-Host "  RMW_IMPLEMENTATION             = rmw_fastrtps_cpp"
 Write-Host "  FASTRTPS_DEFAULT_PROFILES_FILE = $profilePath"
 
-# 3. Firewall rule
+# 4. Firewall rule
 Write-Host ""
 $ruleName = "ROS2 DDS UDP (Isaac Sim Bridge)"
 
@@ -98,5 +111,5 @@ try {
 Write-Host ""
 Write-Host "Done." -ForegroundColor Cyan
 Write-Host "Restart Isaac Sim to pick up the new environment variables."
-Write-Host "Re-run this script each time WSL2 restarts (the IP changes)."
+Write-Host "Re-run this script each time the container is restarted (IP may change)."
 Write-Host ""
