@@ -85,7 +85,11 @@ echo "  (Waiting up to 5s for DDS discovery...)"
 sleep 5
 
 TOPIC_RAW=$(docker exec "$CONTAINER" bash -c "$ROS_SETUP && ros2 topic list 2>/dev/null")
-TOPIC_COUNT=$(echo "$TOPIC_RAW" | grep -c '/' || true)
+
+# Strip ANSI escape codes, then keep only lines that start with '/' (actual topic names).
+# Without this, FastDDS XML parse errors (which mention file paths) skew the count.
+TOPIC_LIST=$(echo "$TOPIC_RAW" | sed 's/\x1b\[[0-9;]*[mGKH]//g' | grep '^/')
+TOPIC_COUNT=$(echo "$TOPIC_LIST" | grep -c '^/' || true)
 
 # ros2 topic list always exits 0; count > 2 means something beyond the default
 # /parameter_events and /rosout that any ROS 2 node publishes
@@ -96,11 +100,11 @@ check "ros2 topic list shows Isaac Sim topics ($TOPIC_COUNT topics)" $? \
 if [ "$TOPIC_COUNT" -gt 0 ]; then
     echo ""
     echo "  Topics visible from container:"
-    echo "$TOPIC_RAW" | sed 's/^/    /'
+    echo "$TOPIC_LIST" | sed 's/^/    /'
 
     # Spot-check for /clock — easiest Isaac Sim topic to confirm bridge is live
     echo ""
-    echo "$TOPIC_RAW" | grep -q "/clock"
+    echo "$TOPIC_LIST" | grep -q "^/clock$"
     check "/clock topic present" $? \
         "Add a ROS2 Clock node to your Isaac Sim Action Graph and hit Play"
 fi
