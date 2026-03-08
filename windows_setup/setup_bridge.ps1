@@ -1,16 +1,16 @@
-# Isaac Sim ROS 2 Bridge — Windows Setup
+# Isaac Sim ROS 2 Bridge - Windows Setup
 #
 # What this does:
 #   1. Detects the current WSL2 IP (changes on every WSL2 restart)
 #   2. Sets user-level environment variables Isaac Sim will read on next launch
 #   3. Adds a Windows Firewall inbound rule for DDS UDP traffic
 #
-# Run with: Right-click → "Run with PowerShell" (as Administrator for firewall step)
+# Run with: Right-click -> "Run with PowerShell" (as Administrator for firewall step)
 # Re-run each time WSL2 restarts, then relaunch Isaac Sim.
 
 $ErrorActionPreference = "Stop"
 
-# ── 1. Detect WSL2 IP ────────────────────────────────────────────────────────
+# 1. Detect WSL2 IP
 Write-Host ""
 Write-Host "=== Isaac Sim Bridge Setup ===" -ForegroundColor Cyan
 Write-Host ""
@@ -24,13 +24,13 @@ if (-not $wsl2IP) {
 
 Write-Host "WSL2 IP detected: $wsl2IP" -ForegroundColor Green
 
-# ── 2. Set environment variables ─────────────────────────────────────────────
+# 2. Set environment variables
 $profilePath = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml"
 
-[System.Environment]::SetEnvironmentVariable("WSL2_HOST",                       $wsl2IP,               "User")
-[System.Environment]::SetEnvironmentVariable("ROS_DOMAIN_ID",                   "0",                   "User")
-[System.Environment]::SetEnvironmentVariable("RMW_IMPLEMENTATION",              "rmw_fastrtps_cpp",    "User")
-[System.Environment]::SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE",  $profilePath,          "User")
+[System.Environment]::SetEnvironmentVariable("WSL2_HOST",                      $wsl2IP,            "User")
+[System.Environment]::SetEnvironmentVariable("ROS_DOMAIN_ID",                  "0",                "User")
+[System.Environment]::SetEnvironmentVariable("RMW_IMPLEMENTATION",             "rmw_fastrtps_cpp", "User")
+[System.Environment]::SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", $profilePath,       "User")
 
 Write-Host "Environment variables set (user-level):" -ForegroundColor Green
 Write-Host "  WSL2_HOST                      = $wsl2IP"
@@ -38,7 +38,7 @@ Write-Host "  ROS_DOMAIN_ID                  = 0"
 Write-Host "  RMW_IMPLEMENTATION             = rmw_fastrtps_cpp"
 Write-Host "  FASTRTPS_DEFAULT_PROFILES_FILE = $profilePath"
 
-# ── 3. Firewall rule ──────────────────────────────────────────────────────────
+# 3. Firewall rule
 Write-Host ""
 $ruleName = "ROS2 DDS UDP (Isaac Sim Bridge)"
 
@@ -56,11 +56,11 @@ try {
         Write-Host "Firewall rule added: '$ruleName' (UDP 7400-7500 inbound)" -ForegroundColor Green
     }
 } catch {
-    Write-Warning "Could not add firewall rule — re-run as Administrator to apply it."
+    Write-Warning "Could not add firewall rule - re-run as Administrator to apply it."
     Write-Warning "($_)"
 }
 
-# ── Done ──────────────────────────────────────────────────────────────────────
+# Done
 Write-Host ""
 Write-Host "Done." -ForegroundColor Cyan
 Write-Host "Restart Isaac Sim to pick up the new environment variables."
