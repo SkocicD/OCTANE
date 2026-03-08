@@ -34,7 +34,7 @@ public partial class MainWindow : Window
             if (status == BridgeStatus.Ready)
             {
                 Badge02.Background  = SolidBrush("#76b900");
-                ((TextBlock)((Grid)Badge02.Child!).Children[0]!).Foreground = SolidBrush("#ffffff");
+                ((TextBlock)Badge02.Child!).Foreground = SolidBrush("#ffffff");
                 BtnStartRos.IsEnabled = true;
             }
         });
