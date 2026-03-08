@@ -10,9 +10,9 @@
                         Multicast attempts are left in place and will fail silently — this keeps
                         the profile compatible if the container is ever run on a same-subnet setup.
 
-                        NOTE: $ENV{VAR} syntax is not supported for <address> fields in FastDDS 2.6.x
-                        (ROS 2 Humble). run_bridge.sh substitutes ISAAC_SIM_HOST at startup via sed
-                        and writes the real IP into fastdds_bridge.xml before starting the container.
+                        NOTE: FastDDS ENV-var XML expansion is not supported for address fields in
+                        FastDDS 2.6.x (ROS 2 Humble). envsubst runs inside the container at startup
+                        (see docker-compose command:) to substitute ISAAC_SIM_HOST before FastDDS loads.
                     -->
                     <initialPeersList>
                         <!-- Isaac Sim Windows host — SPDP well-known unicast ports for domain 0 -->

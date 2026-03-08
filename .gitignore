@@ -3,4 +3,3 @@
 workspace/build/
 workspace/install/
 workspace/log/
-docker_setup/fastdds_bridge.xml

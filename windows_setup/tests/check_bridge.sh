@@ -72,8 +72,16 @@ echo "Network:"
 
 if [ -n "$ISAAC_HOST" ]; then
     docker exec "$CONTAINER" ping -c 1 -W 2 "$ISAAC_HOST" > /dev/null 2>&1
-    check "Container can ping Windows host ($ISAAC_HOST)" $? \
-        "Check ISAAC_SIM_HOST in .env. Is the Windows firewall allowing ICMP?"
+    PING_OK=$?
+    if [ "$PING_OK" -eq 0 ]; then
+        echo "  [PASS] Container can ping Windows host ($ISAAC_HOST)"
+        ((PASS++))
+    else
+        # Docker Desktop on Windows blocks ICMP from containers to the host by default.
+        # This does NOT block UDP (DDS traffic) — treat as informational only.
+        echo "  [WARN] Container cannot ping Windows host ($ISAAC_HOST)"
+        echo "         -> ICMP may be blocked by Docker Desktop (normal). UDP/DDS should still work."
+    fi
 fi
 
 # ── ROS 2 bridge ──────────────────────────────────────────────────────────────

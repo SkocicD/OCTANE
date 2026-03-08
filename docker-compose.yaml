@@ -7,13 +7,15 @@ services:
     container_name: ros2_bridge
     tty: true
     stdin_open: true
-    command: bash
+    # envsubst resolves ISAAC_SIM_HOST in the template at startup, writing the real IP
+    # to /tmp/fastdds_bridge.xml before dropping to an interactive shell.
+    command: bash -c "envsubst < /config/fastdds_bridge.xml.template > /tmp/fastdds_bridge.xml && exec bash"
     network_mode: host
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-      - FASTRTPS_DEFAULT_PROFILES_FILE=/config/fastdds_bridge.xml
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/fastdds_bridge.xml
       - ISAAC_SIM_HOST=${ISAAC_SIM_HOST}
     volumes:
       - ./workspace:/workspace
-      - ./docker_setup/fastdds_bridge.xml:/config/fastdds_bridge.xml:ro
+      - ./docker_setup/fastdds_bridge.xml.template:/config/fastdds_bridge.xml.template:ro

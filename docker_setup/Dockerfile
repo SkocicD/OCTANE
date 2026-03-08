@@ -11,7 +11,9 @@ ENV RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 ENV ROS_DOMAIN_ID=0
 
 # Install ROS dependencies
+# gettext-base provides envsubst, used at container startup to resolve ISAAC_SIM_HOST in the FastDDS profile
 RUN apt update && apt install -y \
+    gettext-base \
     python3-colcon-common-extensions \
     ros-humble-backward-ros \
     ros-humble-cv-bridge \
