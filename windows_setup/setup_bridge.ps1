@@ -78,9 +78,10 @@ $xmlContent = @"
 </dds>
 "@
 
-# TrimStart removes the leading newline that PowerShell here-strings always add.
-# FastDDS (and Isaac Sim's XML parser) requires <?xml to be the very first character.
-[System.IO.File]::WriteAllText($profilePath, $xmlContent.TrimStart(), [System.Text.Encoding]::UTF8)
+# TrimStart removes the leading newline PowerShell here-strings prepend.
+# Replace CRLF with LF -- Isaac Sim's FastDDS XML parser does not handle Windows line endings.
+$encoding = [System.Text.UTF8Encoding]::new($false)  # UTF-8, no BOM
+[System.IO.File]::WriteAllText($profilePath, $xmlContent.TrimStart().Replace("`r`n", "`n"), $encoding)
 Write-Host "FastDDS profile written: $profilePath" -ForegroundColor Green
 
 # 3. Set environment variables
