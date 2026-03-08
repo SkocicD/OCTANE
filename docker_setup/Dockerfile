@@ -6,23 +6,21 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=America/New_York
 
-# Install ROS dependencies and desktop environment
+# ROS 2 bridge defaults — overridden at runtime via docker-compose / .env
+ENV RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ENV ROS_DOMAIN_ID=0
+
+# Install ROS dependencies
 RUN apt update && apt install -y \
     python3-colcon-common-extensions \
     ros-humble-backward-ros \
-    ros-humble-camera-info-manager \
     ros-humble-cv-bridge \
     ros-humble-diagnostic-updater \
-    ros-humble-image-publisher \
     ros-humble-image-transport \
     ros-humble-rclcpp-components \
+    ros-humble-rmw-fastrtps-cpp \
     ros-humble-tf2-sensor-msgs \
-    libgflags-dev \
-    nlohmann-json3-dev \
-    libgoogle-glog-dev \
     libssl-dev \
-    python3-opencv \
-    usbutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install desktop environment and VNC server
