@@ -16,23 +16,24 @@ Write-Host ""
 Write-Host "=== Isaac Sim Bridge Setup ===" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Get the container's actual IP via docker inspect.
+# 1. Get the container's primary outbound IP.
 # On Docker Desktop for Windows, network_mode:host does not share the Windows/WSL2 network
 # interface -- the container gets its own IP in the Docker Desktop VM subnet (192.168.65.x).
-# Isaac Sim must send DDS packets to this IP, not the WSL2 IP.
+# We use "ip route get" inside the container to find the IP it actually uses for outbound
+# traffic, which is what DDS will use. This avoids the ambiguity of hostname -I returning
+# multiple addresses.
 Write-Host "Detecting container IP..." -ForegroundColor White
 
 $containerIP = $null
 try {
-    $containerIP = (docker inspect ros2_bridge --format "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" 2>$null).Trim()
+    # "ip route get 1.1.1.1" returns the route used for outbound traffic, e.g.:
+    # "1.1.1.1 via 192.168.65.1 dev eth0 src 192.168.65.3 uid 0"
+    # We parse the value after "src".
+    $routeOutput = (wsl docker exec ros2_bridge ip route get 1.1.1.1 2>$null)
+    if ($routeOutput -match 'src\s+(\d+\.\d+\.\d+\.\d+)') {
+        $containerIP = $Matches[1]
+    }
 } catch {}
-
-# With network_mode:host the above may return empty -- fall back to hostname -I inside container
-if (-not $containerIP) {
-    try {
-        $containerIP = (docker exec ros2_bridge hostname -I 2>$null).Trim().Split()[0]
-    } catch {}
-}
 
 if (-not $containerIP) {
     Write-Error "Could not detect container IP. Make sure the ros2_bridge container is running first (bash run_bridge.sh in WSL2)."
