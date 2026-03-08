@@ -4,7 +4,7 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 import os
 
 # Generate launch description for perception subsystem
@@ -24,13 +24,16 @@ def generate_launch_description():
     # ========================================
 
     # Native Orbbec camera driver (for Jetson)
-    orbbec_camera_dir = get_package_share_directory('orbbec_camera')
-    astra_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
-        ),
-        condition=UnlessCondition(use_usb_bridge)
-    )
+    try:
+        orbbec_camera_dir = get_package_share_directory('orbbec_camera')
+        astra_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
+            ),
+            condition=UnlessCondition(use_usb_bridge)
+        )
+    except PackageNotFoundError:
+        astra_launch = LogInfo(msg='orbbec_camera not installed - native camera driver skipped')
 
     # Native camera adapter node
     astra_depth_node = Node(

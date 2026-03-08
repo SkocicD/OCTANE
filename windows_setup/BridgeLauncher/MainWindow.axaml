@@ -1,0 +1,355 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="BridgeLauncher.MainWindow"
+        Title="Isaac Sim Bridge"
+        Width="940" Height="620"
+        MinWidth="740" MinHeight="500"
+        Background="#0a0a0a"
+        FontFamily="Inter,Segoe UI,sans-serif">
+
+  <Window.Styles>
+
+    <!-- ── Card action button — full template override ────────── -->
+    <Style Selector="Button.card">
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="14,13"/>
+      <Setter Property="Background" Value="#141414"/>
+      <Setter Property="BorderBrush" Value="#222222"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}"
+                  BoxShadow="0 1 6 0 #28000000">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.card:pointerover">
+      <Setter Property="Background" Value="#1c1c1c"/>
+      <Setter Property="BorderBrush" Value="#2e2e2e"/>
+    </Style>
+    <Style Selector="Button.card:pressed">
+      <Setter Property="Background" Value="#0d0d0d"/>
+      <Setter Property="BorderBrush" Value="#76b900"/>
+    </Style>
+    <Style Selector="Button.card:disabled">
+      <Setter Property="Opacity" Value="0.3"/>
+      <Setter Property="Cursor" Value="Arrow"/>
+    </Style>
+
+    <!-- ── Ghost / utility button ─────────────────────────────── -->
+    <Style Selector="Button.ghost">
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="12,9"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="#202020"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.ghost:pointerover">
+      <Setter Property="Background" Value="#131313"/>
+      <Setter Property="BorderBrush" Value="#2a2a2a"/>
+    </Style>
+    <Style Selector="Button.ghost:pressed">
+      <Setter Property="Background" Value="#0a0a0a"/>
+    </Style>
+
+  </Window.Styles>
+
+  <DockPanel>
+
+    <!-- ── Header ──────────────────────────────────────────────── -->
+    <Border DockPanel.Dock="Top"
+            Background="#0d0d0d"
+            BorderThickness="0,0,0,1"
+            BorderBrush="#1c1c1c"
+            Padding="22,13">
+      <Grid ColumnDefinitions="*,Auto">
+
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="9"
+                    VerticalAlignment="Center">
+          <TextBlock Text="NVIDIA"
+                     FontSize="13"
+                     FontWeight="Bold"
+                     Foreground="#76b900"
+                     VerticalAlignment="Center"/>
+          <TextBlock Text="/"
+                     FontSize="13"
+                     Foreground="#2a2a2a"
+                     VerticalAlignment="Center"/>
+          <TextBlock Text="Isaac Sim Bridge"
+                     FontSize="13"
+                     Foreground="#b0b0b0"
+                     VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Status chips -->
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="7"
+                    VerticalAlignment="Center">
+
+          <Border x:Name="ChipSetup"
+                  Background="#161616" BorderBrush="#222222" BorderThickness="1"
+                  CornerRadius="20" Padding="11,5">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Ellipse x:Name="DotSetup" Width="6" Height="6" Fill="#3a3a3a" VerticalAlignment="Center"/>
+              <TextBlock x:Name="LabelSetup" Text="Setup" FontSize="11" Foreground="#555555" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+
+          <Border x:Name="ChipRos"
+                  Background="#161616" BorderBrush="#222222" BorderThickness="1"
+                  CornerRadius="20" Padding="11,5">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Ellipse x:Name="DotRos" Width="6" Height="6" Fill="#3a3a3a" VerticalAlignment="Center"/>
+              <TextBlock x:Name="LabelRos" Text="ROS2" FontSize="11" Foreground="#555555" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+
+          <Border x:Name="ChipIsaac"
+                  Background="#161616" BorderBrush="#222222" BorderThickness="1"
+                  CornerRadius="20" Padding="11,5">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Ellipse x:Name="DotIsaac" Width="6" Height="6" Fill="#3a3a3a" VerticalAlignment="Center"/>
+              <TextBlock x:Name="LabelIsaac" Text="Isaac Sim" FontSize="11" Foreground="#555555" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ── Log Terminal ─────────────────────────────────────────── -->
+    <Border DockPanel.Dock="Bottom"
+            Height="165"
+            Background="#060606"
+            BorderThickness="0,1,0,0"
+            BorderBrush="#181818"
+            Padding="18,10">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    Margin="0,0,0,7">
+          <TextBlock Text="LOG"
+                     FontSize="9"
+                     FontWeight="SemiBold"
+                     Foreground="#2c2c2c"
+                     VerticalAlignment="Center"/>
+          <Border Width="1" Height="10" Background="#1e1e1e"/>
+          <TextBlock x:Name="LogStatus"
+                     Text="Idle"
+                     FontSize="9"
+                     Foreground="#353535"
+                     VerticalAlignment="Center"/>
+        </StackPanel>
+        <TextBox x:Name="LogBox"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 TextWrapping="Wrap"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                 FontSize="11"
+                 Foreground="#444444"
+                 Padding="0"/>
+      </DockPanel>
+    </Border>
+
+    <!-- ── Main ─────────────────────────────────────────────────── -->
+    <Grid ColumnDefinitions="258,*">
+
+      <!-- Left: Actions -->
+      <Border Grid.Column="0"
+              Background="#0d0d0d"
+              BorderThickness="0,0,1,0"
+              BorderBrush="#181818"
+              Padding="16,20">
+        <StackPanel Spacing="7">
+
+          <TextBlock Text="ACTIONS"
+                     FontSize="9"
+                     FontWeight="SemiBold"
+                     Foreground="#2e2e2e"
+                     Margin="2,0,0,8"/>
+
+          <!-- Step 1 -->
+          <Button x:Name="BtnSetup" Classes="card" Click="OnSetupClick"
+                  ToolTip.Tip="Writes the FastDDS XML profile and sets environment variables for Isaac Sim">
+            <Grid ColumnDefinitions="38,*">
+              <Border x:Name="Badge01"
+                      Grid.Column="0"
+                      Width="28" Height="28"
+                      CornerRadius="14"
+                      Background="#76b900"
+                      VerticalAlignment="Center">
+                <TextBlock Text="01"
+                           FontSize="10"
+                           FontWeight="Bold"
+                           Foreground="#ffffff"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                <TextBlock Text="Windows Setup"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="#d8d8d8"/>
+                <TextBlock Text="FastDDS profile + env vars"
+                           FontSize="10"
+                           Foreground="#484848"/>
+              </StackPanel>
+            </Grid>
+          </Button>
+
+          <!-- Step 2 -->
+          <Button x:Name="BtnStartRos" Classes="card" Click="OnStartRosClick"
+                  IsEnabled="False"
+                  ToolTip.Tip="Starts polling ros2 topic list in WSL2 every 2 seconds">
+            <Grid ColumnDefinitions="38,*">
+              <Border x:Name="Badge02"
+                      Grid.Column="0"
+                      Width="28" Height="28"
+                      CornerRadius="14"
+                      Background="#252525"
+                      VerticalAlignment="Center">
+                <TextBlock Text="02"
+                           FontSize="10"
+                           FontWeight="Bold"
+                           Foreground="#555555"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                <TextBlock Text="Start Monitoring"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="#d8d8d8"/>
+                <TextBlock x:Name="MonitorSubtitle"
+                           Text="Watch for Isaac Sim topics"
+                           FontSize="10"
+                           Foreground="#484848"/>
+              </StackPanel>
+            </Grid>
+          </Button>
+
+          <Border Height="1" Background="#181818" Margin="0,5"/>
+
+          <!-- Terminal -->
+          <Button x:Name="BtnOpenTerm" Classes="ghost" Click="OnOpenTerminalClick"
+                  ToolTip.Tip="Opens Windows Terminal with ROS2 sourced and workspace pre-loaded">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Width="26" Height="26" CornerRadius="7" Background="#161616">
+                <TextBlock Text=">_"
+                           FontSize="10"
+                           FontFamily="Cascadia Code,Consolas,monospace"
+                           Foreground="#555555"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel Spacing="1" VerticalAlignment="Center">
+                <TextBlock Text="Open WSL2 Terminal"
+                           FontSize="12"
+                           Foreground="#787878"/>
+                <TextBlock Text="ROS2 sourced + workspace ready"
+                           FontSize="10"
+                           Foreground="#333333"/>
+              </StackPanel>
+            </StackPanel>
+          </Button>
+
+        </StackPanel>
+      </Border>
+
+      <!-- Right: Live Topics -->
+      <Border Grid.Column="1" Padding="22,20">
+        <DockPanel>
+
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+            <TextBlock DockPanel.Dock="Left"
+                       Text="LIVE TOPICS"
+                       FontSize="9"
+                       FontWeight="SemiBold"
+                       Foreground="#2e2e2e"
+                       VerticalAlignment="Center"/>
+            <TextBlock x:Name="TopicCountLabel"
+                       DockPanel.Dock="Right"
+                       Text=""
+                       FontSize="11"
+                       Foreground="#353535"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Center"/>
+          </DockPanel>
+
+          <!-- Empty state -->
+          <StackPanel x:Name="TopicsPlaceholder"
+                      VerticalAlignment="Center"
+                      HorizontalAlignment="Center"
+                      Spacing="6">
+            <TextBlock Text="No topics detected"
+                       FontSize="15"
+                       Foreground="#1e1e1e"
+                       HorizontalAlignment="Center"/>
+            <TextBlock Text="Complete setup, start monitoring, then hit Play in Isaac Sim"
+                       FontSize="11"
+                       Foreground="#1a1a1a"
+                       HorizontalAlignment="Center"/>
+          </StackPanel>
+
+          <!-- Topic rows -->
+          <ScrollViewer x:Name="TopicsScroller"
+                        IsVisible="False"
+                        HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="TopicsList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Padding="11,6"
+                          Margin="0,2"
+                          CornerRadius="7"
+                          Background="#0f0f0f"
+                          BorderBrush="#191919"
+                          BorderThickness="1">
+                    <TextBlock Text="{Binding}"
+                               FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                               FontSize="12"
+                               Foreground="#76b900"/>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+
+        </DockPanel>
+      </Border>
+
+    </Grid>
+  </DockPanel>
+</Window>
