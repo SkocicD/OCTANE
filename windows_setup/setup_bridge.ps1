@@ -23,7 +23,8 @@ $ros2Candidates = @(
     "C:\opt\ros\humble\x64\setup.bat",
     "C:\opt\ros2\humble\setup.bat",
     "C:\dev\ros2_humble\setup.bat",
-    "E:\ros2_humble\setup.bat"
+    "E:\ros2_humble\setup.bat",
+    "E:\ros2-windows\setup.bat"
 )
 
 $ros2SetupBat = $ros2Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
