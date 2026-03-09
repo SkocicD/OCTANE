@@ -256,6 +256,7 @@ public class BridgeManager : IDisposable
             @"C:\opt\ros\humble\x64\setup.bat",
             @"C:\opt\ros2\humble\setup.bat",
             @"C:\dev\ros2_humble\setup.bat",
+            @"E:\ros2_humble\setup.bat",
         ];
         return Array.Find(candidates, File.Exists);
     }
