@@ -1,15 +1,13 @@
-# Isaac Sim ROS 2 Bridge - Windows Setup
+# Isaac Sim ROS2 Bridge - Windows Setup
 #
 # What this does:
-#   1. Writes Isaac Sim's FastDDS profile (UDPv4 only, no shared memory)
-#   2. Sets user-level environment variables Isaac Sim will read on next launch
-#   3. Adds a Windows Firewall inbound rule for DDS UDP traffic
+#   1. Verifies ROS2 Humble is installed on Windows
+#   2. Writes Isaac Sim's FastDDS profile (UDPv4 only, no shared memory)
+#   3. Sets user-level environment variables Isaac Sim will read on next launch
+#   4. Adds a Windows Firewall inbound rule for DDS UDP traffic
 #
-# Why no container IP detection?
-#   Docker Desktop puts containers on a separate virtual network (192.168.65.x)
-#   that Isaac Sim cannot reach for DDS discovery. The solution is to run ROS2
-#   directly in WSL2 -- DDS multicast works between Windows and WSL2 over the
-#   Hyper-V virtual switch. No hardcoded peer IPs needed.
+# Both Isaac Sim and ROS2 run natively on Windows — no WSL2 or Docker needed
+# for simulation. DDS discovery works over localhost between them directly.
 #
 # Run with: Right-click -> "Run with PowerShell" (as Administrator for firewall step)
 # Re-run if you reset environment variables or reinstall Isaac Sim.
@@ -20,11 +18,27 @@ Write-Host ""
 Write-Host "=== Isaac Sim Bridge Setup ===" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Write FastDDS profile
+# 1. Check ROS2 installation
+$ros2Candidates = @(
+    "C:\opt\ros\humble\x64\setup.bat",
+    "C:\opt\ros2\humble\setup.bat",
+    "C:\dev\ros2_humble\setup.bat"
+)
+
+$ros2SetupBat = $ros2Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($ros2SetupBat) {
+    Write-Host "ROS2 Humble found: $ros2SetupBat" -ForegroundColor Green
+} else {
+    Write-Warning "ROS2 Humble not found at any known path."
+    Write-Warning "Install from: https://docs.ros.org/en/humble/Installation/Windows-Install-Binary.html"
+    Write-Warning "Setup will continue to configure Isaac Sim environment variables."
+}
+
+# 2. Write FastDDS profile
 # Uses NVIDIA's recommended profile: UDPv4 only, shared memory disabled.
-# No initialPeersList -- DDS multicast over the WSL2 Hyper-V virtual switch
-# handles discovery automatically between Isaac Sim and WSL2 ROS2.
-$profilePath = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml"
+# Isaac Sim and Windows ROS2 discover each other over localhost automatically.
+$profilePath  = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml"
 $templatePath = Join-Path $PSScriptRoot "fastdds_isaac_sim.xml.template"
 
 if (-not (Test-Path $templatePath)) {
@@ -40,7 +54,7 @@ $encoding = [System.Text.UTF8Encoding]::new($false)
 
 Write-Host "FastDDS profile written: $profilePath" -ForegroundColor Green
 
-# 2. Set environment variables
+# 3. Set environment variables
 [System.Environment]::SetEnvironmentVariable("ROS_DOMAIN_ID",                  "0",                "User")
 [System.Environment]::SetEnvironmentVariable("RMW_IMPLEMENTATION",             "rmw_fastrtps_cpp", "User")
 [System.Environment]::SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", $profilePath,       "User")
@@ -50,7 +64,7 @@ Write-Host "  ROS_DOMAIN_ID                  = 0"
 Write-Host "  RMW_IMPLEMENTATION             = rmw_fastrtps_cpp"
 Write-Host "  FASTRTPS_DEFAULT_PROFILES_FILE = $profilePath"
 
-# 3. Firewall rule
+# 4. Firewall rule
 Write-Host ""
 $ruleName = "ROS2 DDS UDP (Isaac Sim Bridge)"
 
@@ -78,8 +92,7 @@ Write-Host "Done." -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Restart Isaac Sim to pick up the new environment variables."
-Write-Host "  2. In WSL2 (not inside the Docker container), run:"
-Write-Host "       source /opt/ros/humble/setup.bash"
+Write-Host "  2. In a terminal with ROS2 sourced, run:"
 Write-Host "       ros2 topic list"
 Write-Host "  3. Hit Play in Isaac Sim -- topics should appear."
 Write-Host ""

@@ -233,7 +233,7 @@
           <!-- Step 2 -->
           <Button x:Name="BtnStartRos" Classes="card" Click="OnStartRosClick"
                   IsEnabled="False"
-                  ToolTip.Tip="Starts polling ros2 topic list in WSL2 every 2 seconds">
+                  ToolTip.Tip="Starts polling ros2 topic list every 2 seconds">
             <Grid ColumnDefinitions="38,*">
               <Border x:Name="Badge02"
                       Grid.Column="0"
@@ -276,10 +276,33 @@
                            VerticalAlignment="Center"/>
               </Border>
               <StackPanel Spacing="1" VerticalAlignment="Center">
-                <TextBlock Text="Open WSL2 Terminal"
+                <TextBlock Text="Open Terminal"
                            FontSize="12"
                            Foreground="#787878"/>
                 <TextBlock Text="ROS2 sourced + workspace ready"
+                           FontSize="10"
+                           Foreground="#333333"/>
+              </StackPanel>
+            </StackPanel>
+          </Button>
+
+          <!-- RViz2 -->
+          <Button x:Name="BtnOpenRviz" Classes="ghost" Click="OnOpenRviz2Click"
+                  ToolTip.Tip="Launches rviz2 with ROS2 environment configured">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Width="26" Height="26" CornerRadius="7" Background="#161616">
+                <TextBlock Text="3D"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="#555555"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+              </Border>
+              <StackPanel Spacing="1" VerticalAlignment="Center">
+                <TextBlock Text="Open RViz2"
+                           FontSize="12"
+                           Foreground="#787878"/>
+                <TextBlock Text="Visualize topics + camera feeds"
                            FontSize="10"
                            Foreground="#333333"/>
               </StackPanel>

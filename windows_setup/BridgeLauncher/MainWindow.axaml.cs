@@ -81,6 +81,9 @@ public partial class MainWindow : Window
     private void OnOpenTerminalClick(object? sender, RoutedEventArgs e) =>
         _bridge.OpenTerminal();
 
+    private void OnOpenRviz2Click(object? sender, RoutedEventArgs e) =>
+        _bridge.OpenRviz2();
+
     // ── UI helpers ───────────────────────────────────────────────
 
     private void AppendLog(string message)

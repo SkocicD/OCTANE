@@ -16,21 +16,26 @@ public enum BridgeStatus { Unknown, Running, Ready, Error }
 /// </summary>
 public class BridgeManager : IDisposable
 {
-    private readonly string _repoRoot;
-    private readonly string _setupScriptPath;
+    private readonly string  _repoRoot;
+    private readonly string  _setupScriptPath;
+    private readonly string? _ros2SetupBat;
     private CancellationTokenSource? _monitorCts;
 
-    public event Action<string>?         LogMessage;
-    public event Action<BridgeStatus>?   SetupStatusChanged;
-    public event Action<BridgeStatus>?   RosStatusChanged;
-    public event Action<BridgeStatus>?   IsaacStatusChanged;
-    public event Action<List<string>>?   TopicsUpdated;
+    public event Action<string>?        LogMessage;
+    public event Action<BridgeStatus>?  SetupStatusChanged;
+    public event Action<BridgeStatus>?  RosStatusChanged;
+    public event Action<BridgeStatus>?  IsaacStatusChanged;
+    public event Action<List<string>>?  TopicsUpdated;
 
     public BridgeManager()
     {
         _repoRoot        = FindRepoRoot();
         _setupScriptPath = Path.Combine(_repoRoot, "windows_setup", "setup_bridge.ps1");
+        _ros2SetupBat    = FindRos2SetupBat();
         Log($"Repo root: {_repoRoot}");
+        Log(_ros2SetupBat != null
+            ? $"ROS2 found: {_ros2SetupBat}"
+            : "ROS2 not found — install ROS2 Humble for Windows, then re-run setup.");
     }
 
     // ── Setup ────────────────────────────────────────────────────────────────
@@ -58,21 +63,26 @@ public class BridgeManager : IDisposable
     public async Task StartRosMonitoringAsync()
     {
         RosStatusChanged?.Invoke(BridgeStatus.Running);
-        Log("Checking ROS2 in WSL2 ...");
+        Log("Checking ROS2 ...");
 
-        // Verify ros2 is available
-        var (checkOut, _) = await RunWslAsync(
-            "source /opt/ros/humble/setup.bash 2>/dev/null && ros2 --help > /dev/null 2>&1 && echo OK");
-
-        if (!checkOut.Contains("OK"))
+        if (_ros2SetupBat == null)
         {
             RosStatusChanged?.Invoke(BridgeStatus.Error);
-            Log("ROS2 not found in WSL2. Run: sudo apt install ros-humble-ros-base");
+            Log("ROS2 not found. Install ROS2 Humble for Windows:");
+            Log("  https://docs.ros.org/en/humble/Installation/Windows-Install-Binary.html");
+            return;
+        }
+
+        var (checkOut, _) = await RunRos2Async("ros2 --version");
+        if (string.IsNullOrWhiteSpace(checkOut))
+        {
+            RosStatusChanged?.Invoke(BridgeStatus.Error);
+            Log("ROS2 not responding. Check your installation.");
             return;
         }
 
         RosStatusChanged?.Invoke(BridgeStatus.Ready);
-        Log("ROS2 ready. Waiting for Isaac Sim topics...");
+        Log($"ROS2 ready ({checkOut.Trim()}). Waiting for Isaac Sim topics...");
 
         _monitorCts = new CancellationTokenSource();
         _ = PollTopicsAsync(_monitorCts.Token);
@@ -80,21 +90,17 @@ public class BridgeManager : IDisposable
 
     private async Task PollTopicsAsync(CancellationToken ct)
     {
-        // Build workspace source path in WSL2 format
-        var wslInstall = ToWslPath(Path.Combine(_repoRoot, "workspace", "install", "setup.bash"));
+        var workspaceInstall = Path.Combine(_repoRoot, "workspace", "install", "setup.bat");
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                var cmd =
-                    $"source /opt/ros/humble/setup.bash && " +
-                    $"source {wslInstall} 2>/dev/null; " +
-                    $"RMW_IMPLEMENTATION=rmw_fastrtps_cpp ROS_DOMAIN_ID=0 " +
-                    $"FASTRTPS_DEFAULT_PROFILES_FILE='' " +          // don't inherit Windows profile
-                    $"ros2 topic list 2>/dev/null";
+                var sourceWorkspace = File.Exists(workspaceInstall)
+                    ? $"call \"{workspaceInstall}\" && "
+                    : "";
 
-                var (output, _) = await RunWslAsync(cmd);
+                var (output, _) = await RunRos2Async($"{sourceWorkspace}ros2 topic list");
 
                 var topics = new List<string>();
                 foreach (var raw in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -121,41 +127,60 @@ public class BridgeManager : IDisposable
 
     public void OpenTerminal()
     {
-        var wslWorkspace = ToWslPath(Path.Combine(_repoRoot, "workspace"));
-        var wslInstall   = ToWslPath(Path.Combine(_repoRoot, "workspace", "install", "setup.bash"));
+        if (_ros2SetupBat == null) { Log("ROS2 not found."); return; }
 
-        // Write init to a temp script — avoids wt.exe treating semicolons as its own command separators
-        var tempScript    = Path.Combine(Path.GetTempPath(), "bridge_init.sh");
-        var wslTempScript = ToWslPath(tempScript);
-        File.WriteAllText(tempScript, string.Join("\n",
-            "#!/bin/bash",
-            "source /opt/ros/humble/setup.bash",
-            $"source {wslInstall} 2>/dev/null",
-            $"cd {wslWorkspace}",
-            "export RMW_IMPLEMENTATION=rmw_fastrtps_cpp",
-            "export ROS_DOMAIN_ID=0",
-            "echo ''",
-            "echo '  ROS2 sourced | workspace ready | domain 0'",
-            "echo ''",
-            "exec bash"
-        ));
+        var workspace        = Path.Combine(_repoRoot, "workspace");
+        var workspaceInstall = Path.Combine(workspace, "install", "setup.bat");
+        var sourceWorkspace  = File.Exists(workspaceInstall)
+            ? $"call \"{workspaceInstall}\" && "
+            : "";
 
-        // Try Windows Terminal first, fall back to bare wsl.exe window
+        var init =
+            $"call \"{_ros2SetupBat}\" && " +
+            $"{sourceWorkspace}" +
+            $"cd /d \"{workspace}\" && " +
+            $"set RMW_IMPLEMENTATION=rmw_fastrtps_cpp && " +
+            $"set ROS_DOMAIN_ID=0 && " +
+            $"echo. && echo   ROS2 sourced ^| workspace ready ^| domain 0 && echo.";
+
         try
         {
             var psi = new ProcessStartInfo("wt.exe") { UseShellExecute = true };
-            psi.ArgumentList.Add("wsl.exe");
-            psi.ArgumentList.Add("bash");
-            psi.ArgumentList.Add(wslTempScript);
+            psi.ArgumentList.Add("cmd.exe");
+            psi.ArgumentList.Add("/k");
+            psi.ArgumentList.Add(init);
             Process.Start(psi);
         }
         catch
         {
-            var psi = new ProcessStartInfo("wsl.exe") { UseShellExecute = true };
-            psi.ArgumentList.Add("bash");
-            psi.ArgumentList.Add(wslTempScript);
+            var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = true };
+            psi.ArgumentList.Add("/k");
+            psi.ArgumentList.Add(init);
             Process.Start(psi);
         }
+    }
+
+    // ── RViz2 ────────────────────────────────────────────────────────────────
+
+    public void OpenRviz2()
+    {
+        if (_ros2SetupBat == null) { Log("ROS2 not found."); return; }
+
+        Log("Launching rviz2...");
+        var cmd =
+            $"call \"{_ros2SetupBat}\" && " +
+            $"set RMW_IMPLEMENTATION=rmw_fastrtps_cpp && " +
+            $"set ROS_DOMAIN_ID=0 && " +
+            $"start \"\" ros2 run rviz2 rviz2";
+
+        var psi = new ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow  = true
+        };
+        psi.ArgumentList.Add("/c");
+        psi.ArgumentList.Add(cmd);
+        Process.Start(psi);
     }
 
     // ── Process Helpers ──────────────────────────────────────────────────────
@@ -177,14 +202,11 @@ public class BridgeManager : IDisposable
 
         using var process = Process.Start(psi)!;
 
-        // Stream stdout line by line so the log fills in real time
         var readTask = Task.Run(async () =>
         {
             string? line;
             while ((line = await process.StandardOutput.ReadLineAsync()) != null)
-            {
                 if (!string.IsNullOrWhiteSpace(line)) Log(line);
-            }
         });
 
         var errTask = Task.Run(async () =>
@@ -198,18 +220,24 @@ public class BridgeManager : IDisposable
         return process.ExitCode == 0;
     }
 
-    private async Task<(string output, string error)> RunWslAsync(string bashCommand)
+    private Task<(string output, string error)> RunRos2Async(string ros2Command) =>
+        RunCmdAsync(
+            $"call \"{_ros2SetupBat}\" && " +
+            $"set RMW_IMPLEMENTATION=rmw_fastrtps_cpp && " +
+            $"set ROS_DOMAIN_ID=0 && " +
+            ros2Command);
+
+    private async Task<(string output, string error)> RunCmdAsync(string command)
     {
-        var psi = new ProcessStartInfo("wsl.exe")
+        var psi = new ProcessStartInfo("cmd.exe")
         {
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true
         };
-        psi.ArgumentList.Add("bash");
-        psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add(bashCommand);
+        psi.ArgumentList.Add("/c");
+        psi.ArgumentList.Add(command);
 
         using var process = Process.Start(psi)!;
         var output = await process.StandardOutput.ReadToEndAsync();
@@ -219,6 +247,18 @@ public class BridgeManager : IDisposable
     }
 
     // ── Utilities ────────────────────────────────────────────────────────────
+
+    /// <summary>Finds the ROS2 Humble setup.bat in common install locations.</summary>
+    private static string? FindRos2SetupBat()
+    {
+        string[] candidates =
+        [
+            @"C:\opt\ros\humble\x64\setup.bat",
+            @"C:\opt\ros2\humble\setup.bat",
+            @"C:\dev\ros2_humble\setup.bat",
+        ];
+        return Array.Find(candidates, File.Exists);
+    }
 
     /// <summary>Walks up from the app directory to find the .git root.</summary>
     private static string FindRepoRoot()
@@ -230,20 +270,7 @@ public class BridgeManager : IDisposable
                 return dir.FullName;
             dir = dir.Parent;
         }
-        // Fallback: assume app is somewhere inside the repo
         return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-    }
-
-    /// <summary>Converts a Windows path to its /mnt/... WSL2 equivalent.</summary>
-    private static string ToWslPath(string windowsPath)
-    {
-        if (windowsPath.Length >= 2 && windowsPath[1] == ':')
-        {
-            var drive = char.ToLower(windowsPath[0]);
-            var rest  = windowsPath[2..].Replace('\\', '/');
-            return $"/mnt/{drive}{rest}";
-        }
-        return windowsPath.Replace('\\', '/');
     }
 
     private void Log(string message) =>
