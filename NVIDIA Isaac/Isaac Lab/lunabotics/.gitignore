@@ -1,0 +1,36 @@
+# Machine-local Isaac Lab path config — never commit
+isaaclab_path.cfg
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/
+**/.pytest_cache/
+
+# IDE
+**/.idea/
+.vscode/.python.env
+
+# Isaac Sim / Omniverse
+**/*.dmp
+**/.thumbs
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# Tensorboard event files (large, not useful in git) — model .pt files ARE committed
+logs/**/*.tfevents.*
+logs/**/wandb/
+
+# Hydra output directories (created automatically by train.py)
+outputs/
+.hydra/
+
+# Exported policy files from play.py (large, regenerated on demand)
+logs/**/exported/*.onnx
+
+# Isaac Sim / packman cache (generated next to the repo on some setups)
+_isaac_sim/
+_build/
+_repo/
+.lastformat

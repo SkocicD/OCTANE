@@ -1,0 +1,136 @@
+--- git status ---
+HEAD detached at v2.3.1
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   source/isaaclab/isaaclab/managers/recorder_manager.py
+	modified:   source/isaaclab/isaaclab/utils/datasets/__init__.py
+	modified:   source/isaaclab_assets/isaaclab_assets/robots/__init__.py
+	modified:   source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/rewards.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	2.7.0+cu128
+	arm_collision_report.txt
+	check_fixed_root.py
+	check_usd_compliance.py
+	debug_wheels.py
+	debug_wheels_v2.py
+	debug_wheels_v3.py
+	disable_arm_collision.py
+	find_resting_height.py
+	find_spawn_height.py
+	fix_arm_drives.py
+	fix_wheel_axis.py
+	fix_wheel_drives.py
+	fix_wheel_drives_v2.py
+	fix_wheel_drives_v3.py
+	fix_wheel_inertia.py
+	inspect_all_joints.py
+	inspect_arm_collision_deep.py
+	inspect_wheel_joints.py
+	isaaclab_train.bat
+	lock_arm_joints.py
+	set_realistic_masses.py
+	source/isaaclab_assets/isaaclab_assets/robots/lunabotics.py
+	source/isaaclab_tasks/isaaclab_tasks/direct/lunabotics/
+	source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/config/lunabotics/
+	test_drive.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/source/isaaclab/isaaclab/managers/recorder_manager.py b/source/isaaclab/isaaclab/managers/recorder_manager.py
+index 855c975f2a..47c63c79ac 100644
+--- a/source/isaaclab/isaaclab/managers/recorder_manager.py
++++ b/source/isaaclab/isaaclab/managers/recorder_manager.py
+@@ -14,7 +14,12 @@ from prettytable import PrettyTable
+ from typing import TYPE_CHECKING
+ 
+ from isaaclab.utils import configclass
+-from isaaclab.utils.datasets import EpisodeData, HDF5DatasetFileHandler
++from isaaclab.utils.datasets import EpisodeData
++
++try:
++    from isaaclab.utils.datasets import HDF5DatasetFileHandler
++except ImportError:
++    HDF5DatasetFileHandler = None  # h5py unavailable (Windows Kit DLL conflict)
+ 
+ from .manager_base import ManagerBase, ManagerTermBase
+ from .manager_term_cfg import RecorderTermCfg
+diff --git a/source/isaaclab/isaaclab/utils/datasets/__init__.py b/source/isaaclab/isaaclab/utils/datasets/__init__.py
+index a410fa0a44..acae297e0e 100644
+--- a/source/isaaclab/isaaclab/utils/datasets/__init__.py
++++ b/source/isaaclab/isaaclab/utils/datasets/__init__.py
+@@ -14,4 +14,8 @@ Submodule for datasets classes and methods.
+ 
+ from .dataset_file_handler_base import DatasetFileHandlerBase
+ from .episode_data import EpisodeData
+-from .hdf5_dataset_file_handler import HDF5DatasetFileHandler
++
++try:
++    from .hdf5_dataset_file_handler import HDF5DatasetFileHandler
++except ImportError:
++    pass  # h5py unavailable on this platform (Windows Kit DLL conflict); HDF5 dataset recording disabled
+diff --git a/source/isaaclab_assets/isaaclab_assets/robots/__init__.py b/source/isaaclab_assets/isaaclab_assets/robots/__init__.py
+index 82a13a05e4..bf71535f86 100644
+--- a/source/isaaclab_assets/isaaclab_assets/robots/__init__.py
++++ b/source/isaaclab_assets/isaaclab_assets/robots/__init__.py
+@@ -7,6 +7,7 @@
+ # Configuration for different assets.
+ ##
+ 
++from .lunabotics import *
+ from .allegro import *
+ from .ant import *
+ from .anymal import *
+diff --git a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/rewards.py b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/rewards.py
+index 7a1fc12a1d..3ba30838f2 100644
+--- a/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/rewards.py
++++ b/source/isaaclab_tasks/isaaclab_tasks/manager_based/locomotion/velocity/mdp/rewards.py
+@@ -114,3 +114,44 @@ def stand_still_joint_deviation_l1(
+     command = env.command_manager.get_command(command_name)
+     # Penalize motion when command is nearly zero.
+     return mdp.joint_deviation_l1(env, asset_cfg) * (torch.norm(command[:, :2], dim=1) < command_threshold)
++
++
++def wheel_side_symmetry(
++    env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
++) -> torch.Tensor:
++    """Penalize wheels on the same side having different velocities.
++
++    For skid-steer: left wheels (indices 0-2) should match each other,
++    right wheels (indices 3-5) should match each other.
++    """
++    asset = env.scene[asset_cfg.name]
++    joint_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]  # [N, 6]
++    left_vel = joint_vel[:, :3]
++    right_vel = joint_vel[:, 3:]
++    left_variance = left_vel.var(dim=-1)
++    right_variance = right_vel.var(dim=-1)
++    return -(left_variance + right_variance)
++
++
++def maximize_wheel_speed(
++    env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
++) -> torch.Tensor:
++    """Reward high wheel angular velocity — diagnostic reward to verify wheels can spin fast."""
++    asset = env.scene[asset_cfg.name]
++    return asset.data.joint_vel[:, asset_cfg.joint_ids].abs().mean(dim=-1)
++
++
++def wheel_spin_without_motion(
++    env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
++) -> torch.Tensor:
++    """Penalize wheel spinning when the robot base isn't translating.
++
++    Discourages the policy from exploiting oscillating wheel commands that don't
++    produce actual robot movement (wheel slip / stationary spinning exploit).
++    """
++    asset = env.scene[asset_cfg.name]
++    wheel_speed = asset.data.joint_vel[:, asset_cfg.joint_ids].abs().mean(dim=-1)
++    base_speed = asset.data.root_lin_vel_b[:, :2].norm(dim=-1)
++    # Penalty is large when wheels spin but robot doesn't translate.
++    # exp(-5 * base_speed): ~1.0 at rest, ~0.22 at 0.3 m/s, ~0.05 at 0.6 m/s
++    return -(wheel_speed * torch.exp(-5.0 * base_speed))
