@@ -23,6 +23,9 @@ from isaaclab.assets.articulation import ArticulationCfg
 _ASSETS_DIR = os.path.dirname(os.path.abspath(__file__))
 _NVIDIA_ISAAC_ROOT = os.path.normpath(os.path.join(_ASSETS_DIR, "..", "..", "..", "..", "..", ".."))
 _USD_PATH = os.path.join(_NVIDIA_ISAAC_ROOT, "Isaac Sim", "USD", "CSU_Lunabotics_Isaac_Lab_Model.usd")
+ARENA_USD_PATH = os.path.join(
+    _NVIDIA_ISAAC_ROOT, "Isaac Sim", "Lunabotics Arenas", "Artemis Arena", "ksc_artemis_arena.usd"
+)
 
 _WHEEL_JOINTS = [
     "Left_Front_Wheel", "Left_Center_Wheel", "Left_Rear_Wheel",
@@ -33,6 +36,7 @@ LUNABOTICS_DIRECT_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=_USD_PATH,
         scale=(0.1, 0.1, 0.1),  # USD authored in mm; metersPerUnit=0.01 is wrong tag — true unit is mm → scale=0.1
+        activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             retain_accelerations=False,

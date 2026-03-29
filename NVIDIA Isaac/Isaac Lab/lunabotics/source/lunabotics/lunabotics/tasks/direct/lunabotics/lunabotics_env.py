@@ -29,7 +29,9 @@ import torch
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
+from isaaclab.sensors import ContactSensor, ContactSensorCfg
 
+from lunabotics.assets.lunabotics import ARENA_USD_PATH  # isort: skip
 from .lunabotics_env_cfg import LunaboticsDirectEnvCfg
 
 
@@ -54,6 +56,15 @@ class LunaboticsDirectEnv(DirectRLEnv):
         self._wheel_vel_targets = torch.zeros(self.num_envs, 6, device=self.device)
         self._rl_step = 0
 
+        # Chassis body indices for wall-contact detection.
+        # Wheels are always in contact with terrain; chassis only contacts walls.
+        # Use the sensor's own body_names to get correct indices.
+        sensor_body_names = self._arena_contact.body_names
+        self._chassis_body_ids = torch.tensor(
+            [i for i, n in enumerate(sensor_body_names) if "Wheel" not in n],
+            device=self.device, dtype=torch.long,
+        )
+
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
@@ -64,18 +75,52 @@ class LunaboticsDirectEnv(DirectRLEnv):
                 "flat_orientation_l2",
                 "action_rate_l2",
                 "overspeed",
+                "wall_collision",
             ]
         }
 
     def _setup_scene(self):
+        # 1. Static geometry FIRST — must be spawned before Articulation and clone_environments
+        arena_cfg = sim_utils.UsdFileCfg(
+            usd_path=ARENA_USD_PATH,
+            scale=(5.0, 5.0, 5.0),
+        )
+        arena_cfg.func(
+            "/World/envs/env_.*/Arena",
+            arena_cfg,
+            translation=(0.0, 0.0, 0.0),
+            orientation=(0.7071, 0.0, 0.0, 0.7071),   # +90° around Z (counter-clockwise from above)
+        )
+
+        # 2. Robot articulation
         self._robot = Articulation(self.cfg.robot)
-        self.scene.articulations["robot"] = self._robot
+
+        # 3. Terrain
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+
+        # 4. Clone environments
         self.scene.clone_environments(copy_from_source=False)
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[self.cfg.terrain.prim_path])
+
+        # 5. Scene registration AFTER clone (matches assembly_env.py working pattern)
+        self.scene.articulations["robot"] = self._robot
+
+        # 6. Contact sensor — detects chassis↔wall contacts.
+        # No filter needed: chassis is elevated above terrain so only walls can touch it.
+        # Wheels are excluded at runtime via self._chassis_body_ids (set in __init__).
+        self._arena_contact = ContactSensor(
+            ContactSensorCfg(
+                prim_path="/World/envs/env_.*/Robot/.*",
+                history_length=2,
+                update_period=0.0,
+                track_air_time=False,
+            )
+        )
+        self.scene.sensors["arena_contact"] = self._arena_contact
+
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
@@ -134,7 +179,15 @@ class LunaboticsDirectEnv(DirectRLEnv):
         speed_xy  = torch.norm(self._robot.data.root_lin_vel_b[:, :2], dim=1)
         overspeed = torch.clamp(speed_xy - self.cfg.preferred_speed_threshold, min=0.0)
 
-        rewards = {
+        # ── arena wall collision ───────────────────────────────────────────────
+        # net_forces_w: (num_envs, num_bodies, 3)
+        # Only check chassis bodies — wheels are always touching terrain (false positive).
+        # Chassis is elevated above terrain, so any force on it = wall contact.
+        chassis_forces = self._arena_contact.data.net_forces_w[:, self._chassis_body_ids, :]
+        wall_hit = (torch.norm(chassis_forces, dim=-1).amax(dim=-1)
+                    > self.cfg.wall_contact_threshold).float()
+
+        dt_rewards = {
             "track_lin_vel":       track_lin  * self.cfg.lin_vel_reward_scale,
             "track_ang_vel":       track_ang  * self.cfg.ang_vel_reward_scale,
             "lin_vel_z_l2":        lin_vel_z  * self.cfg.lin_vel_z_scale,
@@ -145,16 +198,24 @@ class LunaboticsDirectEnv(DirectRLEnv):
         }
 
         total = torch.zeros(self.num_envs, device=self.device)
-        for key, val in rewards.items():
+        for key, val in dt_rewards.items():
             total += val * self.step_dt
             self._episode_sums[key] += val * self.step_dt
+
+        # wall collision is a one-time event penalty — not scaled by dt
+        wall_penalty = wall_hit * self.cfg.wall_collision_scale
+        total += wall_penalty
+        self._episode_sums["wall_collision"] += wall_penalty
 
         return total
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         tipped   = torch.norm(self._robot.data.projected_gravity_b[:, :2], dim=1) > 0.9
-        return tipped, time_out
+        chassis_forces = self._arena_contact.data.net_forces_w[:, self._chassis_body_ids, :]
+        wall_hit = (torch.norm(chassis_forces, dim=-1).amax(dim=-1)
+                    > self.cfg.wall_contact_threshold)
+        return tipped | wall_hit, time_out
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
         if env_ids is None or len(env_ids) == self.num_envs:
