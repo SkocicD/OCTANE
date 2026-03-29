@@ -62,7 +62,7 @@ LUNABOTICS_DIRECT_CFG = ArticulationCfg(
             joint_names_expr=_WHEEL_JOINTS,
             saturation_effort=20000.0,  # scale=0.1 → mass ~1000× → need ~1000× torque vs old 20 Nm
             effort_limit=20000.0,
-            velocity_limit=36.7,        # 10× operating max — ~90% torque available at 3.67 rad/s
+            velocity_limit=210.0,        # 35 RPM = 210 deg/s — joint velocities in this USD are deg/s, not rad/s
             stiffness=0.0,
             damping=6000.0,             # must exceed saturation/vel_error: 6000×3.67=22020 > 20000 ✓
             friction=0.0,
