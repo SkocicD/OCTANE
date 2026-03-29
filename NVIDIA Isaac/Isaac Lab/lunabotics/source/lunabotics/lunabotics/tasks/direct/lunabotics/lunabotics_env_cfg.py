@@ -8,11 +8,10 @@ from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg, PhysxCfg
-from isaaclab.terrains import TerrainGeneratorCfg, TerrainImporterCfg
+from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 
 from lunabotics.assets.lunabotics import LUNABOTICS_DIRECT_CFG  # isort: skip
-from lunabotics.terrains import RegolithTerrainCfg  # isort: skip
 
 
 @configclass
@@ -39,37 +38,13 @@ class LunaboticsDirectEnvCfg(DirectRLEnvCfg):
         ),
     )
 
-    # ── terrain ───────────────────────────────────────────────────────────────
-    # Procedural regolith terrain — 7.220 m × 5.350 m Artemis Arena footprint.
-    # Each sub-terrain tile is arena-sized; num_rows × num_cols tiles are
-    # generated with difficulty increasing left→right across columns.
-    # Switch terrain_type to "plane" for a flat baseline run.
-    terrain = TerrainImporterCfg(
+    # ── infinite flat ground plane (visual backdrop + physics fallback) ───────
+    # Plane mesh is at {prim_path}/terrain; translated to z=-0.8 in _setup_scene
+    # to sit just below the arena foundation geometry.
+    terrain: TerrainImporterCfg = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator",
+        terrain_type="plane",
         collision_group=-1,
-        terrain_generator=TerrainGeneratorCfg(
-            seed=42,
-            size=(14.14, 9.14),         # arena footprint: 14.141 m long axis; short axis TBD — update once confirmed
-            num_rows=2,
-            num_cols=4,
-            horizontal_scale=0.05,      # 5 cm/cell — good balance of detail vs speed
-            vertical_scale=0.001,       # 1 mm/count
-            slope_threshold=None,
-            sub_terrains={
-                "regolith": RegolithTerrainCfg(
-                    proportion=1.0,
-                    size=(14.14, 9.14),
-                    horizontal_scale=0.05,
-                    vertical_scale=0.001,
-                    border_width=0.0,
-                    # ── tune these to change surface roughness ───────────────
-                    particle_density_range=(0.5, 2.5),     # mounds/m²  (sparse — large features)
-                    particle_radius_range=(0.40, 2.0),     # metres     (8× wider mounds)
-                    crest_height_range=(0.02, 0.15),       # metres     (more depth)
-                ),
-            },
-        ),
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -77,18 +52,32 @@ class LunaboticsDirectEnvCfg(DirectRLEnvCfg):
             dynamic_friction=1.0,
             restitution=0.0,
         ),
-        visual_material=sim_utils.PreviewSurfaceCfg(
-            diffuse_color=(0.67, 0.67, 0.65),  # lunar grey
-            roughness=0.95,
-            metallic=0.0,
-        ),
         debug_vis=False,
     )
+
+    # ── per-env regolith terrain mesh ─────────────────────────────────────────
+    # A height-field mesh is generated once per env and spawned under each
+    # env's namespace (/World/envs/env_N/Ground) BEFORE clone_environments().
+    # All terrain is per-env — no shared global ground plane.
+    # Tune these to change surface roughness.
+    # size = (X_extent, Y_extent).  Arena long axis is along world Y, so size[0] < size[1].
+    regolith_size: tuple = (27.0, 38.0)             # m — long axis along world Y
+    regolith_horizontal_scale: float = 0.0625      # 6.25 cm/cell (1/16 — exact in binary, no FP truncation in height_field_to_mesh)
+    regolith_vertical_scale: float = 0.001         # 1 mm/count
+    regolith_particle_density_range: tuple = (0.5, 2.5)   # mounds/m²
+    regolith_particle_radius_range: tuple = (0.40, 2.0)   # m
+    regolith_crest_height_range: tuple = (0.02, 0.15)     # m
+
+    # ── robot spawn ───────────────────────────────────────────────────────────
+    # XY offset from each env's origin where the robot spawns.
+    # Negative x = back of arena (toward excavation zone start), negative y = left side.
+    robot_spawn_x_offset: float = -5.0    # m — place robot at bottom of arena
+    robot_spawn_y_offset: float = -3.0    # m — place robot at left side of arena
 
     # ── scene ─────────────────────────────────────────────────────────────────
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
         num_envs=1024,
-        env_spacing=20.0,
+        env_spacing=75.0,
         replicate_physics=True,
     )
 
@@ -127,8 +116,5 @@ class LunaboticsDirectEnvCfg(DirectRLEnvCfg):
 class LunaboticsDirectEnvCfg_PLAY(LunaboticsDirectEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 16
-        self.scene.env_spacing = 20.0
-        # smaller tile grid for visual runs — 2×2 = 4 tiles
-        self.terrain.terrain_generator.num_rows = 2
-        self.terrain.terrain_generator.num_cols = 2
+        self.scene.num_envs = 4
+        self.scene.env_spacing = 45.0   # must be > regolith_size[1]=38.0 to prevent terrain overlap
