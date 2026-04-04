@@ -13,8 +13,12 @@ find_package(ament_cmake REQUIRED)
 
 # Added to generate messages.
 find_package(rosidl_default_generators REQUIRED)
+# Added to use type Image in messages
+find_package(sensor_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AprilTagDetection.msg"
+  "msg/IDImage.msg"
+  DEPENDENCIES sensor_msgs
 )
 
 if(BUILD_TESTING)

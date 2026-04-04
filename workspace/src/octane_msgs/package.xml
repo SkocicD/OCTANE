@@ -19,6 +19,10 @@
   <member_of_group>rosidl_interface_packages</member_of_group>
   <!---->
 
+  <!-- added to use Image type in our custom types -->
+  <depend>sensor_msgs</depend>
+  <!---->
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>
