@@ -18,17 +18,28 @@ from lunabotics.assets.lunabotics import LUNABOTICS_DIRECT_CFG  # isort: skip
 class LunaboticsDirectEnvCfg(DirectRLEnvCfg):
     # ── env ───────────────────────────────────────────────────────────────────
     episode_length_s: float = 20.0
+    episode_length_max_s: float = 300.0            # 5 min cap
+    # Episode length scales with how well the robot drives.  As the EMA of
+    # forward speed approaches target_speed, episode_length_s ramps linearly
+    # from 20s → 300s.  Early on (robot barely moves) short episodes avoid
+    # wasted compute; once it drives well it gets longer runs to practice
+    # sustained navigation.
+    episode_length_target_speed: float = 0.45  # m/s — full episode length at this speed
     decimation: int = 4
-    action_scale: float = 210.0     # 35 RPM = 210 deg/s — full range available for evasive action
+    action_scale: float = 3.665     # 35 RPM = 3.665 rad/s — Isaac Lab velocity targets are in rad/s
     action_space: int = 2           # [forward, turn_rate]
-    observation_space: int = 13
+    observation_space: int = 15     # +2 for heading (cos, sin)
     state_space: int = 0
 
     # ── simulation ───────────────────────────────────────────────────────────
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 200,
         render_interval=4,
-        physx=PhysxCfg(solver_type=0),  # PGS — TGS has confirmed velocity-reporting bug
+        physx=PhysxCfg(
+            solver_type=0,                    # PGS — TGS has confirmed velocity-reporting bug
+            gpu_collision_stack_size=2**28,   # 256 MB — sufficient at 0.25m terrain resolution (~16K tris/mesh)
+            gpu_max_rigid_patch_count=2**18,  # 262144 — default overflows at high env counts (reported need: 203K)
+        ),
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -62,17 +73,30 @@ class LunaboticsDirectEnvCfg(DirectRLEnvCfg):
     # Tune these to change surface roughness.
     # size = (X_extent, Y_extent).  Arena long axis is along world Y, so size[0] < size[1].
     regolith_size: tuple = (27.0, 38.0)             # m — long axis along world Y
-    regolith_horizontal_scale: float = 0.0625      # 6.25 cm/cell (1/16 — exact in binary, no FP truncation in height_field_to_mesh)
+    regolith_horizontal_scale: float = 0.25         # 25 cm/cell — ~16K triangles/mesh vs 263K at 0.0625; fine detail handled by PBR texture
     regolith_vertical_scale: float = 0.001         # 1 mm/count
     regolith_particle_density_range: tuple = (0.5, 2.5)   # mounds/m²
     regolith_particle_radius_range: tuple = (0.40, 2.0)   # m
     regolith_crest_height_range: tuple = (0.02, 0.15)     # m
 
-    # ── robot spawn ───────────────────────────────────────────────────────────
-    # XY offset from each env's origin where the robot spawns.
-    # Negative x = back of arena (toward excavation zone start), negative y = left side.
-    robot_spawn_x_offset: float = -5.0    # m — place robot at bottom of arena
-    robot_spawn_y_offset: float = -3.0    # m — place robot at left side of arena
+    # ── spawn zone (2×2 m start zone, bottom-left of arena) ─────────────────
+    # Robot spawns at random position + random yaw within this rectangle each
+    # episode.  Coordinates are relative to env origin (arena center).
+    # Set zone center/size to match your arena layout.  The margin insets the
+    # actual spawn area so the robot doesn't clip the zone boundary walls.
+    #
+    # NASA Lunabotics arena ≈ 5 m × 7.5 m.  Bottom-left = -X, -Y corner.
+    # Adjust these if your sim arena has different dimensions.
+    # Arena footprint at sim scale: ~26.75 m (X) × ~36.1 m (Y)
+    # (real 5.35×7.22 m, scale=5.0, rotated 90° around Z)
+    # Walls at approximately X = ±13.4 m, Y = ±18.0 m
+    # Real 2×2 m start zone → 10×10 m at 5× scale, bottom-left corner
+    spawn_zone_center_x: float = 8.0      # m — center of 10m zone, ~5m from +X wall
+    spawn_zone_center_y: float = -12.5    # m — center of 10m zone, ~5m from -Y wall
+    spawn_zone_size_x: float = 10.0       # m — 2m real × 5 scale
+    spawn_zone_size_y: float = 10.0       # m — 2m real × 5 scale
+    spawn_zone_margin: float = 2.0        # m — robot clearance from zone edges (keep away from walls)
+    spawn_random_yaw: bool = True         # random heading each episode
 
     # ── scene ─────────────────────────────────────────────────────────────────
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
@@ -85,31 +109,80 @@ class LunaboticsDirectEnvCfg(DirectRLEnvCfg):
     robot: ArticulationCfg = LUNABOTICS_DIRECT_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     # ── physics constants ─────────────────────────────────────────────────────
-    wheel_radius: float = 0.91
+    wheel_radius: float = 0.34544  # 13.6 inches — verified from CAD
 
-    # ── curriculum thresholds (in _pre_physics_step calls) ───────────────────
-    # Phase 0 (0 → 150 iters):  straight only
-    # Phase 1 (150 → 500 iters): straight OR pivot turn, exclusive
-    # Phase 2 (500+):            arcs unlocked
-    curriculum_phase1_steps: int = 7_200    # 150 iters
-    curriculum_phase2_steps: int = 24_000   # 500 iters
+    # USD PhysicsMassAPI stores absolute kg values that do not scale with geometry.
+    # Divide all body masses (and inertias) by this factor at runtime to match
+    # the real robot. Set to (usd_total_mass / real_total_mass).
+    # USD total = 9038 kg; tune denominator once real robot is weighed.
+    mass_correction_factor: float = 100.0
 
-    # ── reward scales (legged_gym / WheeledLab research standard) ────────────
+    # ── curriculum (reward-threshold based) ──────────────────────────────────
+    # Phase 0 — straight only:   advance when EMA(track_lin) > phase1_threshold
+    # Phase 1 — straight+pivot:  advance when EMA(track_lin) > phase2_lin_threshold
+    #                                      AND EMA(track_ang) > phase2_ang_threshold
+    # Phase 2 — arcs unlocked:   full reward suite
+    #
+    # EMA alpha of 0.002 gives ~500-step (~10 iter) smoothing window so a single
+    # good/bad batch doesn't prematurely advance or stall the curriculum.
+    # min_steps guards against advancing on lucky early rollouts before the EMA
+    # has had time to reflect true policy performance.
+    curriculum_ema_alpha: float = 0.002
+    curriculum_phase1_threshold: float = 0.5     # EMA(track_lin) to unlock phase 1
+    curriculum_phase2_lin_threshold: float = 0.65 # EMA(track_lin) to unlock phase 2
+    curriculum_phase2_ang_threshold: float = 0.50 # EMA(track_ang) to unlock phase 2
+    curriculum_phase0_min_steps: int = 2_400      # ~50 iters minimum in phase 0
+    curriculum_phase1_min_steps: int = 2_400      # ~50 iters minimum in phase 1
+
+    # ── reward scales ────────────────────────────────────────────────────────
+    # Follows legged_gym / WheeledLab conventions with three additions for
+    # wheeled robots: alive_bonus, stall_penalty, and only_positive_rewards.
+    #
+    # Wheels can trivially output zero torque (unlike legs, where standing is
+    # hard), so without explicit anti-stall mechanisms the policy converges to
+    # doing nothing.
+    #
+    # alive_bonus:  constant +reward each step the robot is alive.  Gives the
+    #   policy a baseline reason to stay in-bounds and not tip over.
+    # stall_penalty:  discrete negative when |vx| < stall_threshold.  Catches
+    #   the zero-output equilibrium that continuous rewards can't fully break.
+    # only_positive_rewards:  clamp per-step total at 0 so penalty-dominated
+    #   early training doesn't teach "do nothing to avoid penalties."
+    #   (legged_gym default = True)
+    alive_bonus_scale: float = 0.1
+    stall_penalty_scale: float = -0.5       # light nudge — forward_progress is the real anti-stall
+    stall_threshold: float = 0.05           # m/s
+    only_positive_rewards: bool = True       # clamp dt total at 0 (legged_gym default)
+
+    # ── reward scales ────────────────────────────────────────────────────────
+    # Design rule: penalties must be 5–10× smaller than forward_progress so the
+    # clamp doesn't mask the forward signal.  At 0.5 m/s the forward_progress
+    # term yields +3.0/step — no single penalty should approach that magnitude.
+    #
+    #   forward_progress (6.0)  — THE primary reward, 60%+ of total
+    #   track_lin/ang (1.0/0.5) — velocity quality shaping
+    #   all penalties combined  — should sum to ≤ 1.0 at normal driving
+    forward_progress_scale: float = 6.0     # body-frame forward vel — dominant
     lin_vel_reward_scale: float = 1.0       # exp(-||vx_error||² / 0.25)
     ang_vel_reward_scale: float = 0.5       # exp(-||wz_error||² / 0.25)
-    lin_vel_z_scale: float = -2.0           # vz² — vertical bouncing
+    lin_vel_z_scale: float = -0.5           # vz² — was -2.0, too harsh on rough terrain
     ang_vel_xy_l2_scale: float = -0.05      # roll/pitch rate
-    flat_orientation_l2_scale: float = -1.0 # tilt
+    flat_orientation_l2_scale: float = -0.5  # tilt — was -1.0
     action_rate_l2_scale: float = -0.01     # smoothness
-    overspeed_scale: float = -2.0           # linear ramp above preferred_speed_threshold
-    preferred_speed_threshold: float = 0.71 # m/s ≈ 45 deg/s wheel speed — preferred cruise
+    overspeed_scale: float = -1.0           # was -2.0
+    preferred_speed_threshold: float = 0.71 # m/s
 
     # ── arena collision ───────────────────────────────────────────────────────
-    # ContactSensor (horizontal XY forces only) detects robot↔wall contacts.
-    # Increase threshold if normal driving triggers false positives;
-    # decrease if soft wall grazes aren't being caught.
-    wall_contact_threshold: float = 1.0    # Newtons — horizontal force to classify as wall hit
-    wall_collision_scale: float = -50.0    # one-time penalty per wall-hit event (not dt-scaled)
+    wall_contact_threshold: float = 1.0     # N — sensor is on arena, only robot can touch it, any force = collision
+    wall_collision_scale: float = -100.0    # painful but recoverable — -500 caused training divergence
+
+    # ── differential drive quality (always active) ───────────────────────────
+    # Penalties here must stay small relative to forward_progress (6.0).
+    # At -1.0 scale, wheel_consistency generates ~-0.6 typical penalty vs
+    # +3.0 forward reward — a meaningful but not dominant constraint.
+    wheel_consistency_scale: float = -1.0   # was -5.0 — overwhelmed forward signal
+    wheel_slip_scale: float = -0.3
+    wheel_slip_deadzone: float = 0.35
 
 
 @configclass
@@ -117,4 +190,4 @@ class LunaboticsDirectEnvCfg_PLAY(LunaboticsDirectEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 4
-        self.scene.env_spacing = 45.0   # must be > regolith_size[1]=38.0 to prevent terrain overlap
+        self.scene.env_spacing = 70.0

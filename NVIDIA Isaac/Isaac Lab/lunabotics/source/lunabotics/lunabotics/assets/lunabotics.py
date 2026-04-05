@@ -35,7 +35,7 @@ _WHEEL_JOINTS = [
 LUNABOTICS_DIRECT_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=_USD_PATH,
-        scale=(0.1, 0.1, 0.1),  # USD authored in mm; metersPerUnit=0.01 is wrong tag — true unit is mm → scale=0.1
+        scale=(0.1, 0.1, 0.1),  # USD authored in mm; metersPerUnit=0.01 tag is wrong — true unit is mm → scale=0.1 gives correct geometry
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -56,7 +56,7 @@ LUNABOTICS_DIRECT_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.75),  # scale=0.1 estimate — RE-RUN find_resting_height.py to verify
+        pos=(0.0, 0.0, 0.75),  # scale=0.1 — RE-RUN find_resting_height.py to verify exact resting height
         joint_pos={j: 0.0 for j in _WHEEL_JOINTS},
         joint_vel={".*": 0.0},
     ),
@@ -64,11 +64,11 @@ LUNABOTICS_DIRECT_CFG = ArticulationCfg(
         # DCMotorCfg = explicit actuator: computes effort in Python, immune to USD DriveAPI bugs.
         "wheels": DCMotorCfg(
             joint_names_expr=_WHEEL_JOINTS,
-            saturation_effort=20000.0,  # scale=0.1 → mass ~1000× → need ~1000× torque vs old 20 Nm
-            effort_limit=20000.0,
-            velocity_limit=210.0,        # 35 RPM = 210 deg/s — joint velocities in this USD are deg/s, not rad/s
+            saturation_effort=25.0,      # 25 Nm motor limit
+            effort_limit=25.0,
+            velocity_limit=3.665,        # 35 RPM = 3.665 rad/s
             stiffness=0.0,
-            damping=6000.0,             # must exceed saturation/vel_error: 6000×3.67=22020 > 20000 ✓
+            damping=50.0,               # 50 × 3.665 = 183 Nm → saturates at 25 Nm; hits max torque at ~0.5 rad/s error
             friction=0.0,
         ),
     },

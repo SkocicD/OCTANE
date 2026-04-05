@@ -147,7 +147,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = multi_agent_to_single_agent(env)
 
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        # Find the latest run folder that actually contains checkpoints.
+        # Empty folders (from crashed/aborted launches) are skipped automatically.
+        import re as _re
+        _run_dir = agent_cfg.load_run if agent_cfg.load_run else ".*"
+        _all_runs = sorted(
+            [d.path for d in os.scandir(log_root_path) if d.is_dir() and _re.match(_run_dir, d.name)]
+        )
+        resume_path = None
+        for _run in reversed(_all_runs):
+            _ckpts = [f for f in os.listdir(_run) if _re.match(r"model_.*.pt", f)]
+            if _ckpts:
+                _ckpts.sort(key=lambda m: f"{m:0>15}")
+                resume_path = os.path.join(_run, _ckpts[-1])
+                break
+        if resume_path is None:
+            print("[WARN] Resume requested but no checkpoints found — starting fresh.")
+            agent_cfg.resume = False
 
     if args_cli.video:
         video_kwargs = {

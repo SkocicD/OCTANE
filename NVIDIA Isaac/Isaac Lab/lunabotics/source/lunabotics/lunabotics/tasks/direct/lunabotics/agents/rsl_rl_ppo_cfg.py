@@ -8,7 +8,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 class LunaboticsDirectPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 48        # 48 × 0.02 s = ~1 s of rover motion per rollout
     max_iterations = 1500
-    save_interval = 100
+    save_interval = 50
     experiment_name = "lunabotics_direct"
     empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
