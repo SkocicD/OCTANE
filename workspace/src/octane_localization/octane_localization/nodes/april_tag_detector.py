@@ -131,6 +131,8 @@ class april_tag_detector(Node):
         self.image_pub.publish(img_msg)
 
         for id, distance in zip(ids, distances):
+            if id < -128 or id > 127:
+                continue
             self.get_logger().info(f"{id}")
             april_tag_msg = AprilTagDetection()
             april_tag_msg.id = id
