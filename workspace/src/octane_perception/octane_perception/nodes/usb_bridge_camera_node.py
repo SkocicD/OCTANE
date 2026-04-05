@@ -7,6 +7,7 @@ from std_msgs.msg import Header
 import socket
 import struct
 import threading
+from octane_msgs.msg import IDImage
 
 
 class USBBridgeCameraNode(Node):
@@ -17,7 +18,8 @@ class USBBridgeCameraNode(Node):
         # Declare parameters for configurable topics and connection
         self.declare_parameter('bridge_host', 'host.docker.internal')
         self.declare_parameter('bridge_port', 5555)
-        self.declare_parameter('image_topic', 'camera/image_raw')
+        self.declare_parameter(
+            'image_topic', '/perception/camera/far/image_raw')
         self.declare_parameter('camera_info_topic', 'camera/camera_info')
         self.declare_parameter('frame_id', 'camera_link')
         self.declare_parameter('width', 640)
@@ -35,8 +37,9 @@ class USBBridgeCameraNode(Node):
         self.encoding = self.get_parameter('encoding').value
 
         # Create publishers
-        self.image_pub = self.create_publisher(Image, image_topic, 10)
-        self.camera_info_pub = self.create_publisher(CameraInfo, camera_info_topic, 10)
+        self.image_pub = self.create_publisher(IDImage, image_topic, 10)
+        self.camera_info_pub = self.create_publisher(
+            CameraInfo, camera_info_topic, 10)
 
         # Socket connection
         self.socket = None
@@ -51,7 +54,8 @@ class USBBridgeCameraNode(Node):
         self.connection_thread.daemon = True
         self.connection_thread.start()
 
-        self.get_logger().info(f'USB Bridge Camera node started (port={self.bridge_port}, topic={image_topic})')
+        self.get_logger().info(
+            f'USB Bridge Camera node started (port={self.bridge_port}, topic={image_topic})')
 
     def create_camera_info(self):
         camera_info = CameraInfo()
@@ -88,7 +92,8 @@ class USBBridgeCameraNode(Node):
 
     def connect_to_bridge(self):
         try:
-            self.get_logger().info(f'Connecting to USB bridge at {self.bridge_host}:{self.bridge_port}')
+            self.get_logger().info(
+                f'Connecting to USB bridge at {self.bridge_host}:{self.bridge_port}')
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.connect((self.bridge_host, self.bridge_port))
             self.connected = True
@@ -123,19 +128,22 @@ class USBBridgeCameraNode(Node):
 
     def publish_frame(self, data):
         # Create Image message
-        msg = Image()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = self.frame_id
-        msg.height = self.height
-        msg.width = self.width
-        msg.encoding = self.encoding
-        msg.step = len(data) // self.height
-        msg.data = list(data)
+        imgmsg = Image()
+        imgmsg.header.stamp = self.get_clock().now().to_msg()
+        imgmsg.header.frame_id = self.frame_id
+        imgmsg.height = self.height
+        imgmsg.width = self.width
+        imgmsg.encoding = self.encoding
+        imgmsg.step = len(data) // self.height
+        imgmsg.data = list(data)
+        msg = IDImage()
+        msg.img = imgmsg
+        msg.camera_id = 'camera'
 
         # Publish image and camera info
         self.image_pub.publish(msg)
-        self.camera_info.header.stamp = msg.header.stamp
-        self.camera_info.header.frame_id = msg.header.frame_id
+        self.camera_info.header.stamp = imgmsg.header.stamp
+        self.camera_info.header.frame_id = imgmsg.header.frame_id
         self.camera_info_pub.publish(self.camera_info)
 
         self.get_logger().info('Published frame', once=True)

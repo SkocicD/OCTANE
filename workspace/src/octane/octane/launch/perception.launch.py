@@ -8,6 +8,8 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 # Generate launch description for perception subsystem
+
+
 def generate_launch_description():
 
     # Declare launch argument for USB bridge mode
@@ -23,23 +25,6 @@ def generate_launch_description():
     # Camera Driver (Native or USB Bridge)
     # ========================================
 
-    # Native Orbbec camera driver (for Jetson)
-    orbbec_camera_dir = get_package_share_directory('orbbec_camera')
-    astra_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
-        ),
-        condition=UnlessCondition(use_usb_bridge)
-    )
-
-    # Native camera adapter node
-    astra_depth_node = Node(
-        package='octane_perception',
-        executable='astra_depth_node',
-        name='astra_depth_node',
-        output='screen',
-        condition=UnlessCondition(use_usb_bridge)
-    )
 
 # Native RGB camera nodes (for Jetson)
     # TODO: Update device_path with actual camera serial numbers from /dev/v4l/by-id/
@@ -153,7 +138,7 @@ def generate_launch_description():
         parameters=[{
             'bridge_host': 'host.docker.internal',
             'bridge_port': 5556,
-            'image_topic': 'camera/orbbec/rgb/image_raw',
+            'image_topic': 'perception/camera/far/image_raw',
             'camera_info_topic': 'camera/orbbec/rgb/camera_info',
             'frame_id': 'orbbec_rgb_frame',
             'width': 640,
@@ -248,8 +233,6 @@ def generate_launch_description():
         LogInfo(msg='Starting perception subsystem'),
 
         # Camera driver (native or bridge)
-        astra_launch,
-        astra_depth_node,
         rgb_camera_left,
         rgb_camera_right,
         rgb_camera_left_rear,
