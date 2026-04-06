@@ -77,6 +77,9 @@ RUN mkdir -p /root/Desktop && \
     echo 'ros2 run rviz2 rviz2' >> /root/Desktop/start_rviz.sh && \
     chmod +x /root/Desktop/start_rviz.sh
 
+# ── pip + git (needed for DA3 install) ────────────────────────────────────
+RUN apt update && apt install -y python3-pip git && rm -rf /var/lib/apt/lists/*
+
 # ── Depth Anything V3 (DA3) dependencies ─────────────────────────────────
 # Auto-detects architecture and installs the right PyTorch build.
 # x86_64: standard pip wheels (CUDA auto-detected at runtime)
@@ -84,14 +87,14 @@ RUN mkdir -p /root/Desktop && \
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ]; then \
         echo "Detected aarch64 (Jetson) — installing PyTorch from NVIDIA index" && \
-        pip install --no-cache-dir \
+        pip3 install --no-cache-dir \
             --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v60dp \
             torch torchvision; \
     else \
         echo "Detected x86_64 — installing PyTorch from standard pip" && \
-        pip install --no-cache-dir torch torchvision; \
+        pip3 install --no-cache-dir torch torchvision; \
     fi && \
-    pip install --no-cache-dir \
+    pip3 install --no-cache-dir \
         xformers \
         einops \
         huggingface_hub \
@@ -101,7 +104,7 @@ RUN ARCH=$(uname -m) && \
         open3d \
         imageio \
         "numpy<2" \
-    && pip install --no-cache-dir git+https://github.com/ByteDance-Seed/Depth-Anything-3.git
+    && pip3 install --no-cache-dir git+https://github.com/ByteDance-Seed/Depth-Anything-3.git
 
 WORKDIR /workspace
 
