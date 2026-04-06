@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
+from octane_msgs.msg import CameraFrame, CameraParam
 from cv_bridge import CvBridge
 import cv2
 
@@ -13,6 +14,7 @@ class RGBCameraNode(Node):
         # Declare parameters
         self.declare_parameter('camera_id', 0)
         self.declare_parameter('device_path', '')
+        self.declare_parameter('serial', '')
         self.declare_parameter('frame_rate', 30)
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 480)
@@ -20,13 +22,13 @@ class RGBCameraNode(Node):
         # Parameter values
         device_path = self.get_parameter('device_path').value
         camera_id = device_path if device_path else self.get_parameter('camera_id').value
+        self.serial = self.get_parameter('serial').value
         frame_rate = self.get_parameter('frame_rate').value
         width = self.get_parameter('width').value
         height = self.get_parameter('height').value
 
-        # Create publishers
-        self.image_pub = self.create_publisher(Image, 'camera/image_raw', 10)
-        self.camera_info_pub = self.create_publisher(CameraInfo, 'camera/camera_info', 10)
+        # Publisher — single bundled CameraFrame topic
+        self.frame_pub = self.create_publisher(CameraFrame, 'camera/frame', 10)
 
         # CV bridge init
         self.bridge = CvBridge()
@@ -41,69 +43,65 @@ class RGBCameraNode(Node):
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-        # Create camera info message
-        self.camera_info = self.create_camera_info(width, height)
+        # Build static camera info + param (update these once calibrated)
+        fx = fy = float(width)
+        cx = width / 2.0
+        cy = height / 2.0
+        self.camera_info = self._build_camera_info(width, height, fx, fy, cx, cy)
+        self.camera_param = self._build_camera_param(width, height, fx, fy, cx, cy)
 
-        # Create timer to capture frames
-        timer_period = 1.0 / frame_rate
-        self.timer = self.create_timer(timer_period, self.capture_frame)
-
-        self.get_logger().info(f'RGB Camera node started (camera_id={camera_id}, {width}x{height} @ {frame_rate}Hz)')
+        # Capture timer
+        self.timer = self.create_timer(1.0 / frame_rate, self.capture_frame)
+        self.get_logger().info(
+            f'RGB Camera node started (id={camera_id}, serial={self.serial}, '
+            f'{width}x{height} @ {frame_rate}Hz)'
+        )
 
     def capture_frame(self):
         ret, frame = self.capture.read()
-
         if not ret:
             self.get_logger().warn('Failed to capture frame')
             return
 
-        # Convert to ROS Image message
-        msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'camera_link'
+        stamp = self.get_clock().now().to_msg()
 
-        self.camera_info.header.stamp = msg.header.stamp
-        self.camera_info.header.frame_id = msg.header.frame_id
-        
-        # Publish image and camera info
-        self.image_pub.publish(msg)
-        self.camera_info_pub.publish(self.camera_info)
+        image_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+        image_msg.header.stamp = stamp
+        image_msg.header.frame_id = 'camera_link'
 
-    def create_camera_info(self, width, height):
-        camera_info = CameraInfo()
-        camera_info.width = width
-        camera_info.height = height
+        self.camera_info.header.stamp = stamp
+        self.camera_info.header.frame_id = 'camera_link'
 
-        # Camera matrix (typical webcam approximation)
-        fx = fy = width  # Focal length approximation
-        cx = width / 2.0
-        cy = height / 2.0
+        msg = CameraFrame()
+        msg.serial = self.serial
+        msg.image = image_msg
+        msg.info = self.camera_info
+        msg.param = self.camera_param
+        self.frame_pub.publish(msg)
 
-        camera_info.k = [
-            fx, 0.0, cx,
-            0.0, fy, cy,
-            0.0, 0.0, 1.0
-        ]
+    @staticmethod
+    def _build_camera_info(w, h, fx, fy, cx, cy):
+        info = CameraInfo()
+        info.width = w
+        info.height = h
+        info.distortion_model = 'plumb_bob'
+        info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+        info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+        return info
 
-        # No distortion (simplification)
-        camera_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
-        camera_info.distortion_model = 'plumb_bob'
-
-        # Rectification matrix (identity)
-        camera_info.r = [
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0
-        ]
-
-        # Projection matrix
-        camera_info.p = [
-            fx, 0.0, cx, 0.0,
-            0.0, fy, cy, 0.0,
-            0.0, 0.0, 1.0, 0.0
-        ]
-
-        return camera_info
+    @staticmethod
+    def _build_camera_param(w, h, fx, fy, cx, cy):
+        param = CameraParam()
+        param.fx = fx
+        param.fy = fy
+        param.cx = cx
+        param.cy = cy
+        param.dist = [0.0, 0.0, 0.0, 0.0, 0.0]
+        param.width = w
+        param.height = h
+        return param
 
     def destroy_node(self):
         if self.capture.isOpened():
