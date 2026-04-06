@@ -77,6 +77,34 @@ RUN mkdir -p /root/Desktop && \
     echo 'ros2 run rviz2 rviz2' >> /root/Desktop/start_rviz.sh && \
     chmod +x /root/Desktop/start_rviz.sh
 
+# ── Depth Anything V3 (DA3) dependencies ─────────────────────────────────
+# These are needed for the depth_estimation_node (monocular metric depth).
+#
+# On x86 (desktop/laptop with RTX GPU):
+#   Standard pip wheels work. torch auto-detects CUDA.
+#
+# On aarch64 (Jetson AGX Orin / JetPack):
+#   torch, torchvision, and xformers MUST come from NVIDIA's JetPack-compatible
+#   wheels, NOT regular pip. Replace the pip install below with:
+#     pip install --no-cache-dir \
+#       torch torchvision     # ← from NVIDIA's PyPI index for JetPack
+#       xformers              # ← build from source or use dusty-nv container
+#   See: https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/
+#
+# The depth_anything_3 package itself is pure Python and works on both archs.
+RUN pip install --no-cache-dir \
+    torch torchvision \
+    xformers \
+    einops \
+    huggingface_hub \
+    safetensors \
+    omegaconf \
+    trimesh \
+    open3d \
+    imageio \
+    "numpy<2" \
+    && pip install --no-cache-dir git+https://github.com/ByteDance-Seed/Depth-Anything-3.git
+
 WORKDIR /workspace
 
 # Expose VNC port
