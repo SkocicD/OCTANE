@@ -33,19 +33,33 @@ class DepthEstimationNode(Node):
 
         # ── parameters ────────────────────────────────────────────────────────
         self.declare_parameter('model_name', 'depth-anything/DA3METRIC-LARGE')
+        self.declare_parameter('model_cache_dir', '')  # empty = auto (workspace/models/da3)
         self.declare_parameter('input_topics', ['/cam0/frame'])
         self.declare_parameter('inference_rate', 10.0)
         self.declare_parameter('process_res', 504)
 
         model_name = self.get_parameter('model_name').value
+        model_cache_dir = self.get_parameter('model_cache_dir').value
         input_topics = self.get_parameter('input_topics').value
         inference_rate = self.get_parameter('inference_rate').value
         self.process_res = self.get_parameter('process_res').value
 
         self.bridge = CvBridge()
 
+        # ── resolve model cache directory ─────────────────────────────────────
+        # Default: workspace/models/da3 (next to src/, easy to find)
+        if not model_cache_dir:
+            import os
+            pkg_dir = os.path.dirname(os.path.abspath(__file__))
+            model_cache_dir = os.path.abspath(
+                os.path.join(pkg_dir, '..', '..', '..', '..', '..', 'models', 'da3')
+            )
+        import os
+        os.makedirs(model_cache_dir, exist_ok=True)
+        os.environ['HF_HOME'] = model_cache_dir
+
         # ── load DA3 model ────────────────────────────────────────────────────
-        self.get_logger().info(f'Loading model: {model_name} ...')
+        self.get_logger().info(f'Loading model: {model_name}  (cache: {model_cache_dir})')
         from depth_anything_3.api import DepthAnything3
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
