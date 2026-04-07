@@ -80,8 +80,8 @@ RUN mkdir -p /root/Desktop && \
     echo 'ros2 run rviz2 rviz2' >> /root/Desktop/start_rviz.sh && \
     chmod +x /root/Desktop/start_rviz.sh
 
-# ── git (needed for DA3 install from source) ──────────────────────────────
-RUN apt update && apt install -y git && rm -rf /var/lib/apt/lists/*
+# ── git + vcstool (needed for cloning Isaac ROS deps and DA3) ─────────────
+RUN apt update && apt install -y git python3-vcstool && rm -rf /var/lib/apt/lists/*
 
 # ── Depth Anything V3 dependencies ────────────────────────────────────────
 # Isaac ROS image already includes CUDA-built torch + torchvision, so we

@@ -62,10 +62,45 @@ def generate_launch_description():
             )
         )
 
-    # ── nvblox (TODO) ────────────────────────────────────────────────────────
-    # Will subscribe to mapping/<cam>/depth/image + mapping/<cam>/depth/camera_info
-    # for each camera and produce TSDF / mesh / occupancy / ESDF outputs.
-    # Uses the TF tree the splitters publish for camera poses.
+    # ── nvblox (multi-camera TSDF mapping) ───────────────────────────────────
+    # Subscribes to the splitter outputs for each camera and produces TSDF,
+    # mesh, occupancy grid, and ESDF.  Camera poses come from the TF tree
+    # published by the splitters (base_link → <cam>_frame).
+    #
+    # Uses input remappings to route each camera's shimmed topics into
+    # nvblox's expected topic names.  Single nvblox instance handles all
+    # cameras via the multi-camera input mode.
+    nvblox_remappings = []
+    for i, cam_name in enumerate(cfg['cameras'].keys()):
+        nvblox_remappings.extend([
+            (f'camera_{i}/depth/image',       f'mapping/{cam_name}/depth/image'),
+            (f'camera_{i}/depth/camera_info', f'mapping/{cam_name}/depth/camera_info'),
+            (f'camera_{i}/color/image',       f'mapping/{cam_name}/rgb/image'),
+            (f'camera_{i}/color/camera_info', f'mapping/{cam_name}/rgb/camera_info'),
+        ])
+
+    nodes.append(
+        Node(
+            package='nvblox_ros',
+            executable='nvblox_node',
+            name='nvblox_node',
+            output='screen',
+            parameters=[{
+                'global_frame': 'odom',
+                'pose_frame':   'base_link',
+                'mapping_type': 'static_tsdf',
+                'voxel_size':   0.05,
+                'num_cameras':  len(cfg['cameras']),
+                'use_color':    True,
+                'use_depth':    True,
+                'use_lidar':    False,
+                'max_integration_distance_m': 5.0,
+                'integrate_color_radius_m':   5.0,
+                'esdf_mode':    'esdf_3d',
+            }],
+            remappings=nvblox_remappings,
+        )
+    )
 
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)
