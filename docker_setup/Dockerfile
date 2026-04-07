@@ -1,12 +1,17 @@
-FROM ros:humble
+# NVIDIA Isaac ROS base — ROS2 Humble + CUDA + cuDNN + TensorRT + PyTorch + Isaac ROS pkgs
+#
+# Default tag below is x86_64 (for WSL desktop dev).  On Jetson, override with:
+#   docker build --build-arg ROS_BASE=nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble ...
+# or set ROS_BASE in the docker compose environment.
+ARG ROS_BASE=nvcr.io/nvidia/isaac/ros:x86_64-ros2_humble
+FROM ${ROS_BASE}
 
 SHELL ["/bin/bash", "-c"]
 
-# Set environment variables for non-interactive installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=America/New_York
 
-# Install ROS dependencies and desktop environment
+# ── Extra ROS packages we use that may not be in the Isaac ROS base image ─
 RUN apt update && apt install -y \
     python3-colcon-common-extensions \
     ros-humble-backward-ros \
@@ -25,8 +30,7 @@ RUN apt update && apt install -y \
     usbutils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install desktop environment and VNC server
-# Pre-configure keyboard layout to avoid prompts
+# ── Desktop environment + VNC server ──────────────────────────────────────
 RUN apt update && \
     echo "keyboard-configuration keyboard-configuration/layoutcode string us" | debconf-set-selections && \
     echo "keyboard-configuration keyboard-configuration/modelcode string pc105" | debconf-set-selections && \
@@ -39,7 +43,7 @@ RUN apt update && \
     x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ROS visualization tools
+# ── ROS visualization tools ───────────────────────────────────────────────
 RUN apt update && apt install -y \
     ros-humble-rqt \
     ros-humble-rqt-common-plugins \
@@ -47,12 +51,11 @@ RUN apt update && apt install -y \
     ros-humble-rviz2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up VNC
+# VNC setup
 RUN mkdir -p ~/.vnc && \
     echo "octane" | vncpasswd -f > ~/.vnc/passwd && \
     chmod 600 ~/.vnc/passwd
 
-# Create VNC startup script
 RUN mkdir -p /root/.vnc && \
     echo '#!/bin/bash' > /root/.vnc/xstartup && \
     echo 'unset SESSION_MANAGER' >> /root/.vnc/xstartup && \
@@ -60,7 +63,7 @@ RUN mkdir -p /root/.vnc && \
     echo 'exec startxfce4' >> /root/.vnc/xstartup && \
     chmod +x /root/.vnc/xstartup
 
-# Create Desktop directory and helper scripts
+# Desktop helper scripts
 RUN mkdir -p /root/Desktop && \
     echo '#!/bin/bash' > /root/Desktop/start_rqt_image_view.sh && \
     echo 'source /opt/ros/humble/setup.bash' >> /root/Desktop/start_rqt_image_view.sh && \
@@ -77,25 +80,13 @@ RUN mkdir -p /root/Desktop && \
     echo 'ros2 run rviz2 rviz2' >> /root/Desktop/start_rviz.sh && \
     chmod +x /root/Desktop/start_rviz.sh
 
-# ── pip + git (needed for DA3 install) ────────────────────────────────────
-RUN apt update && apt install -y python3-pip git && rm -rf /var/lib/apt/lists/*
+# ── git (needed for DA3 install from source) ──────────────────────────────
+RUN apt update && apt install -y git && rm -rf /var/lib/apt/lists/*
 
-# ── Depth Anything V3 (DA3) dependencies ─────────────────────────────────
-# Auto-detects architecture and installs the right PyTorch build.
-# x86_64: standard pip wheels (CUDA auto-detected at runtime)
-# aarch64 (Jetson): NVIDIA's JetPack-compatible wheels from their PyPI index
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ]; then \
-        echo "Detected aarch64 (Jetson) — installing PyTorch from NVIDIA index" && \
-        pip3 install --no-cache-dir \
-            --extra-index-url https://developer.download.nvidia.com/compute/redist/jp/v60dp \
-            torch torchvision; \
-    else \
-        echo "Detected x86_64 — installing PyTorch from standard pip" && \
-        pip3 install --no-cache-dir torch torchvision; \
-    fi && \
-    pip3 install --no-cache-dir \
-        xformers \
+# ── Depth Anything V3 dependencies ────────────────────────────────────────
+# Isaac ROS image already includes CUDA-built torch + torchvision, so we
+# skip those. Just install the small Python deps + DA3 itself.
+RUN pip3 install --no-cache-dir \
         einops \
         huggingface_hub \
         safetensors \
@@ -110,4 +101,3 @@ WORKDIR /workspace
 
 # Expose VNC port
 EXPOSE 5901
-
