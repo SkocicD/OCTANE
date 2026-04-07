@@ -154,5 +154,27 @@ def generate_launch_description():
             )
         )
 
+    # ════════════════════════════════════════════════════════════════════════
+    # Depth estimation (DA3) — runs on all 5 near RGB cameras
+    # ════════════════════════════════════════════════════════════════════════
+    near_rgb_topics = [
+        f'perception/camera/near/{position}/rgb/frame'
+        for _, position, _, _, _ in NEAR_RGB_CAMERAS
+    ]
+    nodes.append(
+        Node(
+            package='octane_perception',
+            executable='depth_estimation_node',
+            name='depth_estimation_node',
+            output='screen',
+            parameters=[{
+                'model_name': 'depth-anything/DA3METRIC-LARGE',
+                'input_topics': near_rgb_topics,
+                'inference_rate': 10.0,
+                'process_res': 504,
+            }],
+        )
+    )
+
     nodes.append(LogInfo(msg='Perception subsystem online'))
     return LaunchDescription(nodes)
