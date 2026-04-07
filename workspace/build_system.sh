@@ -52,7 +52,7 @@ elif [ "$BUILD_MODE" == "octane" ]; then
     MAKEFLAGS="-j2" colcon build \
         --base-paths "${WORKSPACE_ROOT}/src" \
         --packages-select \
-        octane_perception octane \
+        octane_msgs octane_perception octane_mapping octane \
         --parallel-workers 1 \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
         --event-handlers console_cohesion+
@@ -63,7 +63,7 @@ elif [ "$BUILD_MODE" == "all" ]; then
     MAKEFLAGS="-j2" colcon build \
         --base-paths "${WORKSPACE_ROOT}/src" \
         --packages-select \
-        orbbec_camera_msgs orbbec_camera octane_perception octane \
+        orbbec_camera_msgs orbbec_camera octane_msgs octane_perception octane_mapping octane \
         --parallel-workers 1 \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
         --event-handlers console_cohesion+
@@ -83,7 +83,7 @@ else
         MAKEFLAGS="-j2" colcon build \
             --base-paths "${WORKSPACE_ROOT}/src" \
             --packages-select \
-            octane_perception octane \
+            octane_msgs octane_perception octane_mapping octane \
             --parallel-workers 1 \
             --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
             --event-handlers console_cohesion+
@@ -93,7 +93,7 @@ else
         MAKEFLAGS="-j2" colcon build \
             --base-paths "${WORKSPACE_ROOT}/src" \
             --packages-select \
-            orbbec_camera_msgs orbbec_camera octane_perception octane \
+            orbbec_camera_msgs orbbec_camera octane_msgs octane_perception octane_mapping octane \
             --parallel-workers 1 \
             --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
             --event-handlers console_cohesion+

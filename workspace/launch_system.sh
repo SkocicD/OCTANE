@@ -37,12 +37,18 @@ echo "=== Launching Perception Subsystem ==="
 ros2 launch octane perception.launch.py &
 PERCEPTION_PID=$!
 
+# Launch mapping subsystem
+echo ""
+echo "=== Launching Mapping Subsystem ==="
+ros2 launch octane mapping.launch.py &
+MAPPING_PID=$!
+
 # Wait for user interrupt
 echo ""
 echo "=== Octane System Running ==="
 echo "Press Ctrl+C to shutdown"
 echo ""
 
-trap 'echo ""; echo "=== Shutting Down Octane System ==="; kill $PERCEPTION_PID 2>/dev/null; exit 0' SIGINT SIGTERM
+trap 'echo ""; echo "=== Shutting Down Octane System ==="; kill $PERCEPTION_PID $MAPPING_PID 2>/dev/null; exit 0' SIGINT SIGTERM
 
 wait
