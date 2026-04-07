@@ -4,11 +4,13 @@ project(octane_msgs)
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CameraParam.msg"
+  "msg/CameraOffset.msg"
   "msg/CameraFrame.msg"
-  DEPENDENCIES sensor_msgs
+  DEPENDENCIES sensor_msgs geometry_msgs
 )
 
 ament_package()
