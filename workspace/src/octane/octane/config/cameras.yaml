@@ -1,0 +1,113 @@
+# Camera configuration for the OCTANE Lunabotics rover.
+#
+# Single source of truth for all 6 cameras: 1 Orbbec (depth + RGB) and
+# 5 standalone near RGB cameras.  Each entry defines the topics, intrinsics,
+# and mounting offset relative to base_link.
+#
+# Both the perception camera nodes and the mapping fusion / nvblox shim load
+# this file.  Update mounting offsets here once the rover is assembled and
+# calibrated — every consumer will pick up the change.
+#
+# Units:
+#   pos.x/y/z   meters from base_link
+#   rot.x/y/z   degrees Euler (roll, pitch, yaw) — converted to rad downstream
+#   fx/fy/cx/cy pixels
+#   dist[5]     OpenCV plumb_bob coefficients [k1, k2, p1, p2, k3]
+
+cameras:
+
+  orbbec_depth:
+    serial: orbbec_001
+    rgb_topic:   perception/camera/depth_camera/rgb/frame
+    depth_topic: perception/camera/depth_camera/depth/frame
+    width:  640
+    height: 480
+    intrinsics:
+      fx: 570.0
+      fy: 570.0
+      cx: 320.0
+      cy: 240.0
+      dist: [0.0, 0.0, 0.0, 0.0, 0.0]
+    offset:
+      pos: { x: 0.00, y: 0.30, z: 0.50 }
+      rot: { x: 0.0, y: 0.0, z: 0.0 }
+
+  near_rgb_left_side:
+    serial: left_side
+    rgb_topic:   perception/camera/near/left_side/rgb/frame
+    depth_topic: perception/camera/near/left_side/depth/frame
+    width:  640
+    height: 480
+    intrinsics:
+      fx: 615.0
+      fy: 615.0
+      cx: 320.0
+      cy: 240.0
+      dist: [0.0, 0.0, 0.0, 0.0, 0.0]
+    offset:
+      pos: { x: 0.20, y: 0.00, z: 0.40 }
+      rot: { x: 0.0, y: 0.0, z: 90.0 }
+
+  near_rgb_left_front:
+    serial: left_front
+    rgb_topic:   perception/camera/near/left_front/rgb/frame
+    depth_topic: perception/camera/near/left_front/depth/frame
+    width:  640
+    height: 480
+    intrinsics:
+      fx: 615.0
+      fy: 615.0
+      cx: 320.0
+      cy: 240.0
+      dist: [0.0, 0.0, 0.0, 0.0, 0.0]
+    offset:
+      pos: { x: 0.20, y: 0.15, z: 0.40 }
+      rot: { x: 0.0, y: 0.0, z: 45.0 }
+
+  near_rgb_right_side:
+    serial: right_side
+    rgb_topic:   perception/camera/near/right_side/rgb/frame
+    depth_topic: perception/camera/near/right_side/depth/frame
+    width:  640
+    height: 480
+    intrinsics:
+      fx: 615.0
+      fy: 615.0
+      cx: 320.0
+      cy: 240.0
+      dist: [0.0, 0.0, 0.0, 0.0, 0.0]
+    offset:
+      pos: { x: -0.20, y: 0.00, z: 0.40 }
+      rot: { x: 0.0, y: 0.0, z: -90.0 }
+
+  near_rgb_right_front:
+    serial: right_front
+    rgb_topic:   perception/camera/near/right_front/rgb/frame
+    depth_topic: perception/camera/near/right_front/depth/frame
+    width:  640
+    height: 480
+    intrinsics:
+      fx: 615.0
+      fy: 615.0
+      cx: 320.0
+      cy: 240.0
+      dist: [0.0, 0.0, 0.0, 0.0, 0.0]
+    offset:
+      pos: { x: -0.20, y: 0.15, z: 0.40 }
+      rot: { x: 0.0, y: 0.0, z: -45.0 }
+
+  near_rgb_back_rear:
+    serial: back_rear
+    rgb_topic:   perception/camera/near/back_rear/rgb/frame
+    depth_topic: perception/camera/near/back_rear/depth/frame
+    width:  640
+    height: 480
+    intrinsics:
+      fx: 615.0
+      fy: 615.0
+      cx: 320.0
+      cy: 240.0
+      dist: [0.0, 0.0, 0.0, 0.0, 0.0]
+    offset:
+      pos: { x: 0.00, y: -0.25, z: 0.40 }
+      rot: { x: 0.0, y: 0.0, z: 180.0 }

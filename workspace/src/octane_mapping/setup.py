@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'camera_frame_splitter = octane_mapping.nodes.camera_frame_splitter:main',
         ],
     },
 )

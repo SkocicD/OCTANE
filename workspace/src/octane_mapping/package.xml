@@ -12,6 +12,8 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>tf2_ros</depend>
+  <depend>python3-yaml</depend>
   <depend>octane_msgs</depend>
 
   <export>
