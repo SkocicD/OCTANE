@@ -18,20 +18,8 @@ Topics:
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from octane_supervisor.state_machine import StateMachine, Mode, State
-
-
-class ControlStatusMsg:
-    """Custom message type for control status.
-
-    TODO: Replace with proper ROS2 message definition
-    """
-    def __init__(self):
-        self.navigation_enabled = False
-        self.manual_enabled = False
-        self.emergency_stop = False
-        self.fault_type = ""
 
 
 class ModeManagerNode(Node):
@@ -68,7 +56,9 @@ class ModeManagerNode(Node):
 
         # Publishers
         self.state_pub = self.create_publisher(String, "/supervisor/state", qos)
-        self.control_status_pub = self.create_publisher(ControlStatusMsg, "/supervisor/control_status", qos)
+        self.navigation_enabled_pub = self.create_publisher(Bool, "/supervisor/navigation_enabled", qos)
+        self.manual_enabled_pub = self.create_publisher(Bool, "/supervisor/manual_enabled", qos)
+        self.emergency_stop_pub = self.create_publisher(Bool, "/supervisor/emergency_stop", qos)
 
         # Timer for state publishing
         self.timer = self.create_timer(1.0 / check_rate, self.publish_state)
@@ -124,13 +114,18 @@ class ModeManagerNode(Node):
         state_msg.data = self.state_machine.state.name
         self.state_pub.publish(state_msg)
 
-        # Publish control status
-        status_msg = ControlStatusMsg()
-        status_msg.navigation_enabled = self.state_machine.navigation_enabled
-        status_msg.manual_enabled = self.state_machine.manual_enabled
-        status_msg.emergency_stop = self.state_machine.emergency_stop
-        status_msg.fault_type = self.state_machine.fault_type or ""
-        self.control_status_pub.publish(status_msg)
+        # Publish individual control status flags
+        nav_msg = Bool()
+        nav_msg.data = self.state_machine.navigation_enabled
+        self.navigation_enabled_pub.publish(nav_msg)
+
+        manual_msg = Bool()
+        manual_msg.data = self.state_machine.manual_enabled
+        self.manual_enabled_pub.publish(manual_msg)
+
+        estop_msg = Bool()
+        estop_msg.data = self.state_machine.emergency_stop
+        self.emergency_stop_pub.publish(estop_msg)
 
 
 def main(args=None):
