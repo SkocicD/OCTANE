@@ -1,179 +1,240 @@
 #!/usr/bin/env python3
-"""TCP protocol encoder/decoder for OCTANE ground station communication.
+"""Lean TCP protocol for OCTANE ground station comm.
 
-Message frame format:
-  [MAGIC:2B][TYPE:1B][SEQ:2B][LENGTH:4B][PAYLOAD:N bytes][CRC32:4B]
+Frame format (minimal):
+  [MAGIC:1B][TYPE:1B][LEN:1B][PAYLOAD:N][CRC:1B]
+  Total overhead: 4 bytes + variable payload
 
 Types:
-  0x01 = Telemetry (rover -> ground)
-  0x02 = Command (ground -> rover)
-  0x03 = Command ACK (rover -> ground)
-  0x04 = Fault Alert (rover -> ground, high priority)
+  T = Telemetry (0x54)
+  C = Command (0x43)
+  A = Ack (0x41)
+  F = Fault (0x46)
+
+Modes (single char):
+  0 = Standby
+  1 = Manual
+  2 = Autonomous
+  3 = Fault Reset
+
+States (single char):
+  0 = STANDBY
+  1 = MANUAL
+  2 = AUTONOMOUS
+  3 = FAULT
+
+Fault severities:
+  0 = Info
+  1 = Warning
+  2 = Critical
 """
 
 import struct
-import json
 import zlib
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
 from enum import IntEnum
+from typing import Optional, Dict, Any
+
+# Constants
+MAGIC = 0x4F  # 'O' for OCTANE
+HEADER_SIZE = 3  # magic + type + length
+CRC_SIZE = 1  # 8-bit CRC (good enough for short messages)
+
+# Message types (ASCII for debugging)
+TYPE_TELEMETRY = ord('T')  # 0x54
+TYPE_COMMAND = ord('C')    # 0x43
+TYPE_ACK = ord('A')        # 0x41
+TYPE_FAULT = ord('F')      # 0x46
+
+# Mode/state codes
+MODE_STANDBY = b'0'
+MODE_MANUAL = b'1'
+MODE_AUTONOMOUS = b'2'
+MODE_FAULT_RESET = b'3'
+
+# Severity codes
+SEV_INFO = b'0'
+SEV_WARNING = b'1'
+SEV_CRITICAL = b'2'
 
 
-class MessageType(IntEnum):
-    """TCP message types."""
-    TELEMETRY = 0x01
-    COMMAND = 0x02
-    COMMAND_ACK = 0x03
-    FAULT_ALERT = 0x04
+def crc8(data: bytes) -> int:
+    """Simple CRC-8 for small messages."""
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x80:
+                crc = ((crc << 1) ^ 0x07) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+    return crc
 
 
-# Magic bytes for OCTANE protocol
-MAGIC = b'OT'
-HEADER_SIZE = 9  # 2 (magic) + 1 (type) + 2 (seq) + 4 (length)
-CRC_SIZE = 4
+def encode_telemetry(state: str, fault: Optional[str] = None,
+                     battery: Optional[float] = None) -> bytes:
+    """Encode telemetry: T + state_char + optional fault/battery.
 
+    Example: T1 = Manual, T2 = Autonomous
+    With fault: T1|battery_fault| (fault char appended)
 
-@dataclass
-class OctaneMessage:
-    """Parsed OCTANE protocol message."""
-    msg_type: MessageType
-    seq: int
-    payload: Dict[str, Any]
-    crc_valid: bool = True
-
-
-def encode_message(msg_type: MessageType, payload: Dict[str, Any], seq: int = 0) -> bytes:
-    """Encode a message to wire format.
-
-    Args:
-        msg_type: Message type (Telemetry, Command, etc.)
-        payload: Dictionary to serialize as JSON
-        seq: Sequence number (auto-increment if 0)
-
-    Returns:
-        Complete message frame ready for TCP socket
+    Wire format: [O][T][n][state][optional data][crc]
     """
-    # Serialize payload to compact JSON
-    json_str = json.dumps(payload, separators=(',', ':'))
-    payload_bytes = json_str.encode('utf-8')
+    # Map state string to single char
+    state_map = {'STANDBY': b'0', 'MANUAL': b'1',
+                 'AUTONOMOUS': b'2', 'FAULT': b'3'}
+    state_byte = state_map.get(state, b'0')
 
-    # Build header
-    header = struct.pack(
-        '!2sBHI',
-        MAGIC,
-        msg_type.value,
-        seq,
-        len(payload_bytes)
-    )
+    # Build payload
+    payload = state_byte
+    if battery is not None:
+        # Pack battery as float (4 bytes) with marker
+        payload += b'B' + struct.pack('<f', battery)
+    if fault:
+        # Truncate fault name to single char for now (can expand later)
+        payload += b'F' + fault[:1].encode()
 
-    # Calculate CRC32
-    crc = zlib.crc32(header + payload_bytes) & 0xFFFFFFFF
+    # Header + payload
+    header = struct.pack('!BBB', MAGIC, TYPE_TELEMETRY, len(payload))
+    frame = header + payload
 
-    return header + payload_bytes + struct.pack('!I', crc)
+    # Add CRC
+    crc = crc8(frame)
+    return frame + bytes([crc])
 
 
-def decode_message(data: bytes) -> Optional[OctaneMessage]:
-    """Decode a message from wire format.
+def encode_command(mode: str, estop: bool = False) -> bytes:
+    """Encode command: C + mode_char + estop_flag.
 
-    Args:
-        data: Raw bytes from TCP socket (may contain partial messages)
+    Wire format: [O][C][3][mode][estop][crc]
+    Always 5 bytes on wire.
+    """
+    mode_map = {'standby': MODE_STANDBY, 'manual': MODE_MANUAL,
+                'autonomous': MODE_AUTONOMOUS, 'fault_reset': MODE_FAULT_RESET}
+    mode_byte = mode_map.get(mode.lower(), MODE_STANDBY)
 
-    Returns:
-        OctaneMessage if complete valid message found, None otherwise
+    estop_byte = b'1' if estop else b'0'
+    payload = mode_byte + estop_byte
+
+    header = struct.pack('!BBB', MAGIC, TYPE_COMMAND, len(payload))
+    frame = header + payload
+
+    crc = crc8(frame)
+    return frame + bytes([crc])
+
+
+def encode_ack(success: bool) -> bytes:
+    """Encode ACK: A + success_flag.
+
+    Wire format: [O][A][1][0/1][crc]
+    Always 4 bytes on wire.
+    """
+    success_byte = b'1' if success else b'0'
+    payload = success_byte
+
+    header = struct.pack('!BBB', MAGIC, TYPE_ACK, len(payload))
+    frame = header + payload
+
+    crc = crc8(frame)
+    return frame + bytes([crc])
+
+
+def encode_fault(fault_type: str, severity: str) -> bytes:
+    """Encode fault alert: F + severity + fault_char.
+
+    Wire format: [O][F][3][severity][fault_char][crc]
+    Always 5 bytes on wire.
+    """
+    sev_map = {'info': SEV_INFO, 'warning': SEV_WARNING, 'critical': SEV_CRITICAL}
+    sev_byte = sev_map.get(severity.lower(), SEV_INFO)
+
+    fault_byte = fault_type[:1].encode()  # First char of fault name
+
+    payload = sev_byte + fault_byte
+    header = struct.pack('!BBB', MAGIC, TYPE_FAULT, len(payload))
+    frame = header + payload
+
+    crc = crc8(frame)
+    return frame + bytes([crc])
+
+
+def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
+    """Decode message frame.
+
+    Returns dict with keys: type, success, or fault data
+    Returns None if incomplete or invalid CRC.
     """
     if len(data) < HEADER_SIZE:
         return None
 
     # Parse header
-    magic, msg_type, seq, payload_len = struct.unpack('!2sBHI', data[:HEADER_SIZE])
+    magic, msg_type, payload_len = struct.unpack('!BBB', data[:HEADER_SIZE])
 
     if magic != MAGIC:
         return None
 
-    if len(data) < HEADER_SIZE + payload_len + CRC_SIZE:
-        return None  # Need more data
-
-    # Extract payload and CRC
-    payload_bytes = data[HEADER_SIZE:HEADER_SIZE + payload_len]
-    received_crc = struct.unpack('!I', data[HEADER_SIZE + payload_len:HEADER_SIZE + payload_len + CRC_SIZE])[0]
-
-    # Verify CRC
-    calculated_crc = zlib.crc32(data[:HEADER_SIZE + payload_len]) & 0xFFFFFFFF
-    crc_valid = (received_crc == calculated_crc)
-
-    # Parse JSON payload
-    try:
-        payload = json.loads(payload_bytes.decode('utf-8'))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    expected_len = HEADER_SIZE + payload_len + CRC_SIZE
+    if len(data) < expected_len:
         return None
 
-    return OctaneMessage(
-        msg_type=MessageType(msg_type),
-        seq=seq,
-        payload=payload,
-        crc_valid=crc_valid
-    )
+    # Extract and verify CRC
+    frame = data[:expected_len - CRC_SIZE]
+    received_crc = data[expected_len - 1]
+    calc_crc = crc8(frame)
 
+    if received_crc != calc_crc:
+        return None  # CRC failure
 
-def create_telemetry_packet(state: str, fault: Optional[str] = None,
-                           battery: Optional[float] = None, seq: int = 0) -> bytes:
-    """Create a telemetry packet.
+    # Extract payload
+    payload = data[HEADER_SIZE:HEADER_SIZE + payload_len]
 
-    Args:
-        state: Current state (STANDBY, MANUAL, AUTONOMOUS, FAULT)
-        fault: Active fault type if any
-        battery: Battery voltage if available
-        seq: Sequence number
+    # Decode based on type
+    if msg_type == TYPE_TELEMETRY:
+        state_map = {b'0': 'STANDBY', b'1': 'MANUAL',
+                     b'2': 'AUTONOMOUS', b'3': 'FAULT'}
+        state_byte = payload[0:1]
+        state = state_map.get(state_byte, 'STANDBY')
 
-    Returns:
-        Encoded message frame
-    """
-    payload = {'t': state}
-    if fault:
-        payload['f'] = fault
-    if battery is not None:
-        payload['b'] = battery
-    return encode_message(MessageType.TELEMETRY, payload, seq)
+        result = {'type': 'telemetry', 'state': state}
 
+        # Parse optional fields
+        idx = 1
+        while idx < len(payload):
+            marker = payload[idx:idx+1]
+            if marker == b'B' and idx + 5 <= len(payload):
+                battery = struct.unpack('<f', payload[idx+1:idx+5])[0]
+                result['battery'] = battery
+                idx += 5
+            elif marker == b'F' and idx + 1 < len(payload):
+                fault_char = payload[idx+1:idx+2].decode()
+                result['fault'] = fault_char
+                idx += 2
+            else:
+                idx += 1
 
-def create_command_packet(mode: str, estop: bool = False, seq: int = 0) -> bytes:
-    """Create a command packet from ground station.
+        return result
 
-    Args:
-        mode: Target mode (standby, manual, autonomous, fault_reset)
-        estop: Emergency stop flag
-        seq: Sequence number
+    elif msg_type == TYPE_COMMAND:
+        if len(payload) >= 2:
+            mode_map = {MODE_STANDBY: 'standby', MODE_MANUAL: 'manual',
+                       MODE_AUTONOMOUS: 'autonomous', MODE_FAULT_RESET: 'fault_reset'}
+            mode_byte = payload[0:1]
+            mode = mode_map.get(mode_byte, 'standby')
+            estop = payload[1:2] == b'1'
 
-    Returns:
-        Encoded message frame
-    """
-    payload = {'m': mode, 'e': estop}
-    return encode_message(MessageType.COMMAND, payload, seq)
+            return {'type': 'command', 'mode': mode, 'estop': estop}
 
+    elif msg_type == TYPE_ACK:
+        if len(payload) >= 1:
+            return {'type': 'ack', 'success': payload[0:1] == b'1'}
 
-def create_command_ack(success: bool, seq: int = 0) -> bytes:
-    """Create a command acknowledgment.
+    elif msg_type == TYPE_FAULT:
+        if len(payload) >= 2:
+            sev_map = {SEV_INFO: 'info', SEV_WARNING: 'warning',
+                      SEV_CRITICAL: 'critical'}
+            sev_byte = payload[0:1]
+            severity = sev_map.get(sev_byte, 'info')
+            fault_char = payload[1:2].decode()
 
-    Args:
-        success: Whether command was executed successfully
-        seq: Original command sequence number
+            return {'type': 'fault', 'severity': severity, 'fault': fault_char}
 
-    Returns:
-        Encoded message frame
-    """
-    payload = {'s': success, 'seq': seq}
-    return encode_message(MessageType.COMMAND_ACK, payload, 0)
-
-
-def create_fault_alert(fault_type: str, severity: str) -> bytes:
-    """Create a high-priority fault alert.
-
-    Args:
-        fault_type: Type of fault (e.g., "battery_undervoltage")
-        severity: Fault severity (critical, warning, info)
-
-    Returns:
-        Encoded message frame
-    """
-    payload = {'f': fault_type, 's': severity}
-    return encode_message(MessageType.FAULT_ALERT, payload, 0)
+    return None
