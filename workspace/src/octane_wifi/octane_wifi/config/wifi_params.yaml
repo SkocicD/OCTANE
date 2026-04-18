@@ -1,0 +1,8 @@
+# WiFi Communication Configuration
+
+wifi_comm_node:
+  ros__parameters:
+    host: "0.0.0.0"  # Listen on all interfaces
+    port: 5000
+    telemetry_rate: 10.0  # Hz (telemetry updates)
+    timeout_seconds: 2.0  # Connection timeout
