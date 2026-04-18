@@ -28,7 +28,7 @@ if [ ! -d "${WORKSPACE_ROOT}/src/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/
     echo ""
 fi
 
-OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane"
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_wifi octane"
 ORBBEC_PKGS="orbbec_camera_msgs orbbec_camera"
 
 CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"

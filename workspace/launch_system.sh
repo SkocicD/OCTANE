@@ -31,6 +31,12 @@ else
     exit 1
 fi
 
+# Launch supervisor subsystem
+echo ""
+echo "=== Launching Supervisor Subsystem ==="
+ros2 launch octane supervisor.launch.py &
+SUPERVISOR_PID=$!
+
 # Launch perception subsystem
 echo ""
 echo "=== Launching Perception Subsystem ==="
@@ -43,12 +49,18 @@ echo "=== Launching Mapping Subsystem ==="
 ros2 launch octane mapping.launch.py &
 MAPPING_PID=$!
 
+# Launch WiFi communication subsystem
+echo ""
+echo "=== Launching WiFi Communication Subsystem ==="
+ros2 launch octane wifi.launch.py &
+WiFi_PID=$!
+
 # Wait for user interrupt
 echo ""
 echo "=== Octane System Running ==="
 echo "Press Ctrl+C to shutdown"
 echo ""
 
-trap 'echo ""; echo "=== Shutting Down Octane System ==="; kill $PERCEPTION_PID $MAPPING_PID 2>/dev/null; exit 0' SIGINT SIGTERM
+trap 'echo ""; echo "=== Shutting Down Octane System ==="; kill $SUPERVISOR_PID $PERCEPTION_PID $MAPPING_PID $WiFi_PID 2>/dev/null; exit 0' SIGINT SIGTERM
 
 wait
