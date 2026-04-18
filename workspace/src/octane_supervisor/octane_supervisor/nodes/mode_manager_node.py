@@ -11,8 +11,12 @@ Topics:
         Input: Fault type from fault detectors
     /supervisor/state (std_msgs/String)
         Output: Current state (STANDBY, MANUAL, AUTONOMOUS, FAULT)
-    /supervisor/control_status (octane_supervisor/ControlStatus)
-        Output: navigation_enabled, manual_enabled, emergency_stop
+    /supervisor/navigation_enabled (std_msgs/Bool)
+        Output: Navigation control active
+/supervisor/manual_enabled (std_msgs/Bool)
+Output: Manual control active
+/supervisor/e_suggestion (std_msgs/Bool)
+Output: E-suggestion active (software fault)
 """
 
 import rclpy
@@ -58,7 +62,7 @@ class ModeManagerNode(Node):
         self.state_pub = self.create_publisher(String, "/supervisor/state", qos)
         self.navigation_enabled_pub = self.create_publisher(Bool, "/supervisor/navigation_enabled", qos)
         self.manual_enabled_pub = self.create_publisher(Bool, "/supervisor/manual_enabled", qos)
-        self.emergency_stop_pub = self.create_publisher(Bool, "/supervisor/emergency_stop", qos)
+        self.e_suggestion_pub = self.create_publisher(Bool, "/supervisor/e_suggestion", qos)
 
         # Timer for state publishing
         self.timer = self.create_timer(1.0 / check_rate, self.publish_state)
@@ -123,9 +127,9 @@ class ModeManagerNode(Node):
         manual_msg.data = self.state_machine.manual_enabled
         self.manual_enabled_pub.publish(manual_msg)
 
-        estop_msg = Bool()
-        estop_msg.data = self.state_machine.emergency_stop
-        self.emergency_stop_pub.publish(estop_msg)
+        esug_msg = Bool()
+        esug_msg.data = self.state_machine.e_suggestion
+        self.e_suggestion_pub.publish(esug_msg)
 
 
 def main(args=None):

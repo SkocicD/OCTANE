@@ -91,8 +91,8 @@ class StateMachine:
         return self._state == State.MANUAL
 
     @property
-    def emergency_stop(self) -> bool:
-        """True if emergency stop is active."""
+    def e_suggestion(self) -> bool:
+        """True if e-suggestion (software fault) is active."""
         return self._state == State.FAULT
 
     def transition(self, target_mode: Mode, fault_type: Optional[str] = None) -> StateTransition:
