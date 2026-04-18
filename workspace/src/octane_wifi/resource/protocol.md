@@ -4,6 +4,9 @@
 **Minimal bandwidth** - every byte counts over wireless.
 
 ## Frame Format
+
+Every message on the wire has this structure:
+
 ```
 +--------+--------+--------+------------+--------+
 | Magic  | Type   | Length |  Payload   | CRC8   |
@@ -11,13 +14,23 @@
 +--------+--------+--------+------------+--------+
 ```
 
-**Total overhead:** Only 4 bytes (magic + type + length + CRC)
+**The 5 fields:**
+
+| Field | Size | Purpose |
+|-------|------|---------|
+| **Magic** | 1 byte | Always `0x4F` ('O') - validates we're reading OCTANE protocol, not random noise |
+| **Type** | 1 byte | Message type: `T`=Telemetry, `C`=Command, `A`=ACK, `F`=Fault Alert |
+| **Length** | 1 byte | How many bytes in the Payload field (0-255) |
+| **Payload** | N bytes | The actual data (state, mode, fault code, etc.) |
+| **CRC8** | 1 byte | Error detection - if this doesn't match, packet is corrupted |
+
+**Total overhead:** Only 4 bytes per message (magic + type + length + CRC)
 
 **Types (ASCII for debugging):**
-- `T` (0x54) = Telemetry
-- `C` (0x43) = Command
-- `A` (0x41) = Acknowledgment
-- `F` (0x46) = Fault Alert
+- `T` (0x54) = **Telemetry** - Rover broadcasts state to ground
+- `C` (0x43) = **Command** - Ground sends mode change to rover
+- `A` (0x41) = **ACK** - Rover confirms command received
+- `F` (0x46) = **Fault Alert** - Rover immediately reports critical fault
 
 ---
 
