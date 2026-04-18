@@ -38,7 +38,7 @@ Every message on the wire has this structure:
 
 ### 1. Telemetry (T) - Rover → Ground
 
-**Purpose:** Periodic state broadcast (10Hz default).
+**Purpose:** Periodic state broadcast
 
 **Wire format:** `T + state_char + [optional fields]`
 
