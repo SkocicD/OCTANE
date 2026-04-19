@@ -1,30 +1,33 @@
 #!/usr/bin/env python3
-"""Launch file for OCTANE network communication node.
+"""Launch file for OCTANE network communication with heartbeat.
 
 Located in octane package for centralized launch management.
+
+Launches:
+  - network_comm_node: TCP server for mode commands and telemetry
+  - heartbeat_sender: UDP heartbeat for connection monitoring
 """
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
     """Generate launch description."""
 
-    # Declare launch arguments
-    host_arg = DeclareLaunchArgument(
-        'host',
+    # TCP parameters
+    tcp_host_arg = DeclareLaunchArgument(
+        'tcp_host',
         default_value='0.0.0.0',
-        description='Host address to bind TCP server'
+        description='TCP host address to bind'
     )
 
-    port_arg = DeclareLaunchArgument(
-        'port',
+    tcp_port_arg = DeclareLaunchArgument(
+        'tcp_port',
         default_value='5000',
-        description='TCP port for ground station connection'
+        description='TCP port for mode commands'
     )
 
     telemetry_rate_arg = DeclareLaunchArgument(
@@ -33,31 +36,62 @@ def generate_launch_description():
         description='Telemetry broadcast rate in Hz'
     )
 
-    # Config file path
-    config_path = PathJoinSubstitution([
-        FindPackageShare('octane_network'),
-        'config',
-        'network_params.yaml',
-    ])
+    # UDP heartbeat parameters
+    udp_host_arg = DeclareLaunchArgument(
+        'udp_host',
+        default_value='255.255.255.255',
+        description='UDP broadcast address for heartbeat'
+    )
 
-    node = Node(
+    udp_port_arg = DeclareLaunchArgument(
+        'udp_port',
+        default_value='5001',
+        description='UDP port for heartbeat'
+    )
+
+    heartbeat_rate_arg = DeclareLaunchArgument(
+        'heartbeat_rate',
+        default_value='0.33',
+        description='Heartbeat rate in Hz (recommended: 0.33 = 300ms interval)'
+    )
+
+    # TCP node (mode commands + telemetry)
+    tcp_node = Node(
         package='octane_network',
         executable='network_comm_node',
         name='network_comm_node',
         output='screen',
         parameters=[
-            config_path,
             {
-                'host': LaunchConfiguration('host'),
-                'port': LaunchConfiguration('port'),
+                'host': LaunchConfiguration('tcp_host'),
+                'port': LaunchConfiguration('tcp_port'),
                 'telemetry_rate': LaunchConfiguration('telemetry_rate'),
             }
         ],
     )
 
+    # UDP heartbeat node
+    udp_node = Node(
+        package='octane_network',
+        executable='heartbeat_sender',
+        name='heartbeat_sender',
+        output='screen',
+        parameters=[
+            {
+                'host': LaunchConfiguration('udp_host'),
+                'port': LaunchConfiguration('udp_port'),
+                'rate_hz': LaunchConfiguration('heartbeat_rate'),
+            }
+        ],
+    )
+
     return LaunchDescription([
-        host_arg,
-        port_arg,
+        tcp_host_arg,
+        tcp_port_arg,
         telemetry_rate_arg,
-        node,
+        udp_host_arg,
+        udp_port_arg,
+        heartbeat_rate_arg,
+        tcp_node,
+        udp_node,
     ])

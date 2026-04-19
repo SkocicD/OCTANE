@@ -174,11 +174,53 @@ with low-latency streaming for visualization data.
 
 ---
 
+## Heartbeat System (Connection Health Monitoring)
+
+To detect connection loss without relying on TCP state, the rover sends periodic
+UDP heartbeat packets.
+
+### Implementation
+
+**Rover side**: `heartbeat_sender.py` node
+- Sends UDP broadcast every 300ms (3.33 Hz)
+- Minimal frame format: `[MAGIC][STATE][SEQ][CRC]` = 5 bytes
+- Subscribes to `/supervisor/state` to include current mode
+
+**Heartbeat frame format**:
+```
+Byte 0: MAGIC = 0x4F ('O')
+Byte 1: STATE = '0'(STANDBY), '1'(MANUAL), '2'(AUTONOMOUS), '3'(FAULT)
+Byte 2-3: SEQ = 16-bit sequence number (wraps at 65535)
+Byte 4: CRC = CRC-8 of first 4 bytes
+
+Total: 5 bytes
+```
+
+**GUI side**: `NetworkModeClient.cs` should listen for heartbeats
+- Track last received heartbeat timestamp
+- If no heartbeat for 6.5+ seconds, set `IsConnected = false`
+- When heartbeat resumes, set `IsConnected = true`
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `heartbeat_rate_hz` | 0.33 | Heartbeat frequency (1/3 Hz = 300ms interval) |
+| `udp_port` | 5001 | UDP port for heartbeat (separate from TCP port 5000) |
+| `timeout_seconds` | 6.5 | GUI timeout before marking connection lost |
+
+**Recommendation**: GUI timeout should be at least 2x the heartbeat interval
+to account for occasional packet loss. With 300ms interval and 6.5s timeout,
+the GUI can miss ~21 consecutive heartbeats before declaring disconnection.
+
+---
+
 ## File References
 
-- `protocol.py` - Binary frame encoding/decoding (Python)
+- `protocol.py` - Binary frame encoding/decoding (TCP messages)
+- `heartbeat_sender.py` - UDP heartbeat sender node
 - `NetworkProtocol.cs` - Binary frame encoding/decoding (C#)
-- `network_comm_node.py` - ROS2 bridge node
+- `network_comm_node.py` - ROS2 TCP bridge node
 - `NetworkModeClient.cs` - Ground station TCP client
 - `messages.md` - Message payload reference
 - `protocol.md` - Wire format specification
