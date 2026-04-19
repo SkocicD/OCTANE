@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""network communication node for OCTANE rover ground station link."""
+"""Network communication node for OCTANE rover ground station link.
+
+This node provides TCP communication between theground station GUI and ROS2.
+It bridges mode commands, state updates, and fault alerts.
+"""
 
 import rclpy
 from rclpy.node import Node
@@ -7,16 +11,11 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String, Empty
 import socket
 import threading
+import json
 from typing import Optional
-import struct
-
-from octane_network.protocol import (
-    encode_telemetry, encode_command, encode_ack, encode_fault,
-    decode_message, HEADER_SIZE, CRC_SIZE
-)
 
 
-class networkCommNode(Node):
+class NetworkCommNode(Node):
     """TCP server for ground station communication."""
 
     def __init__(self):
@@ -48,18 +47,19 @@ class networkCommNode(Node):
 
         # State
         self.current_state = 'STANDBY'
-        self.current_fault: Optional[str] = None
-        self.client_socket: Optional[socket.socket] = None
+        self.current_fault = None
+        self.client_socket = None
         self.connected = False
         self.running = False
 
         # Buffer for partial messages
-        self.buffer = b''
+        self.buffer = ''
+        self.buffer_lock = threading.Lock()
 
         # Server
-        self.server_socket: Optional[socket.socket] = None
-        self.accept_thread: Optional[threading.Thread] = None
-        self.recv_thread: Optional[threading.Thread] = None
+        self.server_socket = None
+        self.accept_thread = None
+        self.recv_thread = None
 
         # Timer
         period = 1.0 / self.telemetry_rate
@@ -67,14 +67,14 @@ class networkCommNode(Node):
 
         # Start server
         self.start_server()
-        self.get_logger().info(f'network node listening on {self.host}:{self.port}')
+        self.get_logger().info(f'Network node listening on {self.host}:{self.port}')
 
     def start_server(self):
         """Start TCP server."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(1)
+        self.server_socket.listen(1)  # Allow only one connection (GUI)
         self.server_socket.settimeout(1.0)
         self.running = True
 
@@ -88,13 +88,15 @@ class networkCommNode(Node):
                 client, addr = self.server_socket.accept()
                 self.get_logger().info(f'Ground station connected: {addr}')
 
+                # Close existing connection if any
                 if self.client_socket:
+                    self.get_logger().warn('New connection, closing old one')
                     self.client_socket.close()
 
                 self.client_socket = client
                 self.connected = True
-                self.buffer = b''
 
+                # Start receive thread
                 self.recv_thread = threading.Thread(target=self.recv_loop, daemon=True)
                 self.recv_thread.start()
 
@@ -102,97 +104,139 @@ class networkCommNode(Node):
                 continue
             except Exception as e:
                 self.get_logger().error(f'Accept error: {e}')
-                break
-
-    def recv_loop(self):
-        """Receive and decode commands."""
-        try:
-            while self.running and self.client_socket:
-                data = self.client_socket.recv(256)
-                if not data:
+                if not self.running:
                     break
 
-                self.buffer += data
+    def recv_loop(self):
+        """Receive and decode JSON messages."""
+        try:
+            self.client_socket.settimeout(1.0)
 
-                # Process complete messages
-                while len(self.buffer) >= HEADER_SIZE:
-                    # Peek at header to get length
-                    _, _, payload_len = struct.unpack('!BBB', self.buffer[:HEADER_SIZE])
-                    expected = HEADER_SIZE + payload_len + CRC_SIZE
+            while self.running and self.client_socket:
+                try:
+                    data = self.client_socket.recv(1024)
+                    if not data:
+                        break
 
-                    if len(self.buffer) < expected:
-                        break  # Wait for more data
+                    # Convert to string and add to buffer
+                    with self.buffer_lock:
+                        self.buffer += data.decode('utf-8')
 
-                    # Extract complete frame
-                    frame = self.buffer[:expected]
-                    self.buffer = self.buffer[expected:]
+                    # Process complete messages (newline-delimited)
+                    self.process_buffer()
 
-                    # Decode
-                    msg = decode_message(frame)
-                    if msg:
-                        self.handle_message(msg)
+                except socket.timeout:
+                    continue
 
         except Exception as e:
             self.get_logger().error(f'Receive error: {e}')
         finally:
             self.get_logger().warn('Disconnected from ground station')
             self.connected = False
+            with self.buffer_lock:
+                self.buffer = ''
             if self.client_socket:
                 self.client_socket.close()
                 self.client_socket = None
 
+    def process_buffer(self):
+        """Process complete messages from buffer."""
+        while '\n' in self.buffer:
+            # Extract complete message
+            msg_end = self.buffer.index('\n')
+            msg_str = self.buffer[:msg_end].strip()
+            self.buffer = self.buffer[msg_end + 1:]
+
+            if not msg_str:
+                continue
+
+            try:
+                msg = json.loads(msg_str)
+                self.handle_message(msg)
+            except json.JSONDecodeError as e:
+                self.get_logger().error(f'Invalid JSON: {e}')
+
     def handle_message(self, msg: dict):
-        """Process decoded message."""
-        if msg['type'] == 'command':
-            mode = msg['mode']
-            estop = msg['estop']
+        """Process decoded JSON message."""
+        if msg.get('type') != 'mode_command':
+            self.get_logger().warn(f'Unknown message type: {msg.get("type")}')
+            return
 
-            if estop:
-                self.get_logger().error('E-STOP requested!')
-                # TODO: Send emergency stop to rover
+        mode = msg.get('mode', '').upper()
+        timestamp = msg.get('timestamp', 0)
 
-            # Publish mode command
-            mode_msg = String()
-            mode_msg.data = mode
-            self.mode_command_pub.publish(mode_msg)
-            self.get_logger().info(f'Command: {mode} (estop={estop})')
+        # Validate mode
+        valid_modes = ['STANDBY', 'MANUAL', 'AUTONOMOUS', 'FAULT_RESET']
+        if mode not in valid_modes:
+            self.get_logger().warn(f'Invalid mode: {mode}')
+            return
 
-            # Send ACK
-            if self.client_socket:
-                ack = encode_ack(True)
-                self.client_socket.sendall(ack)
+        self.get_logger().info(f'Received mode command: {mode} (timestamp: {timestamp})')
+
+        # Publish mode command to ROS2
+        mode_msg = String()
+        mode_msg.data = mode
+        self.mode_command_pub.publish(mode_msg)
+
+        # Send ACK to GUI
+        if self.client_socket:
+            try:
+                ack = json.dumps({
+                    'type': 'ack',
+                    'success': True,
+                    'timestamp': self.get_clock().now().nanoseconds / 1e9
+                }) + '\n'
+                self.client_socket.sendall(ack.encode('utf-8'))
+            except Exception as e:
+                self.get_logger().error(f'ACK send failed: {e}')
 
     def state_callback(self, msg: String):
-        """Handle state change."""
+        """Handle supervisor state change."""
+        old_state = self.current_state
         self.current_state = msg.data
+
+        if old_state != self.current_state:
+            self.get_logger().info(f'State changed: {old_state} → {self.current_state}')
 
     def fault_callback(self, msg: String):
         """Handle fault signal."""
         self.current_fault = msg.data
-        self.get_logger().error(f'Fault: {msg.data}')
+        self.get_logger().error(f'Fault detected: {msg.data}')
 
-        # Send immediate fault alert
-        if self.client_socket:
-            alert = encode_fault(msg.data, 'critical')
+        # Send immediate fault alert to GUI
+        if self.client_socket and self.connected:
             try:
-                self.client_socket.sendall(alert)
+                alert = json.dumps({
+                    'type': 'fault_alert',
+                    'fault': self.current_fault,
+                    'severity': 'critical',
+                    'timestamp': self.get_clock().now().nanoseconds / 1e9
+                }) + '\n'
+                self.client_socket.sendall(alert.encode('utf-8'))
             except Exception as e:
-                self.get_logger().error(f'Failed to send alert: {e}')
+                self.get_logger().error(f'Fault alert send failed: {e}')
 
     def send_telemetry(self):
-        """Send periodic telemetry."""
+        """Send periodic telemetry to GUI."""
         if not self.connected or not self.client_socket:
             return
 
         try:
-            packet = encode_telemetry(self.current_state, self.current_fault)
-            self.client_socket.sendall(packet)
+            telemetry = json.dumps({
+                'type': 'state_update',
+                'mode': self.current_state,
+                'fault': self.current_fault,
+                'timestamp': self.get_clock().now().nanoseconds / 1e9
+            }) + '\n'
+
+            self.client_socket.sendall(telemetry.encode('utf-8'))
+
         except Exception as e:
             self.get_logger().error(f'Telemetry send failed: {e}')
             self.connected = False
 
     def destroy_node(self):
-        """Clean up."""
+        """Clean up resources."""
         self.running = False
         if self.server_socket:
             self.server_socket.close()
@@ -203,7 +247,8 @@ class networkCommNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = networkCommNode()
+    node = NetworkCommNode()
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
