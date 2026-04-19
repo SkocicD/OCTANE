@@ -1,4 +1,4 @@
-# octane_wifi
+# octane_network
 
 Wireless communication package for OCTANE rover ground station link.
 
@@ -48,22 +48,22 @@ Wireless communication package for OCTANE rover ground station link.
 
 ## Package Structure
 ```
-octane_wifi/
+octane_network/
 ├── launch/
-│   └── wifi.launch.py
-├── octane_wifi/
+│   └── network.launch.py
+├── octane_network/
 │   ├── nodes/
-│   │   └── wifi_comm_node.py
+│   │   └── network_comm_node.py
 │   └── protocol.py
 ├── config/
-│   └── wifi_params.yaml
+│   └── network_params.yaml
 ├── setup.py
 └── package.xml
 ```
 
 ## Nodes
 
-### wifi_comm_node
+### network_comm_node
 **Single node handling both directions:**
 
 **TCP Server (port 5000):**
@@ -80,9 +80,9 @@ octane_wifi/
 - `/supervisor/mode_command` ← decode from Command messages
 - `/supervisor/fault_reset` ← when Command contains reset flag
 
-## Configuration (wifi_params.yaml)
+## Configuration (network_params.yaml)
 ```yaml
-wifi_comm_node:
+network_comm_node:
   ros__parameters:
     host: "0.0.0.0"  # Listen on all interfaces
     port: 5000
@@ -93,7 +93,7 @@ wifi_comm_node:
 ## Implementation Sequence
 1. Create package structure (setup.py, package.xml)
 2. Implement protocol.py (encoding/decoding)
-3. Implement wifi_comm_node.py (TCP server + ROS2 bridge)
-4. Create wifi_params.yaml
-5. Create wifi.launch.py
+3. Implement network_comm_node.py (TCP server + ROS2 bridge)
+4. Create network_params.yaml
+5. Create network.launch.py
 6. Test with mock ground station

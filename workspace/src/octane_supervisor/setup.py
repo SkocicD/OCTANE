@@ -23,6 +23,7 @@ setup(
             'mode_manager_node = octane_supervisor.nodes.mode_manager_node:main',
             'fault_manager_node = octane_supervisor.nodes.fault_manager_node:main',
             'fault_checker_node = octane_supervisor.nodes.fault_checker_node:main',
+        'state_monitor_node = octane_supervisor.nodes.state_monitor_node:main',
         ],
     },
 )

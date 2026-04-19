@@ -108,3 +108,22 @@ Evaluated: 10.2 < 10.5 → True → Publish "battery_undervoltage"
 2. On fault received: mark as active, record timestamp
 3. On reset command: only clear auto-recover faults, block if critical faults active
 4. Periodically publish summary status
+
+---
+
+### `state_monitor_node`
+**Displays state changes in a clean, readable format. Opens in separate terminal window.**
+
+**Subscribes:**
+- `/supervisor/state` (String) - current state from mode_manager_node
+
+**Output:**
+- Prints formatted state transitions to console with timestamps
+- Shows FROM → TO state changes
+- Displays visual indicators for each state (⏸️ READY, 🎮 CONTROL, 🤖 AUTO, ⚠️ ERROR)
+
+**Usage:**
+```bash
+ros2 run octane_supervisor state_monitor_node
+```
+Or automatically launched via `ros2 launch octane supervisor.launch.py` (opens in new terminal)

@@ -1,4 +1,4 @@
-# OCTANE WiFi
+# OCTANE network
 
 Wireless communication package for OCTANE rover ground station link.
 

@@ -57,6 +57,15 @@ class ModeManagerNode(Node):
             self.fault_signal_callback,
             qos,
         )
+        self.create_subscription(
+            String,
+            "/supervisor/fault_status",
+            self.fault_status_callback,
+            qos,
+        )
+
+        # Track fault status for fault reset validation
+        self.faults_active = False
 
         # Publishers
         self.state_pub = self.create_publisher(String, "/supervisor/state", qos)
@@ -69,6 +78,15 @@ class ModeManagerNode(Node):
 
         self.get_logger().info("Mode manager node initialized")
         self.publish_state()
+
+    def fault_status_callback(self, msg: String):
+        """Update fault status from fault manager."""
+        # Simple check: if message contains "NO_faults", then no active faults
+        self.faults_active = "NO_faults" not in msg.data
+        if self.faults_active:
+            self.get_logger().debug(f"Faults active: {msg.data}")
+        else:
+            self.get_logger().debug("No faults active")
 
     def mode_command_callback(self, msg: String):
         """Handle mode command from ground station."""
@@ -87,9 +105,9 @@ class ModeManagerNode(Node):
         target_mode = mode_map[mode_str]
 
         # If fault reset requested, check if faults are cleared
-        if target_mode == Mode.FAULT_RESET:
-            # TODO: Check with fault_manager if all faults cleared
-            pass
+        if target_mode == Mode.FAULT_RESET and self.faults_active:
+            self.get_logger().warn("Fault reset ignored: faults are still active")
+            return
 
         transition = self.state_machine.transition(target_mode)
 

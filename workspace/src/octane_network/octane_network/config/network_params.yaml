@@ -1,6 +1,6 @@
-# WiFi Communication Configuration
+# network Communication Configuration
 
-wifi_comm_node:
+network_comm_node:
   ros__parameters:
     host: "0.0.0.0"  # Listen on all interfaces
     port: 5000
