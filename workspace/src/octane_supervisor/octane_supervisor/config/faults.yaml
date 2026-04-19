@@ -1,0 +1,229 @@
+# OCTANE Supervisor Fault Definitions
+# Based on Electrical and Software Fault Tables
+#
+# Each fault has:
+#   - severity: critical | high | medium | low
+#   - auto_recover: true | false (requires manual reset)
+#   - condition: Python expression evaluated in fault_checker_node
+#   - source: ROS2 topic or sensor to monitor
+
+faults:
+  # Electrical Faults
+  battery_undervoltage:
+    severity: critical
+    auto_recover: false
+    description: "Battery voltage dropped below safe threshold"
+    condition: "battery_voltage < 10.5"
+    source: "/sensors/battery"
+    threshold: 10.5  # Volts
+
+  battery_overcurrent:
+    severity: high
+    auto_recover: false
+    description: "Battery current exceeded safe limit"
+    condition: "battery_current > 30.0"
+    source: "/sensors/battery"
+    threshold: 30.0  # Amps
+
+  drive_motor_undervoltage:
+    severity: high
+    auto_recover: false
+    description: "Drive motor voltage too low"
+    condition: "motor_voltage < 10.0"
+    source: "/hardware/motor_status"
+    threshold: 10.0
+
+  motor_overcurrent:
+    severity: medium
+    auto_recover: false
+    description: "Drive motor overcurrent (phase A/B/C)"
+    condition: "motor_current_a > 15.0 or motor_current_b > 15.0 or motor_current_c > 15.0"
+    source: "/hardware/motor_status"
+    threshold: 15.0
+
+  motor_driver_failure_single:
+    severity: high
+    auto_recover: false
+    description: "Single drive motor driver failure"
+    condition: "motor_driver_errors >= 1 and motor_driver_errors < 3"
+    source: "/hardware/motor_status"
+    threshold: 1
+
+  motor_driver_failure_multiple:
+    severity: critical
+    auto_recover: false
+    description: "Multiple drive motor driver failures"
+    condition: "motor_driver_errors >= 3"
+    source: "/hardware/motor_status"
+    threshold: 3
+
+  dig_actuator_overcurrent:
+    severity: medium
+    auto_recover: false
+    description: "Dig actuator overcurrent"
+    condition: "actuator_current > 10.0"
+    source: "/hardware/actuator_status"
+    threshold: 10.0
+
+  dig_actuator_driver_failure:
+    severity: high
+    auto_recover: false
+    description: "Dig actuator driver failure"
+    condition: "actuator_driver_error == true"
+    source: "/hardware/actuator_status"
+
+  actuator_position_mismatch:
+    severity: medium
+    auto_recover: true
+    description: "Actuator position does not match commanded"
+    condition: "abs(actuator_position - actuator_command) > 5.0"
+    source: "/hardware/actuator_status"
+    threshold: 5.0  # degrees
+
+  actuator_unresponsive:
+    severity: high
+    auto_recover: false
+    description: "Actuator not responding to commands"
+    condition: "actuator_heartbeat_timeout > 3.0"
+    source: "/hardware/actuator_status"
+    threshold: 3.0  # seconds
+
+  # Software Faults
+  wifi_connection_loss:
+    severity: high
+    auto_recover: true
+    description: "WiFi connection to ground station lost"
+    condition: "wifi_heartbeat_timeout > 5.0"
+    source: "/wifi/connection_status"
+    threshold: 5.0  # seconds
+
+  master_computer_thermal:
+    severity: high
+    auto_recover: true
+    description: "Master computer thermal throttling"
+    condition: "cpu_temperature > 80.0"
+    source: "/system/thermal"
+    threshold: 80.0  # Celsius
+
+  ml_inference_crash:
+    severity: critical
+    auto_recover: false
+    description: "ML inference pipeline crashed"
+    condition: "ml_inference_errors >= 3"
+    source: "/perception/ml_status"
+    threshold: 3
+
+  ml_model_init_failure:
+    severity: critical
+    auto_recover: false
+    description: "ML model failed to initialize"
+    condition: "ml_model_loaded == false"
+    source: "/perception/ml_status"
+
+  ml_inference_timeout:
+    severity: high
+    auto_recover: true
+    description: "ML inference taking too long"
+    condition: "ml_inference_latency > 500.0"
+    source: "/perception/ml_status"
+    threshold: 500.0  # milliseconds
+
+  can_bus_open:
+    severity: critical
+    auto_recover: false
+    description: "CAN bus physical connection lost"
+    condition: "can_bus_connected == false"
+    source: "/hardware/can_status"
+
+  can_dead:
+    severity: critical
+    auto_recover: false
+    description: "CAN bus completely unresponsive"
+    condition: "can_message_timeout > 2.0"
+    source: "/hardware/can_status"
+    threshold: 2.0  # seconds
+
+  can_heartbeat_stopped:
+    severity: critical
+    auto_recover: true
+    description: "CAN bus heartbeat stopped"
+    condition: "can_heartbeat_timeout > 1.0"
+    source: "/hardware/can_status"
+    threshold: 1.0  # second
+
+  can_ack_failure:
+    severity: high
+    auto_recover: true
+    description: "CAN bus acknowledgement failed"
+    condition: "can_ack_errors >= 5"
+    source: "/hardware/can_status"
+    threshold: 5
+
+  state_machine_deadlock:
+    severity: high
+    auto_recover: false
+    description: "State machine stuck in invalid state"
+    condition: "state_transition_timeout > 10.0"
+    source: "/supervisor/state"
+    threshold: 10.0  # seconds
+
+  incorrect_zone_awareness:
+    severity: high
+    auto_recover: false
+    description: "Robot has incorrect location/zone awareness"
+    condition: "zone_confidence < 0.5"
+    source: "/localization/zone"
+    threshold: 0.5
+
+  esuggestion_state_failure:
+    severity: critical
+    auto_recover: false
+    description: "Failed to transition to e-suggestion state"
+    condition: "esuggestion_transition_failed == true"
+    source: "/supervisor/state"
+
+  april_tag_detection_failure:
+    severity: high
+    auto_recover: true
+    description: "AprilTag not visible for localization"
+    condition: "april_tag_detected == false and tag_timeout > 30.0"
+    source: "/localization/april_tag"
+    threshold: 30.0  # seconds
+
+  depth_camera_error:
+    severity: critical
+    auto_recover: true
+    description: "Depth camera error"
+    condition: "depth_camera_errors >= 3"
+    source: "/perception/depth_camera"
+    threshold: 3
+
+  localization_camera_error:
+    severity: high
+    auto_recover: true
+    description: "Localization camera error"
+    condition: "localization_camera_errors >= 3"
+    source: "/perception/localization_camera"
+    threshold: 3
+
+  expected_motion_fault:
+    severity: low
+    auto_recover: true
+    description: "Robot slipped or got stuck"
+    condition: "motion_confidence < 0.6"
+    source: "/navigation/motion"
+    threshold: 0.6
+
+  object_collision:
+    severity: low
+    auto_recover: true
+    description: "Robot collided with obstacle"
+    condition: "collision_detected == true"
+    source: "/navigation/collision"
+
+
+# Global supervisor settings
+supervisor:
+  state_transition_timeout: 5.0  # Max time for state transition (seconds)
+  fault_check_rate: 10.0  # Hz
+  emergency_stop_debounce: 0.5  # Seconds before ES is confirmed
