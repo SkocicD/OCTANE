@@ -7,12 +7,15 @@ Launches:
 - mode_manager_node: State machine for mode transitions
 - fault_manager_node: Fault aggregation and status
 - fault_checker_node: Evaluates fault conditions from sensors
+- state_monitor_node: Displays state changes (opens in new terminal)
 """
 
+import os
+import sys
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 
 
@@ -70,8 +73,21 @@ def generate_launch_description():
         ),
     ]
 
+    # State monitor - opens in new terminal window on Windows
+    # This allows you to watch state transitions as they happen on the robot
+    state_monitor = ExecuteProcess(
+        cmd=[
+            'start', 'cmd', '/k',
+            'ros2', 'run', 'octane_supervisor', 'state_monitor_node'
+        ],
+        shell=True,
+        output='screen',
+        description='Opens state monitor in new terminal window'
+    )
+
     return LaunchDescription([
         check_rate_arg,
         fault_check_rate_arg,
         *nodes,
+        state_monitor,
     ])
