@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WiFi communication node for OCTANE rover ground station link."""
+"""network communication node for OCTANE rover ground station link."""
 
 import rclpy
 from rclpy.node import Node
@@ -10,17 +10,17 @@ import threading
 from typing import Optional
 import struct
 
-from octane_wifi.protocol import (
+from octane_network.protocol import (
     encode_telemetry, encode_command, encode_ack, encode_fault,
     decode_message, HEADER_SIZE, CRC_SIZE
 )
 
 
-class WifiCommNode(Node):
+class networkCommNode(Node):
     """TCP server for ground station communication."""
 
     def __init__(self):
-        super().__init__('wifi_comm_node')
+        super().__init__('network_comm_node')
 
         # Declare parameters
         self.declare_parameter('host', '0.0.0.0')
@@ -67,7 +67,7 @@ class WifiCommNode(Node):
 
         # Start server
         self.start_server()
-        self.get_logger().info(f'WiFi node listening on {self.host}:{self.port}')
+        self.get_logger().info(f'network node listening on {self.host}:{self.port}')
 
     def start_server(self):
         """Start TCP server."""
@@ -203,7 +203,7 @@ class WifiCommNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = WifiCommNode()
+    node = networkCommNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

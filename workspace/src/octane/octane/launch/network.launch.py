@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch file for OCTANE WiFi communication node.
+"""Launch file for OCTANE network communication node.
 
 Located in octane package for centralized launch management.
 """
@@ -35,15 +35,15 @@ def generate_launch_description():
 
     # Config file path
     config_path = PathJoinSubstitution([
-        FindPackageShare('octane_wifi'),
+        FindPackageShare('octane_network'),
         'config',
-        'wifi_params.yaml',
+        'network_params.yaml',
     ])
 
     node = Node(
-        package='octane_wifi',
-        executable='wifi_comm_node',
-        name='wifi_comm_node',
+        package='octane_network',
+        executable='network_comm_node',
+        name='network_comm_node',
         output='screen',
         parameters=[
             config_path,

@@ -1,4 +1,4 @@
-# OCTANE WiFi - Message Reference
+# OCTANE network - Message Reference
 
 Quick reference for all message formats used in rover-ground communication.
 
@@ -36,7 +36,7 @@ Quick reference for all message formats used in rover-ground communication.
   - `b` = Battery (undervoltage/overcurrent)
   - `m` = Motor (overcurrent/driver failure)
   - `c` = CAN bus (communication lost)
-  - `w` = WiFi (connection timeout)
+  - `w` = network (connection timeout)
   - `a` = Actuator (position/heartbeat fault)
   - `d` = Depth camera (sensor error)
 
@@ -171,7 +171,7 @@ Size: 2 bytes
 | `b` | Battery | Undervoltage (<10.5V), Overcurrent (>30A) |
 | `m` | Motor | Overcurrent, Driver failure, Thermal shutdown |
 | `c` | CAN Bus | Communication lost, Heartbeat timeout, ACK failure |
-| `w` | WiFi | Connection lost, Timeout >2s |
+| `w` | network | Connection lost, Timeout >2s |
 | `a` | Actuator | Position mismatch, Driver failure, Timeout |
 | `d` | Depth Camera | Sensor error, Timeout, Calibration loss |
 | `l` | Localization | AprilTag not detected, Loss of confidence |
@@ -195,10 +195,10 @@ Action: Monitor, system still operational
 Size: 3 bytes
 ```
 
-**Info WiFi timeout:**
+**Info network timeout:**
 ```
 Bytes: [F][0][w]
-Decoded: Severity = info, Fault = WiFi
+Decoded: Severity = info, Fault = network
 Action: Check connection, no critical action needed
 Size: 3 bytes
 ```

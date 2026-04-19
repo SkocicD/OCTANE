@@ -1,4 +1,4 @@
-# OCTANE WiFi - Protocol Specification
+# OCTANE network - Protocol Specification
 
 ## Design Goal
 **Minimal bandwidth** - every byte counts over wireless.
@@ -135,7 +135,7 @@ Wire: [O][A][1][0]  → Rejected
 - `b` = Battery fault (undervoltage/overcurrent)
 - `m` = Motor fault (overcurrent/driver failure)
 - `c` = CAN bus fault
-- `w` = WiFi connection loss
+- `w` = network connection loss
 - `a` = Actuator fault
 - `d` = Depth camera error
 
@@ -199,7 +199,7 @@ Future:  [F][2][b][0x01]      (Battery sub-type 01 = undervoltage)
 
 **Python encoding:**
 ```python
-from octane_wifi.protocol import encode_telemetry, encode_command
+from octane_network.protocol import encode_telemetry, encode_command
 
 # Send "Manual mode" with 11.4V battery
 packet = encode_telemetry('MANUAL', battery=11.4)
@@ -212,7 +212,7 @@ packet = encode_command('autonomous', estop=False)
 
 **Parsing incoming:**
 ```python
-from octane_wifi.protocol import decode_message
+from octane_network.protocol import decode_message
 
 msg = decode_message(rx_buffer)
 if msg:

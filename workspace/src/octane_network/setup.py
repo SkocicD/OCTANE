@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'octane_wifi'
+package_name = 'octane_network'
 
 setup(
     name=package_name,
@@ -9,7 +9,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/config', ['octane_wifi/config/wifi_params.yaml']),
+        ('share/' + package_name + '/config', ['octane_network/config/network_params.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'wifi_comm_node = octane_wifi.nodes.wifi_comm_node:main',
+            'network_comm_node = octane_network.nodes.network_comm_node:main',
         ],
     },
 )

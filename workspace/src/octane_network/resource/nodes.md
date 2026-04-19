@@ -1,6 +1,6 @@
-# OCTANE WiFi - Nodes
+# OCTANE network - Nodes
 
-## `wifi_comm_node`
+## `network_comm_node`
 
 TCP server bridging ROS2 topics to ground station communication.
 
@@ -47,7 +47,7 @@ TCP server bridging ROS2 topics to ground station communication.
 - ROS2 topic publish failure: Logs error, continues
 
 ## Files
-- `nodes/wifi_comm_node.py` - Main node implementation
+- `nodes/network_comm_node.py` - Main node implementation
 - `protocol.py` - Encoder/decoder for TCP messages
-- `config/wifi_params.yaml` - Node parameters
-- `launch/wifi.launch.py` - Launch file with parameter arguments
+- `config/network_params.yaml` - Node parameters
+- `launch/network.launch.py` - Launch file with parameter arguments
