@@ -29,7 +29,7 @@ from typing import Optional
 MAGIC = 0x4F
 DEFAULT_HOST = "255.255.255.255"  # Broadcast by default
 DEFAULT_PORT = 5001  # Separate port from TCP command port
-DEFAULT_RATE_HZ = 0.33  # ~333ms interval (3 heartbeats per second)
+DEFAULT_RATE_HZ = 0.3333  # 3 second interval between heartbeats
 
 
 def calc_crc8(data: bytes) -> int:
@@ -80,10 +80,10 @@ class HeartbeatSenderNode(Node):
 
         # Validate timeout vs rate
         if self.rate_hz > 0:
-            self.timeout_sec = 1.0 / self.rate_hz
+            interval_sec = 1.0 / self.rate_hz
             self.get_logger().info(
-                f"Heartbeat interval: {1.0/self.rate_hz:.2f}s, "
-                f"GUI timeout should be >= {1.0/self.rate_hz * 2:.1f}s"
+                f"Heartbeat interval: {interval_sec:.1f}s, "
+                f"GUI timeout should be >= {interval_sec * 2:.1f}s (2x interval)"
             )
 
         # Current state
@@ -98,7 +98,13 @@ class HeartbeatSenderNode(Node):
         self.sock.settimeout(0.1)  # Short timeout for non-blocking send
 
         # Timer
-        period = 1.0 / self.rate_hz
+        interval_sec = 1.0 / self.rate_hz  # 3 seconds
+        self.timer = self.create_timer(interval_sec, self.send_heartbeat)
+
+        self.get_logger().info(
+            f"Heartbeat sender initialized: {self.host}:{self.port} "
+            f"every {interval_sec:.1f}s"
+        )
         self.timer = self.create_timer(period, self.send_heartbeat)
 
         # Subscribe to supervisor state

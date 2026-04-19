@@ -16,7 +16,7 @@ import socket
 import threading
 from typing import Optional, List
 
-from octane_network.protocol import (
+from octane_network.classes.protocol import (
     encode_command, encode_telemetry, encode_ack, encode_fault,
     decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT
 )
