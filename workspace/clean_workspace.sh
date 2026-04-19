@@ -97,9 +97,9 @@ else
         rm -rf build/octane_supervisor
     fi
 
-    if [ -d "build/octane_wifi" ]; then
-        echo "Removing build/octane_wifi/"
-        rm -rf build/octane_wifi
+    if [ -d "build/octane_network" ]; then
+        echo "Removing build/octane_network/"
+        rm -rf build/octane_network
     fi
 
     if [ -d "build/octane" ]; then
@@ -127,9 +127,9 @@ else
         rm -rf install/octane_supervisor
     fi
 
-    if [ -d "install/octane_wifi" ]; then
-        echo "Removing install/octane_wifi/"
-        rm -rf install/octane_wifi
+    if [ -d "install/octane_network" ]; then
+        echo "Removing install/octane_network/"
+        rm -rf install/octane_network
     fi
 
     if [ -d "install/octane" ]; then

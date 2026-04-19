@@ -52,7 +52,7 @@ MAPPING_PID=$!
 # Launch WiFi communication subsystem
 echo ""
 echo "=== Launching WiFi Communication Subsystem ==="
-ros2 launch octane wifi.launch.py &
+ros2 launch octane network.launch.py &
 WiFi_PID=$!
 
 # Wait for user interrupt
