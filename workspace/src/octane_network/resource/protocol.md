@@ -56,16 +56,11 @@ Every message on the wire has this structure:
 
 **Examples:**
 ```
-Wire: [O][T][1][1]              = Manual mode, 4 bytes total
-Wire: [O][T][5][2][B][<float>]  = Autonomous + battery, 7 bytes total
-Wire: [O][T][3][1][F][b]        = Manual + battery fault, 5 bytes total
+Wire: [O][T][1][1][crc] = Manual mode, 5 bytes total
+Wire: [O][T][6][2][B][<float>][crc] = Autonomous + battery, 10 bytes total
+Wire: [O][T][3][1][F][b][crc] = Manual + fault, 6 bytes total
 ```
 
-**Actual byte sequences:**
-```
-"Manual mode"       → 4F 54 01 31                    (4 bytes!)
-"Auto + 11.4V battery" → 4F 54 05 32 42 00 E6 44 41 (9 bytes)
-```
 
 ---
 
@@ -89,12 +84,12 @@ Wire: [O][T][3][1][F][b]        = Manual + battery fault, 5 bytes total
 
 **Examples:**
 ```
-Wire: [O][C][2][1][0]  → Switch to manual mode
-Wire: [O][C][2][2][1]  → Switch to autonomous + e-stop flag
-Wire: [O][C][2][0][0]  → Return to standby
+Wire: [O][C][2][1][0][crc] = Switch to manual
+Wire: [O][C][2][2][1][crc] = Switch to autonomous + e-stop
+Wire: [O][C][2][0][0][crc] = Return to standby
 ```
 
-**Fixed size:** Always 5 bytes on wire.
+**Fixed size:** Always 6 bytes on wire (5 + CRC).
 
 ---
 
@@ -110,11 +105,11 @@ Wire: [O][C][2][0][0]  → Return to standby
 
 **Examples:**
 ```
-Wire: [O][A][1][1]  → Success
-Wire: [O][A][1][0]  → Rejected
+Wire: [O][A][1][1][crc] = Success
+Wire: [O][A][1][0][crc] = Rejected
 ```
 
-**Fixed size:** Always 4 bytes on wire.
+**Fixed size:** Always 5 bytes on wire (4 + CRC).
 
 ---
 
@@ -141,29 +136,29 @@ Wire: [O][A][1][0]  → Rejected
 
 **Examples:**
 ```
-Wire: [O][F][3][2][b] → Critical battery fault
-Wire: [O][F][3][1][m] → Warning: motor overcurrent
-Wire: [O][F][3][2][c] → Critical: CAN bus dead
+Wire: [O][F][2][2][b][crc] = Critical battery fault
+Wire: [O][F][2][1][m][crc] = Warning motor overcurrent
+Wire: [O][F][2][2][c][crc] = Critical CAN bus dead
 ```
 
-**Fixed size:** Always 5 bytes on wire.
+**Fixed size:** Always 6 bytes on wire (5 + CRC).
 
 ---
 
-## Size Comparison
+## Size Comparison (with full frame including CRC)
 
-| Message Type | Old Design (JSON) | New Design | Savings |
-|--------------|-------------------|------------|---------|
-| Telemetry (state only) | 23 bytes | **4 bytes** | 83% |
-| Command | 21 bytes | **5 bytes** | 76% |
-| ACK | 15 bytes | **4 bytes** | 73% |
-| Fault Alert | 35 bytes | **5 bytes** | 86% |
-| Telemetry + battery | 31 bytes | **9 bytes** | 71% |
+| Message Type | Old Design (JSON) | New Design (binary + CRC) | Savings |
+|--------------|-------------------|---------------------------|---------|
+| Telemetry (state only) | 23 bytes | **5 bytes** | 78% |
+| Command | 21 bytes | **6 bytes** | 71% |
+| ACK | 15 bytes | **5 bytes** | 67% |
+| Fault Alert | 35 bytes | **6 bytes** | 83% |
+| Telemetry + battery | 31 bytes | **10 bytes** | 68% |
 
 **Typical telemetry loop (10Hz):**
 - Old: 230 bytes/second
-- New: 40 bytes/second
-- **83% bandwidth reduction**
+- New: 50 bytes/second (state only)
+- **78% bandwidth reduction**
 
 ---
 
@@ -201,13 +196,17 @@ Future:  [F][2][b][0x01]      (Battery sub-type 01 = undervoltage)
 ```python
 from octane_network.protocol import encode_telemetry, encode_command
 
+# Send "Manual mode" (state only)
+packet = encode_telemetry('MANUAL')
+# Returns: b'OT\x011D' (5 bytes: MAGIC+TYPE+LEN+STATE+CRC)
+
 # Send "Manual mode" with 11.4V battery
 packet = encode_telemetry('MANUAL', battery=11.4)
-# Returns: b'OT\x012B\xe6\x44\x00\x...' (9 bytes)
+# Returns: b'OT\x051B\x66\x66\x36\x41\xfd' (10 bytes)
 
 # Send "Switch to autonomous"
 packet = encode_command('autonomous', estop=False)
-# Returns: b'OC\x022\x00\x...' (5 bytes)
+# Returns: b'OC\x022\x00\xf3' (6 bytes: MAGIC+TYPE+LEN+MODE+ESTOP+CRC)
 ```
 
 **Parsing incoming:**

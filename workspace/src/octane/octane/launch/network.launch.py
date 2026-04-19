@@ -55,7 +55,7 @@ def generate_launch_description():
         ],
     )
 
-    return LaunchDataset([
+    return LaunchDescription([
         host_arg,
         port_arg,
         telemetry_rate_arg,

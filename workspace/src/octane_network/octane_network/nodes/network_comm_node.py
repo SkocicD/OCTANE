@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Network communication node for OCTANE rover ground station link.
 
-This node provides TCP communication between theground station GUI and ROS2.
-It bridges mode commands, state updates, and fault alerts.
+This node provides TCP communication between the ground station GUI and ROS2.
+It bridges mode commands, state updates, and fault alerts using the lean binary protocol.
+
+Protocol: workspace/src/octane_network/resource/messages.md
+Implementation: workspace/src/octane_network/octane_network/protocol.py
 """
 
 import rclpy
@@ -11,12 +14,16 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String, Empty
 import socket
 import threading
-import json
-from typing import Optional
+from typing import Optional, List
+
+from octane_network.protocol import (
+    encode_command, encode_telemetry, encode_ack, encode_fault,
+    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT
+)
 
 
 class NetworkCommNode(Node):
-    """TCP server for ground station communication."""
+    """TCP server for ground station communication using lean binary protocol."""
 
     def __init__(self):
         super().__init__('network_comm_node')
@@ -52,8 +59,8 @@ class NetworkCommNode(Node):
         self.connected = False
         self.running = False
 
-        # Buffer for partial messages
-        self.buffer = ''
+        # Binary buffer for partial frames
+        self.buffer: bytes = b''
         self.buffer_lock = threading.Lock()
 
         # Server
@@ -108,7 +115,7 @@ class NetworkCommNode(Node):
                     break
 
     def recv_loop(self):
-        """Receive and decode JSON messages."""
+        """Receive binary frames and decode messages."""
         try:
             self.client_socket.settimeout(1.0)
 
@@ -118,11 +125,11 @@ class NetworkCommNode(Node):
                     if not data:
                         break
 
-                    # Convert to string and add to buffer
+                    # Add to binary buffer
                     with self.buffer_lock:
-                        self.buffer += data.decode('utf-8')
+                        self.buffer += data
 
-                    # Process complete messages (newline-delimited)
+                    # Process complete frames
                     self.process_buffer()
 
                 except socket.timeout:
@@ -134,61 +141,66 @@ class NetworkCommNode(Node):
             self.get_logger().warn('Disconnected from ground station')
             self.connected = False
             with self.buffer_lock:
-                self.buffer = ''
+                self.buffer = b''
             if self.client_socket:
                 self.client_socket.close()
-                self.client_socket = None
+            self.client_socket = None
 
     def process_buffer(self):
-        """Process complete messages from buffer."""
-        while '\n' in self.buffer:
-            # Extract complete message
-            msg_end = self.buffer.index('\n')
-            msg_str = self.buffer[:msg_end].strip()
-            self.buffer = self.buffer[msg_end + 1:]
+        """Process complete frames from binary buffer."""
+        while True:
+            # Need at least header (3 bytes) to determine frame length
+            with self.buffer_lock:
+                if len(self.buffer) < 3:
+                    return
 
-            if not msg_str:
-                continue
+                # Parse header
+                magic = self.buffer[0]
+                msg_type = self.buffer[1]
+                payload_len = self.buffer[2]
 
-            try:
-                msg = json.loads(msg_str)
+                # Calculate total frame size (header + payload + CRC)
+                expected_len = 3 + payload_len + 1  # 3 byte header + payload + 1 CRC
+
+                if len(self.buffer) < expected_len:
+                    return  # Wait for more data
+
+                # Extract complete frame
+                frame = self.buffer[:expected_len]
+                self.buffer = self.buffer[expected_len:]
+
+            # Decode frame
+            msg = decode_message(frame)
+            if msg:
                 self.handle_message(msg)
-            except json.JSONDecodeError as e:
-                self.get_logger().error(f'Invalid JSON: {e}')
+            # If decode fails (bad CRC/magic), silently discard
 
     def handle_message(self, msg: dict):
-        """Process decoded JSON message."""
-        if msg.get('type') != 'mode_command':
-            self.get_logger().warn(f'Unknown message type: {msg.get("type")}')
-            return
+        """Process decoded binary message."""
+        msg_type = msg.get('type')
 
-        mode = msg.get('mode', '').upper()
-        timestamp = msg.get('timestamp', 0)
+        if msg_type == 'command':
+            mode = msg.get('mode', '')
+            estop = msg.get('estop', False)
 
-        # Validate mode
-        valid_modes = ['STANDBY', 'MANUAL', 'AUTONOMOUS', 'FAULT_RESET']
-        if mode not in valid_modes:
-            self.get_logger().warn(f'Invalid mode: {mode}')
-            return
+            self.get_logger().info(f'Received command: mode={mode}, estop={estop}')
 
-        self.get_logger().info(f'Received mode command: {mode} (timestamp: {timestamp})')
+            # Publish mode command to ROS2
+            mode_msg = String()
+            mode_msg.data = mode.upper()
+            self.mode_command_pub.publish(mode_msg)
 
-        # Publish mode command to ROS2
-        mode_msg = String()
-        mode_msg.data = mode
-        self.mode_command_pub.publish(mode_msg)
+            # Send ACK if connected
+            if self.client_socket:
+                try:
+                    # Encode ACK using binary protocol
+                    ack_frame = encode_ack(success=True)
+                    self.client_socket.sendall(ack_frame)
+                except Exception as e:
+                    self.get_logger().error(f'ACK send failed: {e}')
 
-        # Send ACK to GUI
-        if self.client_socket:
-            try:
-                ack = json.dumps({
-                    'type': 'ack',
-                    'success': True,
-                    'timestamp': self.get_clock().now().nanoseconds / 1e9
-                }) + '\n'
-                self.client_socket.sendall(ack.encode('utf-8'))
-            except Exception as e:
-                self.get_logger().error(f'ACK send failed: {e}')
+        else:
+            self.get_logger().warn(f'Unknown message type: {msg_type}')
 
     def state_callback(self, msg: String):
         """Handle supervisor state change."""
@@ -196,40 +208,47 @@ class NetworkCommNode(Node):
         self.current_state = msg.data
 
         if old_state != self.current_state:
-            self.get_logger().info(f'State changed: {old_state} → {self.current_state}')
+            self.get_logger().info(f'State changed: {old_state} -> {self.current_state}')
 
     def fault_callback(self, msg: String):
         """Handle fault signal."""
         self.current_fault = msg.data
-        self.get_logger().error(f'Fault detected: {msg.data}')
+        self.get_logger().error(f'Fault detected: {self.current_fault}')
 
-        # Send immediate fault alert to GUI
+        # Send immediate fault alert to GUI using binary protocol
         if self.client_socket and self.connected:
             try:
-                alert = json.dumps({
-                    'type': 'fault_alert',
-                    'fault': self.current_fault,
-                    'severity': 'critical',
-                    'timestamp': self.get_clock().now().nanoseconds / 1e9
-                }) + '\n'
-                self.client_socket.sendall(alert.encode('utf-8'))
+                # Map fault name to single-char code
+                fault_map = {
+                    'battery_undervoltage': 'b',
+                    'battery_overcurrent': 'b',
+                    'motor_overcurrent': 'm',
+                    'motor_driver_failure': 'm',
+                    'can_bus_down': 'c',
+                    'can_dead': 'c',
+                    'wifi_connection_loss': 'w',
+                    'ml_inference_crash': 's',
+                    'april_tag_detection_failure': 'l',
+                    'depth_camera_error': 'd',
+                    'actuator_unresponsive': 'a',
+                }
+                fault_char = fault_map.get(self.current_fault, 's')  # default to 'software'
+
+                # Encode fault alert as binary frame
+                fault_frame = encode_fault(fault_char, 'critical')
+                self.client_socket.sendall(fault_frame)
             except Exception as e:
                 self.get_logger().error(f'Fault alert send failed: {e}')
 
     def send_telemetry(self):
-        """Send periodic telemetry to GUI."""
+        """Send periodic telemetry to GUI using binary protocol."""
         if not self.connected or not self.client_socket:
             return
 
         try:
-            telemetry = json.dumps({
-                'type': 'state_update',
-                'mode': self.current_state,
-                'fault': self.current_fault,
-                'timestamp': self.get_clock().now().nanoseconds / 1e9
-            }) + '\n'
-
-            self.client_socket.sendall(telemetry.encode('utf-8'))
+            # Encode telemetry as binary frame
+            telemetry_frame = encode_telemetry(self.current_state, fault=self.current_fault)
+            self.client_socket.sendall(telemetry_frame)
 
         except Exception as e:
             self.get_logger().error(f'Telemetry send failed: {e}')
