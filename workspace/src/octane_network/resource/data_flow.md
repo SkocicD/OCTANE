@@ -205,20 +205,20 @@ Total: 5 bytes
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `heartbeat_rate_hz` | 0.33 | Heartbeat frequency (1/3 Hz = 300ms interval) |
+| `heartbeat_rate_hz` | 0.33 | Heartbeat frequency (1/3 Hz = 3s interval) |
 | `udp_port` | 5001 | UDP port for heartbeat (separate from TCP port 5000) |
 | `timeout_seconds` | 6.5 | GUI timeout before marking connection lost |
 
 **Recommendation**: GUI timeout should be at least 2x the heartbeat interval
-to account for occasional packet loss. With 300ms interval and 6.5s timeout,
+to account for occasional packet loss. With 3s interval and 6.5s timeout,
 the GUI can miss ~21 consecutive heartbeats before declaring disconnection.
 
 ---
 
 ## File References
 
-- `protocol.py` - Binary frame encoding/decoding (TCP messages)
-- `heartbeat_sender.py` - UDP heartbeat sender node
+- `classes/protocol.py` - Binary frame encoding/decoding (TCP messages)
+- `nodes/heartbeat_sender.py` - UDP heartbeat sender node sender node
 - `NetworkProtocol.cs` - Binary frame encoding/decoding (C#)
 - `network_comm_node.py` - ROS2 TCP bridge node
 - `NetworkModeClient.cs` - Ground station TCP client

@@ -47,7 +47,9 @@ TCP server bridging ROS2 topics to ground station communication.
 - ROS2 topic publish failure: Logs error, continues
 
 ## Files
+---
+- `nodes/heartbeat_sender.py` - UDP heartbeat sender node
 - `nodes/network_comm_node.py` - Main node implementation
-- `protocol.py` - Encoder/decoder for TCP messages
+- `classes/protocol.py` - Binary protocol encoder/decoder (shared utilities)
 - `config/network_params.yaml` - Node parameters
 - `launch/network.launch.py` - Launch file with parameter arguments

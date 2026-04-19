@@ -21,7 +21,7 @@ Lean binary protocol optimized for minimal bandwidth usage:
   
 - **UDP (port 5001)**: Connection heartbeat
   - 5 bytes per packet
-  - Configurable rate (default: 300ms interval)
+  - Configurable rate (default: 3s interval)
   - GUI timeout: 6.5 seconds
 
 ## Documentation
@@ -45,7 +45,7 @@ Parameters:
 - `telemetry_rate` (default: 10.0) - Telemetry broadcast rate (Hz)
 - `udp_host` (default: 255.255.255.255) - UDP broadcast address
 - `udp_port` (default: 5001) - UDP port for heartbeat
-- `heartbeat_rate` (default: 0.33) - Heartbeat frequency in Hz
+- `heartbeat_rate` (default: 0.3333 (3s interval)) - Heartbeat frequency in Hz
 
 ## Architecture
 
