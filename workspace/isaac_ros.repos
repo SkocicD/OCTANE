@@ -1,8 +1,8 @@
 # Isaac ROS dependencies for nvblox multi-camera mapping.
 #
-# Clone these into workspace/src/ with:
-#   cd workspace/src
-#   vcs import < ../isaac_ros.repos
+# Clone these into workspace/src/external_pkgs/ with:
+#   cd workspace/src/external_pkgs
+#   vcs import < ../../isaac_ros.repos
 #
 # Or run the helper:
 #   ./workspace/clone_isaac_ros.sh

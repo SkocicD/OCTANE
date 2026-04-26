@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Build all Octane system packages.
-# Auto-discovers any packages in src/ — if Isaac ROS / nvblox sources are
-# cloned (via clone_isaac_ros.sh), they get built automatically.
+# Auto-discovers packages in src/ and src/external_pkgs/ — Isaac ROS / nvblox
+# sources (cloned via clone_isaac_ros.sh) are built automatically from external_pkgs/.
 #
 # Usage:
 #   ./build_system.sh           - Smart build (skip orbbec if already built)
@@ -22,7 +22,7 @@ echo ""
 cd "${WORKSPACE_ROOT}"
 
 # Auto-clone Isaac ROS deps (nvblox + supporting packages) if missing
-if [ ! -d "${WORKSPACE_ROOT}/src/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/clone_isaac_ros.sh" ]; then
+if [ ! -d "${WORKSPACE_ROOT}/src/external_pkgs/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/clone_isaac_ros.sh" ]; then
     echo "[INFO] Isaac ROS sources not found — cloning…"
     "${WORKSPACE_ROOT}/clone_isaac_ros.sh"
     echo ""

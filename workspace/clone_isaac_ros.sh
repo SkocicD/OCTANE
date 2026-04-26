@@ -1,11 +1,11 @@
 #!/bin/bash
-# Clone Isaac ROS dependencies (nvblox + supporting packages) into workspace/src/.
+# Clone Isaac ROS dependencies (nvblox + supporting packages) into workspace/src/external_pkgs/.
 # Run this once before the first build that needs nvblox.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="${SCRIPT_DIR}/src"
+SRC_DIR="${SCRIPT_DIR}/src/external_pkgs"
 REPOS_FILE="${SCRIPT_DIR}/isaac_ros.repos"
 
 if ! command -v vcs &> /dev/null; then
