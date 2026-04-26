@@ -77,12 +77,11 @@ def generate_launch_description():
     # This allows you to watch state transitions as they happen on the robot
     state_monitor = ExecuteProcess(
         cmd=[
-            'start', 'cmd', '/k',
+            'xterm', '-e',
             'ros2', 'run', 'octane_supervisor', 'state_monitor_node'
         ],
         shell=True,
         output='screen',
-        description='Opens state monitor in new terminal window'
     )
 
     return LaunchDescription([

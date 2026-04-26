@@ -28,11 +28,20 @@ if [ ! -d "${WORKSPACE_ROOT}/src/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/
     echo ""
 fi
 
+# Check for external packages
+if [ -d "${WORKSPACE_ROOT}/src/external_pkgs" ]; then
+    echo "[INFO] Found external packages directory"
+    # Add external packages to the build path
+    export COLCON_BASE_PATHS="${WORKSPACE_ROOT}/src:${WORKSPACE_ROOT}/src/external_pkgs"
+else
+    export COLCON_BASE_PATHS="${WORKSPACE_ROOT}/src"
+fi
+
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
-ORBBEC_PKGS="orbbec_camera_msgs orbbec_camera"
+ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"
-COLCON_FLAGS="--base-paths ${WORKSPACE_ROOT}/src --parallel-workers 1 --event-handlers console_cohesion+"
+COLCON_FLAGS="--base-paths ${COLCON_BASE_PATHS} --parallel-workers 1 --event-handlers console_cohesion+"
 
 case "$1" in
     --orbbec)
@@ -49,7 +58,7 @@ case "$1" in
         ;;
     *)
         # Smart build: skip orbbec if already built, build everything else
-        if [ -d "${WORKSPACE_ROOT}/install/orbbec_camera" ] && [ -d "${WORKSPACE_ROOT}/install/orbbec_camera_msgs" ]; then
+        if [ -d "${WORKSPACE_ROOT}/install/astra_camera" ]; then
             echo "[MODE] Smart build (orbbec cached, building everything else)"
             MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-skip ${ORBBEC_PKGS} --cmake-args ${CMAKE_ARGS}
         else

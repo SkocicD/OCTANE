@@ -105,7 +105,6 @@ class HeartbeatSenderNode(Node):
             f"Heartbeat sender initialized: {self.host}:{self.port} "
             f"every {interval_sec:.1f}s"
         )
-        self.timer = self.create_timer(period, self.send_heartbeat)
 
         # Subscribe to supervisor state
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)

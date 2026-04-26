@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'network_comm_node = octane_network.nodes.network_comm_node:main',
+            'heartbeat_sender = octane_network.nodes.heartbeat_sender:main',
         ],
     },
 )

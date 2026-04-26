@@ -29,7 +29,13 @@ def generate_launch_description():
         default_value='true',
         description='Use USB bridge for Mac development (true/false)',
     )
+    enable_depth_estimation_arg = DeclareLaunchArgument(
+        'enable_depth_estimation',
+        default_value='false',
+        description='Enable depth estimation node (true/false)',
+    )
     use_usb_bridge = LaunchConfiguration('use_usb_bridge')
+    enable_depth_estimation = LaunchConfiguration('enable_depth_estimation')
 
     nodes = [
         use_usb_bridge_arg,
@@ -41,7 +47,7 @@ def generate_launch_description():
     # ════════════════════════════════════════════════════════════════════════
 
     # ── Orbbec depth camera ──────────────────────────────────────────────────
-    orbbec_camera_dir = get_package_share_directory('orbbec_camera')
+    orbbec_camera_dir = get_package_share_directory('astra_camera')
     nodes.append(
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -166,6 +172,7 @@ def generate_launch_description():
             package='octane_perception',
             executable='depth_estimation_node',
             name='depth_estimation_node',
+        condition=IfCondition(enable_depth_estimation),
             output='screen',
             parameters=[{
                 'model_name': 'depth-anything/DA3METRIC-LARGE',
