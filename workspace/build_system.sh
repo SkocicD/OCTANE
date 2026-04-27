@@ -28,20 +28,11 @@ if [ ! -d "${WORKSPACE_ROOT}/src/external_pkgs/isaac_ros_nvblox" ] && [ -f "${WO
     echo ""
 fi
 
-# Check for external packages
-if [ -d "${WORKSPACE_ROOT}/src/external_pkgs" ]; then
-    echo "[INFO] Found external packages directory"
-    # Add external packages to the build path
-    export COLCON_BASE_PATHS="${WORKSPACE_ROOT}/src:${WORKSPACE_ROOT}/src/external_pkgs"
-else
-    export COLCON_BASE_PATHS="${WORKSPACE_ROOT}/src"
-fi
-
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"
-COLCON_FLAGS="--base-paths ${COLCON_BASE_PATHS} --parallel-workers 1 --event-handlers console_cohesion+"
+COLCON_FLAGS="--base-paths ${WORKSPACE_ROOT}/src --parallel-workers 1 --event-handlers console_cohesion+"
 
 case "$1" in
     --orbbec)
