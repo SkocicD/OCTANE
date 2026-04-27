@@ -9,9 +9,11 @@ Your Docker environment is now configured with a layered approach using NVIDIA's
 ```
 /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/
 ├── Dockerfile              # Main application Dockerfile
+├── Dockerfile.layers       # Multi-stage Dockerfile for layered builds
 ├── Docker_Guide.md         # Quick reference guide
 ├── setup_isaac_docker.sh   # Complete setup script
-├── build_layered.sh        # Build your application layer
+├── build_docker.sh         # Flexible build script with dependency/app layers
+├── build_layered.sh        # Legacy build script
 ├── clear_docker_images.sh   # Cleanup script (preserves base image)
 ├── manage_base_image.sh   # Base image management
 ├── auth_ngc.sh            # NVIDIA authentication
@@ -20,37 +22,41 @@ Your Docker environment is now configured with a layered approach using NVIDIA's
 
 ## How the Layered Approach Works
 
-### Two-Layer Docker System
+### Three-Layer Docker System
 
 1. **Base Layer**: NVIDIA Isaac ROS Base Image
    - Pre-built image: `nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos`
    - Contains ROS2, CUDA, TensorRT, and NVIDIA packages
    - Downloaded once and preserved
 
-2. **Application Layer**: Your Custom Code
-   - Everything in your Dockerfile after the `FROM` instruction
+2. **Dependencies Layer**: System dependencies and packages (infrequently changed)
+   - ROS packages, system libraries, Python dependencies
+   - Built once and reused
+
+3. **Application Layer**: Your Custom Code (frequently changed)
+   - Your source code and configurations
    - Rebuilds quickly when you make changes
 
 ## Setup Process
 
-### Initial Setup (Run Once)
+### Flexible Build System
 ```bash
-cd /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/
-./setup_isaac_docker.sh
-```
+# Build only dependencies layer (when adding new packages)
+./build_docker.sh --deps
 
-This handles:
-1. NVIDIA NGC authentication
-2. Pulling and preserving the base image
-3. Building your application layer
+# Build only application layer (when changing code)
+./build_docker.sh --app
 
-### Daily Usage
-```bash
-# Rebuild only your application layer (fast)
-./build_layered.sh --layered
+# Build both layers (default)
+./build_docker.sh
 
-# Clean up temporary images (preserves base)
-./clear_docker_images.sh
+# Clean previous builds to prevent clutter
+./build_docker.sh --clean
+
+# Examples:
+./build_docker.sh --deps --clean    # Rebuild only dependencies
+./build_docker.sh --app             # Rebuild only application code
+./build_docker.sh                   # Rebuild everything
 ```
 
 ## Key Benefits
@@ -59,11 +65,12 @@ This handles:
 2. **Fast Build Times**: Only your application layer rebuilds
 3. **Proper Storage**: Docker data stored on NVMe drive (445GB free)
 4. **Automatic Cleanup**: Cleanup scripts preserve base image while removing temporary data
+5. **Flexible Builds**: Build only what you need (dependencies or application)
 
 ## Important Scripts
 
 - `setup_isaac_docker.sh`: Complete initial setup
-- `build_layered.sh --layered`: Rebuild application layer
+- `build_docker.sh`: Flexible build system (--deps, --app, --clean)
 - `manage_base_image.sh`: Preserve base image
 - `clear_docker_images.sh`: Safe cleanup
 - `auth_ngc.sh`: Handle NVIDIA authentication

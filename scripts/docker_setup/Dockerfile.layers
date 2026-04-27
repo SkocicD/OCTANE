@@ -1,0 +1,72 @@
+# Multi-stage Dockerfile for OCTANE with dependency and application separation
+# This allows building just dependencies or the full application
+
+# Stage 1: Dependencies layer (infrequently changed)
+FROM nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos AS dependencies
+
+# Install system dependencies that rarely change
+RUN apt update && apt install -y \
+    python3-colcon-common-extensions \
+    git \
+    libusb-1.0-0-dev
+
+# Install ROS dependencies
+RUN apt update && apt install -y \
+    ros-humble-camera-info-manager \
+    ros-humble-cv-bridge \
+    ros-humble-image-publisher
+
+# Stage 2: Application layer (frequently changed) - depends on dependencies stage
+FROM dependencies AS application
+
+# Install development tools and packages
+RUN apt update && apt install -y \
+    ros-humble-desktop \
+    libuvc-dev \
+    libgoogle-glog-dev \
+    nlohmann-json3-dev \
+    libeigen3-dev \
+    libopenmpi-dev \
+    python3-dev \
+    cmake \
+    build-essential
+
+# Install Python dependencies
+RUN apt update && apt install -y \
+    python3-pip \
+    python3-venv \
+    python3-numpy \
+    python3-opencv \
+    libglfw3-dev \
+    libosmesa6-dev
+
+RUN pip3 install --no-cache-dir \
+    einops \
+    huggingface_hub \
+    imageio \
+    "numpy<2" \
+    opencv-python \
+    fastapi \
+    uvicorn \
+    requests \
+    typer \
+    pillow \
+    omegaconf \
+    plyfile \
+    safetensors \
+    pillow_heif || \
+    echo "Warning: Some Python packages failed to install"
+
+WORKDIR /workspace
+
+# Copy workspace sources
+COPY ../workspace /workspace
+
+# Build Orbbec camera package
+RUN cd /workspace && \
+    colcon build --packages-select ros2_astra_camera --cmake-args -DCMAKE_BUILD_TYPE=Release || \
+    echo "Warning: ros2_astra_camera build failed or not found"
+
+# Set environment variables
+ENV PYTHONPATH=${PYTHONPATH}:/workspace/src/external_pkgs/depth-anything-3/src
+RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
