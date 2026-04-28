@@ -12,15 +12,15 @@ RUN apt update && apt install -y python3-colcon-common-extensions git
 
 # Install core ROS dependencies
 RUN apt update && apt install -y \
-    ros-humble-camera-info-manager \
-    ros-humble-cv-bridge \
-    ros-humble-image-publisher \
+    ros-jazzy-camera-info-manager \
+    ros-jazzy-cv-bridge \
+    ros-jazzy-image-publisher \
     libusb-1.0-0-dev
 
 # Install full dependencies (conditional)
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
     apt update && apt install -y \
-    ros-humble-desktop \
+    ros-jazzy-desktop \
     libuvc-dev \
     libgoogle-glog-dev \
     nlohmann-json3-dev \
@@ -60,7 +60,7 @@ RUN if [ "$BUILD_TYPE" = "full" ]; then \
 WORKDIR /workspace
 
 # Copy workspace sources
-COPY ../workspace /workspace
+COPY workspace /workspace
 
 # Build Orbbec camera (if needed)
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
@@ -70,5 +70,5 @@ RUN if [ "$BUILD_TYPE" = "full" ]; then \
     fi
 
 # Set environment variables
-ENV PYTHONPATH=${PYTHONPATH}:/workspace/src/external_pkgs/depth-anything-3/src
-RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+ENV PYTHONPATH=/workspace/src/external_pkgs/depth-anything-3/src
+RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc

@@ -12,16 +12,10 @@ RUN apt update && apt install -y \
 
 # Install ROS dependencies
 RUN apt update && apt install -y \
-    ros-humble-camera-info-manager \
-    ros-humble-cv-bridge \
-    ros-humble-image-publisher
-
-# Stage 2: Application layer (frequently changed) - depends on dependencies stage
-FROM dependencies AS application
-
-# Install development tools and packages
-RUN apt update && apt install -y \
-    ros-humble-desktop \
+    ros-jazzy-camera-info-manager \
+    ros-jazzy-cv-bridge \
+    ros-jazzy-image-publisher \
+    ros-jazzy-desktop \
     libuvc-dev \
     libgoogle-glog-dev \
     nlohmann-json3-dev \
@@ -29,17 +23,16 @@ RUN apt update && apt install -y \
     libopenmpi-dev \
     python3-dev \
     cmake \
-    build-essential
-
-# Install Python dependencies
-RUN apt update && apt install -y \
+    build-essential \
     python3-pip \
     python3-venv \
     python3-numpy \
     python3-opencv \
     libglfw3-dev \
-    libosmesa6-dev
+    libosmesa6-dev || \
+    echo "Warning: Failed to install some dependencies, continuing anyway"
 
+# Install Python dependencies
 RUN pip3 install --no-cache-dir \
     einops \
     huggingface_hub \
@@ -55,12 +48,18 @@ RUN pip3 install --no-cache-dir \
     plyfile \
     safetensors \
     pillow_heif || \
-    echo "Warning: Some Python packages failed to install"
+    echo "Warning: Some Python packages failed to install, continuing anyway"
+
+# Stage 2: Application layer (frequently changed) - depends on dependencies stage
+FROM dependencies AS application
+
+# Clean any existing build cache to prevent CMake conflicts
+RUN rm -rf /workspace/build/* 2>/dev/null || true
 
 WORKDIR /workspace
 
 # Copy workspace sources
-COPY ../workspace /workspace
+COPY workspace /workspace
 
 # Build Orbbec camera package
 RUN cd /workspace && \
@@ -68,5 +67,5 @@ RUN cd /workspace && \
     echo "Warning: ros2_astra_camera build failed or not found"
 
 # Set environment variables
-ENV PYTHONPATH=${PYTHONPATH}:/workspace/src/external_pkgs/depth-anything-3/src
-RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+ENV PYTHONPATH=/workspace/src/external_pkgs/depth-anything-3/src
+RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc

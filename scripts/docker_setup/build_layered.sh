@@ -42,15 +42,26 @@ build_layered_images() {
         pull_base_image
     fi
 
-    # Build the application image using the layered approach
-    echo "Building application image..."
-    docker build -t octane-app:latest -f Dockerfile .
+    # Build the dependencies layer first
+    echo "Building dependencies layer..."
+    docker build -t octane-deps:latest -f Dockerfile.layers --target dependencies .
 
     if [ $? -eq 0 ]; then
-        echo "Successfully built application image"
+        echo "Successfully built dependencies layer"
+    else
+        echo "Failed to build dependencies layer"
+        return 1
+    fi
+
+    # Build the application layer
+    echo "Building application layer..."
+    docker build -t octane-app:latest -f Dockerfile.layers --target application .
+
+    if [ $? -eq 0 ]; then
+        echo "Successfully built application layer"
         return 0
     else
-        echo "Failed to build application image"
+        echo "Failed to build application layer"
         return 1
     fi
 }

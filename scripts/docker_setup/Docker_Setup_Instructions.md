@@ -10,10 +10,12 @@ Your Docker environment is now configured with a layered approach using NVIDIA's
 /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/
 ├── Dockerfile              # Main application Dockerfile
 ├── Dockerfile.layers       # Multi-stage Dockerfile for layered builds
+├── Dockerfile.multistage   # Alternative multi-stage Dockerfile with build args
+├── Dockerfile.dev           # Development environment Dockerfile
 ├── Docker_Guide.md         # Quick reference guide
 ├── setup_isaac_docker.sh   # Complete setup script
 ├── build_docker.sh         # Flexible build script with dependency/app layers
-├── build_layered.sh        # Legacy build script
+├── build_layered.sh        # Layered build script
 ├── clear_docker_images.sh   # Cleanup script (preserves base image)
 ├── manage_base_image.sh   # Base image management
 ├── auth_ngc.sh            # NVIDIA authentication
