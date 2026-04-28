@@ -69,6 +69,8 @@ if [ "$CLEAN_MODE" = true ]; then
     docker rmi octane-deps:latest octane-app:latest 2>/dev/null || true
     # Clean workspace build cache
     /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/clean_workspace_build.sh
+    # Remove any existing containers with the same name
+    docker rm -f octane_container 2>/dev/null || true
 fi
 
 # Build dependencies layer if requested

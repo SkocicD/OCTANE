@@ -13,7 +13,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="${SCRIPT_DIR}"
+# Fix the workspace root to point to the actual workspace directory
+WORKSPACE_ROOT="/media/csulunabotics/SSD/OCTANE/workspace"
 
 echo "=== Building Octane System ==="
 echo "Workspace: ${WORKSPACE_ROOT}"
@@ -21,19 +22,18 @@ echo ""
 
 cd "${WORKSPACE_ROOT}"
 
-# Auto-clone Isaac ROS deps (nvblox + supporting packages) if missing
-if [ ! -d "${WORKSPACE_ROOT}/src/external_pkgs/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/clone_isaac_ros.sh" ]; then
-    echo "[INFO] Isaac ROS sources not found — cloning…"
-    "${WORKSPACE_ROOT}/clone_isaac_ros.sh"
-    echo ""
-fi
-
 # Source ROS environment if available
 if [ -f "/opt/ros/humble/setup.bash" ]; then
     source /opt/ros/humble/setup.bash
     echo "[INFO] Sourced ROS 2 Humble environment"
 else
     echo "[WARNING] ROS 2 environment not found"
+fi
+
+# Check if colcon is available
+if ! command -v colcon &> /dev/null; then
+    echo "[ERROR] colcon not found. Please install colcon: sudo apt install python3-colcon-common-extensions"
+    exit 1
 fi
 
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
