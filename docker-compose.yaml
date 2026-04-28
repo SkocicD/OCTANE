@@ -2,7 +2,7 @@ services:
   ros2:
     build:
       context: ./docker_setup
-      dockerfile: Dockerfile.optimized
+      dockerfile: Dockerfile
     image: ros2:latest
     container_name: ros2
     tty: true

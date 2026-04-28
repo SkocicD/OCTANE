@@ -28,34 +28,47 @@ if [ ! -d "${WORKSPACE_ROOT}/src/external_pkgs/isaac_ros_nvblox" ] && [ -f "${WO
     echo ""
 fi
 
+# Source ROS environment if available
+if [ -f "/opt/ros/humble/setup.bash" ]; then
+    source /opt/ros/humble/setup.bash
+    echo "[INFO] Sourced ROS 2 Humble environment"
+else
+    echo "[WARNING] ROS 2 environment not found"
+fi
+
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
-CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"
-COLCON_FLAGS="--base-paths ${WORKSPACE_ROOT}/src --parallel-workers 1 --event-handlers console_cohesion+"
+# Build packages in the correct order to handle dependencies
+echo "[BUILD] Building packages in dependency order..."
 
+# First build message packages
+echo "[STEP] Building message packages..."
+colcon build --base-paths ${WORKSPACE_ROOT}/src --packages-select octane_msgs --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+# Then build other core packages
+CORE_PKGS="octane_supervisor octane_network octane_perception"
+echo "[STEP] Building core packages..."
+colcon build --base-paths ${WORKSPACE_ROOT}/src --packages-select ${CORE_PKGS} --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+# Build remaining packages based on command line args
 case "$1" in
     --orbbec)
         echo "[MODE] Building orbbec packages only"
-        MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-select ${ORBBEC_PKGS} --cmake-args ${CMAKE_ARGS}
+        colcon build --base-paths ${WORKSPACE_ROOT}/src --packages-select ${ORBBEC_PKGS} --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
         ;;
     --octane)
         echo "[MODE] Building octane packages only"
-        MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-select ${OCTANE_PKGS} --cmake-args ${CMAKE_ARGS}
+        colcon build --base-paths ${WORKSPACE_ROOT}/src --packages-select ${OCTANE_PKGS} --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
         ;;
     --all)
         echo "[MODE] Force building everything in src/"
-        MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --cmake-args ${CMAKE_ARGS}
+        colcon build --base-paths ${WORKSPACE_ROOT}/src --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
         ;;
     *)
-        # Smart build: skip orbbec if already built, build everything else
-        if [ -d "${WORKSPACE_ROOT}/install/astra_camera" ]; then
-            echo "[MODE] Smart build (orbbec cached, building everything else)"
-            MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-skip ${ORBBEC_PKGS} --cmake-args ${CMAKE_ARGS}
-        else
-            echo "[MODE] Smart build (first run, building everything)"
-            MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --cmake-args ${CMAKE_ARGS}
-        fi
+        # Smart build: build everything except CUDA-heavy packages that cause issues
+        echo "[MODE] Smart build (excluding problematic CUDA packages)"
+        colcon build --base-paths ${WORKSPACE_ROOT}/src --packages-skip isaac_ros_common isaac_ros_nitros --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
         ;;
 esac
 
