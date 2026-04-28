@@ -18,7 +18,11 @@ RUN apt update && apt install -y \
     cuda-toolkit-12-6 \
     cuda-toolkit-config-common \
     cuda-toolkit-12-config-common \
-    cuda-toolkit-12-6-config-common
+    cuda-toolkit-12-6-config-common \
+    libnpp-12-6 \
+    libnvjpeg-12-6 \
+    libnpp-dev-12-6 \
+    libnvjpeg-dev-12-6
 
 # Install ROS dependencies
 RUN apt update && apt install -y \

@@ -13,6 +13,10 @@ services:
       - "5901:5901"
     volumes:
       - ./workspace:/workspace
+      - /opt/nvidia/vpi3:/opt/nvidia/vpi3
+      - /usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu
     devices:
       - /dev/bus/usb:/dev/bus/usb
     privileged: true
+    environment:
+      - vpi_DIR=/opt/nvidia/vpi3/lib/aarch64-linux-gnu/cmake/vpi
