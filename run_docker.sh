@@ -1,1 +1,0 @@
-/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/run_docker.sh
