@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Run OCTANE container
+# Run OCTANE container with ephemeral workspace
 # Usage: ./run_docker.sh [options]
 # Options:
 #   (no args)     - Run interactive bash shell
@@ -43,7 +43,11 @@ if [ "$#" -gt 0 ]; then
     esac
 fi
 
-# Run container
+# Create ephemeral workspace for this container
+EPHEMERAL_WORKSPACE=$(/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/workspace_manager.sh create)
+echo "Using ephemeral workspace: $EPHEMERAL_WORKSPACE"
+
+# Run container with the ephemeral workspace
 echo "Running: $CMD"
 docker run -it --rm \
     --name octane_container \
@@ -51,5 +55,10 @@ docker run -it --rm \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
     -e DISPLAY=$DISPLAY \
     -e QT_X11_NO_MITSHM=1 \
+    -v "$EPHEMERAL_WORKSPACE":/workspace \
+    -v /opt/nvidia/vpi3:/opt/nvidia/vpi3 \
+    -v /usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --privileged \
     $IMAGE_NAME \
     $CMD
