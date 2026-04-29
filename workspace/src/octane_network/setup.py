@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             'network_comm_node = octane_network.nodes.network_comm_node:main',
             'heartbeat_sender = octane_network.nodes.heartbeat_sender:main',
+            'network_monitor_node = octane_network.nodes.network_monitor_node:main',
         ],
     },
 )

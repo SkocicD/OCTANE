@@ -10,7 +10,7 @@ Launches:
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration
 
 
@@ -85,6 +85,18 @@ def generate_launch_description():
         ],
     )
 
+    network_monitor_terminal = ExecuteProcess(
+        cmd=[
+            'xterm',
+            '-title', 'OCTANE | Network Monitor',
+            '-fa', 'Monospace', '-fs', '10',
+            '-bg', '#0d1117', '-fg', '#58a6ff',
+            '-hold',
+            '-e', 'ros2', 'run', 'octane_network', 'network_monitor_node',
+        ],
+        output='log',
+    )
+
     return LaunchDescription([
         tcp_host_arg,
         tcp_port_arg,
@@ -94,4 +106,5 @@ def generate_launch_description():
         heartbeat_rate_arg,
         tcp_node,
         udp_node,
+        network_monitor_terminal,
     ])
