@@ -80,13 +80,14 @@ else
     echo "[OK] apt dependencies already satisfied"
 fi
 
-# ── 3. rosdep ─────────────────────────────────────────────────────────────────
+# ── 3. rosdep (optional — network may be unavailable) ─────────────────────────
 if ! [ -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
     echo "[SETUP] Initialising rosdep..."
-    sudo rosdep init
+    sudo rosdep init 2>/dev/null || echo "[WARN]  rosdep init failed (network?), skipping"
 fi
-echo "[SETUP] Updating rosdep..."
-rosdep update --rosdistro "${ROS_DISTRO}" -q
+rosdep update --rosdistro "${ROS_DISTRO}" -q 2>/dev/null \
+    && echo "[OK] rosdep updated" \
+    || echo "[WARN]  rosdep update failed (network?), skipping — apt deps already handled above"
 
 # ── 4. External repos ──────────────────────────────────────────────────────────
 echo "[CHECK] Verifying external repos..."
@@ -127,61 +128,64 @@ if [ -f "${WORKSPACE_ROOT}/isaac_ros.repos" ]; then
     fi
 fi
 
-# ── 5. Build ───────────────────────────────────────────────────────────────────
+# ── 5. Stale cache check ───────────────────────────────────────────────────────
+# If build cache references a different workspace path, wipe it to avoid broken builds
+if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; then
+    echo "[WARN]  Stale build cache detected (old workspace path) — wiping build/install/log..."
+    rm -rf "${WORKSPACE_ROOT}/build" "${WORKSPACE_ROOT}/install" "${WORKSPACE_ROOT}/log"
+    echo "[OK]    Cache cleared"
+fi
+
+# ── 6. Build ───────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
+# All external isaac_ros/nvblox packages — only built with --all or --external
+EXTERNAL_PKGS_DIR="${WORKSPACE_ROOT}/src/external_pkgs"
+
+COLCON_ARGS="--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"
 
 echo ""
 echo "[BUILD] Building packages..."
 
-# Always build message packages first (other packages depend on them)
-echo "[STEP] Building message packages..."
-colcon build \
-    --base-paths "${WORKSPACE_ROOT}/src" \
-    --packages-select octane_msgs \
-    --event-handlers console_cohesion+ \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-
-echo "[STEP] Building core packages..."
-colcon build \
-    --base-paths "${WORKSPACE_ROOT}/src" \
-    --packages-select octane_supervisor octane_network octane_perception \
-    --event-handlers console_cohesion+ \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-
 case "$1" in
     --orbbec)
-        echo "[MODE] Building orbbec packages only"
-        colcon build \
-            --base-paths "${WORKSPACE_ROOT}/src" \
-            --packages-select ${ORBBEC_PKGS} \
-            --event-handlers console_cohesion+ \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        echo "[MODE] Orbbec packages only"
+        colcon build --base-paths "${WORKSPACE_ROOT}/src" \
+            --packages-select ${ORBBEC_PKGS} ${COLCON_ARGS}
         ;;
     --octane)
-        echo "[MODE] Building octane packages only"
-        colcon build \
-            --base-paths "${WORKSPACE_ROOT}/src" \
-            --packages-select ${OCTANE_PKGS} \
-            --event-handlers console_cohesion+ \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        echo "[MODE] Octane packages only"
+        # msgs must come first
+        colcon build --base-paths "${WORKSPACE_ROOT}/src" \
+            --packages-select octane_msgs ${COLCON_ARGS}
+        colcon build --base-paths "${WORKSPACE_ROOT}/src" \
+            --packages-select ${OCTANE_PKGS} ${COLCON_ARGS}
+        ;;
+    --external)
+        echo "[MODE] External packages only (isaac_ros, nvblox — requires CUDA headers)"
+        # isaac_ros_common must be built before everything else that depends on it
+        colcon build --base-paths "${EXTERNAL_PKGS_DIR}" \
+            --packages-select isaac_ros_common ${COLCON_ARGS}
+        colcon build --base-paths "${EXTERNAL_PKGS_DIR}" \
+            --packages-skip isaac_ros_common ${COLCON_ARGS}
         ;;
     --all)
-        echo "[MODE] Building everything in src/"
-        colcon build \
-            --base-paths "${WORKSPACE_ROOT}/src" \
-            --event-handlers console_cohesion+ \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        echo "[MODE] Full build (octane + orbbec + external)"
+        # Order: isaac_ros_common → rest of external → octane msgs → octane
+        colcon build --base-paths "${EXTERNAL_PKGS_DIR}" \
+            --packages-select isaac_ros_common ${COLCON_ARGS}
+        colcon build --base-paths "${WORKSPACE_ROOT}/src" \
+            --packages-skip isaac_ros_common ${COLCON_ARGS}
         ;;
     *)
-        echo "[MODE] Smart build (skipping CUDA-heavy isaac_ros packages)"
-        colcon build \
-            --base-paths "${WORKSPACE_ROOT}/src" \
-            --packages-skip isaac_ros_common isaac_ros_nitros \
-            --event-handlers console_cohesion+ \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        # Default: only build OCTANE packages — skip external_pkgs entirely
+        echo "[MODE] Smart build (octane packages only, skipping external_pkgs)"
+        colcon build --base-paths "${WORKSPACE_ROOT}/src" \
+            --packages-select octane_msgs ${COLCON_ARGS}
+        colcon build --base-paths "${WORKSPACE_ROOT}/src" \
+            --packages-select ${OCTANE_PKGS} ${COLCON_ARGS}
         ;;
 esac
 

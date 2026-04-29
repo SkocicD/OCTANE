@@ -1,2 +1,21 @@
 #!/bin/bash
-docker exec -it ros2 bash -c "source /opt/ros/humble/setup.bash && source /workspace/install/setup.bash 2>/dev/null; exec bash"
+
+# Open an interactive shell with ROS 2 and the OCTANE workspace sourced.
+
+WORKSPACE_ROOT="/home/csulunabotics/OCTANE/workspace"
+
+ROS_SETUP=""
+for distro in humble jazzy; do
+    if [ -f "/opt/ros/${distro}/setup.bash" ]; then
+        ROS_SETUP="/opt/ros/${distro}/setup.bash"
+        break
+    fi
+done
+
+if [ -z "$ROS_SETUP" ]; then
+    echo "[ERROR] ROS 2 not found. Run ./build_system.sh first."
+    exit 1
+fi
+
+echo "[OK] Sourcing ROS 2: $ROS_SETUP"
+exec bash --rcfile <(cat ~/.bashrc; echo "source $ROS_SETUP"; echo "source ${WORKSPACE_ROOT}/install/setup.bash 2>/dev/null"; echo 'echo "[OK] OCTANE workspace ready"')
