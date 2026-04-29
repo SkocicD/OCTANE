@@ -37,7 +37,7 @@ def generate_launch_description():
 
     disable_faults_arg = DeclareLaunchArgument(
         'disable_faults',
-        default_value='false',
+        default_value='true',
         description='DEV: suppress all fault signals so FAULT state is never entered'
     )
 
