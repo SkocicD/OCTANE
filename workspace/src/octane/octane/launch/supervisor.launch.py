@@ -35,6 +35,12 @@ def generate_launch_description():
         description='Fault detection check rate in Hz'
     )
 
+    disable_faults_arg = DeclareLaunchArgument(
+        'disable_faults',
+        default_value='false',
+        description='DEV: suppress all fault signals so FAULT state is never entered'
+    )
+
     # Config file path
     config_path = PathJoinSubstitution([
         FindPackageShare('octane_supervisor'),
@@ -50,6 +56,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 {'check_rate': LaunchConfiguration('check_rate')},
+                {'disable_faults': LaunchConfiguration('disable_faults')},
             ],
         ),
         Node(
@@ -88,6 +95,7 @@ def generate_launch_description():
     return LaunchDescription([
         check_rate_arg,
         fault_check_rate_arg,
+        disable_faults_arg,
         *nodes,
         state_monitor,
     ])
