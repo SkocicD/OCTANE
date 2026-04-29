@@ -77,15 +77,14 @@ def generate_launch_description():
             )
         )
     except Exception:
-        import warnings
-        warnings.warn("astra_camera package not found — Orbbec launch skipped. Build with ./build_system.sh --orbbec to enable.")
+        print("[WARN] astra_camera not found — Orbbec launch skipped (build with --orbbec to enable)")
 
     nodes.append(
         Node(
             package='octane_perception',
             executable='astra_depth_node',
             name='astra_depth_node',
-            output='screen',
+            output='log',
             condition=UnlessCondition(use_usb_bridge),
             parameters=[{
                 'rgb_device_path':   ORBBEC_RGB_PATH,
@@ -105,7 +104,7 @@ def generate_launch_description():
                 package='octane_perception',
                 executable='rgb_camera_node',
                 name=node_name,
-                output='screen',
+                output='log',
                 parameters=[{
                     'device_path': device_path,
                     'camera_id': cam_id,
@@ -129,7 +128,7 @@ def generate_launch_description():
             package='octane_perception',
             executable='usb_bridge_camera_node',
             name='orbbec_depth_bridge',
-            output='screen',
+            output='log',
             parameters=[{
                 'bridge_host': 'host.docker.internal',
                 'bridge_port': 5555,
@@ -149,7 +148,7 @@ def generate_launch_description():
             package='octane_perception',
             executable='usb_bridge_camera_node',
             name='orbbec_rgb_bridge',
-            output='screen',
+            output='log',
             parameters=[{
                 'bridge_host': 'host.docker.internal',
                 'bridge_port': 5556,
@@ -172,7 +171,7 @@ def generate_launch_description():
                 package='octane_perception',
                 executable='usb_bridge_camera_node',
                 name=f'{node_name}_bridge',
-                output='screen',
+                output='log',
                 parameters=[{
                     'bridge_host': 'host.docker.internal',
                     'bridge_port': bridge_port,
@@ -200,8 +199,8 @@ def generate_launch_description():
             package='octane_perception',
             executable='depth_estimation_node',
             name='depth_estimation_node',
-        condition=IfCondition(enable_depth_estimation),
-            output='screen',
+            condition=IfCondition(enable_depth_estimation),
+            output='log',
             parameters=[{
                 'model_name': 'depth-anything/DA3METRIC-LARGE',
                 'input_topics': near_rgb_topics,

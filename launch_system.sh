@@ -10,7 +10,8 @@
 #   ./launch_system.sh mapping          - Launch mapping only
 #   ./launch_system.sh network          - Launch network only
 
-WORKSPACE_ROOT="/home/csulunabotics/OCTANE/workspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE_ROOT="$SCRIPT_DIR/workspace"
 LAUNCH_PKG="octane"
 
 # Source ROS 2
@@ -60,10 +61,21 @@ case "$SUBSYSTEM" in
     network)     run_launch network ;;
     all)
         echo "[LAUNCH] Starting all OCTANE subsystems..."
+        PIDS=()
         ros2 launch "$LAUNCH_PKG" supervisor.launch.py &
+        PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" perception.launch.py &
+        PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" mapping.launch.py &
-        ros2 launch "$LAUNCH_PKG" network.launch.py
+        PIDS+=($!)
+        ros2 launch "$LAUNCH_PKG" network.launch.py &
+        PIDS+=($!)
+
+        trap 'echo ""; echo "[STOP] Shutting down all subsystems..."; kill "${PIDS[@]}" 2>/dev/null; wait "${PIDS[@]}" 2>/dev/null; exit 0' SIGINT SIGTERM
+
+        echo "[OK] All subsystems running (PIDs: ${PIDS[*]})"
+        echo "     Press Ctrl+C to stop all"
+        wait "${PIDS[@]}"
         ;;
     *)
         echo "Unknown subsystem: $SUBSYSTEM"

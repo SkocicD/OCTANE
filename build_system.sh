@@ -23,48 +23,38 @@ CUDA_HOME="/usr/local/cuda"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
 
-# Redirect pip user installs to SSD so PyTorch/DA3 don't fill internal storage
-SSD_PYTHON="/media/csulunabotics/SSD1/python"
+# All caches and temp files go onto SSD2 alongside the workspace
+SSD_CACHE="${SCRIPT_DIR}/.cache"
+
+SSD_PYTHON="${SSD_CACHE}/python"
 mkdir -p "${SSD_PYTHON}"
 export PYTHONUSERBASE="${SSD_PYTHON}"
 export PATH="${SSD_PYTHON}/bin:${PATH}"
 
-# Redirect CUDA compiler temp files to SSD — nvcc can write GBs to /tmp during large builds
-# Also set TEMP and TMP for other build systems that might check these
-export TMPDIR="/media/csulunabotics/SSD1/tmp"
+export TMPDIR="${SSD_CACHE}/tmp"
 export TEMP="${TMPDIR}"
 export TMP="${TMPDIR}"
 mkdir -p "${TMPDIR}"
 
-# Set Java temporary directory if Java-based builds are encountered
 export _JAVA_OPTIONS="-Djava.io.tmpdir=${TMPDIR}"
 
-# Redirect ROS logs to SSD to prevent filling internal storage
-export ROS_LOG_DIR="/media/csulunabotics/SSD1/ros/log"
+export ROS_LOG_DIR="${SSD_CACHE}/ros/log"
 mkdir -p "${ROS_LOG_DIR}"
 
-# Redirect pip cache to SSD
-export PIP_CACHE_DIR="/media/csulunabotics/SSD1/pip/cache"
+export PIP_CACHE_DIR="${SSD_CACHE}/pip"
 mkdir -p "${PIP_CACHE_DIR}"
 
-# Set ISAAC ROS workspace to SSD to prevent asset downloads from using internal storage
 export ISAAC_ROS_WS="${WORKSPACE_ROOT}/isaac_ros_assets"
-ISAAC_ROS_ASSETS_DIR="/media/csulunabotics/SSD1/OCTANE/workspace/isaac_ros_assets"
-mkdir -p "${ISAAC_ROS_ASSETS_DIR}"
-# Ensure the directory exists
+ISAAC_ROS_ASSETS_DIR="${SSD_CACHE}/isaac_ros_assets"
 mkdir -p "${ISAAC_ROS_ASSETS_DIR}/isaac_ros_nvblox"
 
-# Additional environment variables to ensure all temporary files go to SSD
-export XDG_CACHE_HOME="/media/csulunabotics/SSD1/cache"
+export XDG_CACHE_HOME="${SSD_CACHE}/xdg"
 mkdir -p "${XDG_CACHE_HOME}"
 
-# Set CUDA cache directory to SSD
-export CUDA_CACHE_PATH="/media/csulunabotics/SSD1/cuda/cache"
-
+export CUDA_CACHE_PATH="${SSD_CACHE}/cuda"
 mkdir -p "${CUDA_CACHE_PATH}"
 
-# Set npm cache directory to SSD (if npm is used)
-export npm_config_cache="/media/csulunabotics/SSD1/npm/cache"
+export npm_config_cache="${SSD_CACHE}/npm"
 mkdir -p "${npm_config_cache}"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -249,7 +239,7 @@ if ! pip3 show depth-anything-3 &>/dev/null; then
     pip3 install -e "${EXT_PKGS}/depth-anything-3" --no-deps
     # Install inference-only deps — timm is installed with --no-deps to prevent
     # it pulling in standard PyPI torch and overwriting the JetPack-specific wheel.
-    pip3 install "numpy<2" pillow imageio safetensors einops omegaconf opencv-python-headless
+    pip3 install "numpy<2" pillow imageio safetensors einops omegaconf opencv-python-headless huggingface-hub
     pip3 install timm --no-deps
     echo "[OK] depth_anything_3 installed"
 else

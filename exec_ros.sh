@@ -2,7 +2,8 @@
 
 # Open an interactive shell with ROS 2 and the OCTANE workspace sourced.
 
-WORKSPACE_ROOT="/home/csulunabotics/OCTANE/workspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE_ROOT="$SCRIPT_DIR/workspace"
 
 ROS_SETUP=""
 for distro in humble jazzy; do

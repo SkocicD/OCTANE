@@ -60,7 +60,7 @@ def generate_launch_description():
         package='octane_network',
         executable='network_comm_node',
         name='network_comm_node',
-        output='screen',
+        output='log',
         parameters=[
             {
                 'host': LaunchConfiguration('tcp_host'),
@@ -75,7 +75,7 @@ def generate_launch_description():
         package='octane_network',
         executable='heartbeat_sender',
         name='heartbeat_sender',
-        output='screen',
+        output='log',
         parameters=[
             {
                 'host': LaunchConfiguration('udp_host'),

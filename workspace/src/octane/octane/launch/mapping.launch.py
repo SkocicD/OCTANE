@@ -33,7 +33,7 @@ def generate_launch_description():
                 package='octane_mapping',
                 executable='camera_frame_splitter',
                 name=f'{cam_name}_rgb_splitter',
-                output='screen',
+                output='log',
                 parameters=[{
                     'camera_name': cam_name,
                     'input_topic': cam_cfg['rgb_topic'],
@@ -50,7 +50,7 @@ def generate_launch_description():
                 package='octane_mapping',
                 executable='camera_frame_splitter',
                 name=f'{cam_name}_depth_splitter',
-                output='screen',
+                output='log',
                 parameters=[{
                     'camera_name': cam_name,
                     'input_topic': cam_cfg['depth_topic'],
@@ -87,7 +87,7 @@ def generate_launch_description():
                 package='nvblox_ros',
                 executable='nvblox_node',
                 name='nvblox_node',
-                output='screen',
+                output='log',
                 parameters=[{
                     'global_frame': 'odom',
                     'pose_frame':   'base_link',
@@ -105,8 +105,7 @@ def generate_launch_description():
             )
         )
     except Exception:
-        import warnings
-        warnings.warn("nvblox_ros not found — nvblox node skipped. Build with ./build_system.sh --external to enable.")
+        print("[WARN] nvblox_ros not found — nvblox node skipped (build with --external to enable)")
 
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)
