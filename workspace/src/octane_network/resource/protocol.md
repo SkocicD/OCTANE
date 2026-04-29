@@ -113,7 +113,38 @@ Wire: [O][A][1][0][crc] = Rejected
 
 ---
 
-### 4. Fault Alert (F) - Rover → Ground
+### 4. Manipulator Command (M) - Ground → Rover
+
+**Purpose:** Relay held-key state from the ground station to the rover at 20 Hz while in Manual mode.
+
+**Wire format:** `M + bitfield`
+
+**Bitfield layout (1 byte):**
+| Bit | Key | Action |
+|-----|-----|--------|
+| 0 | W | Drive forward |
+| 1 | A | Drive left |
+| 2 | S | Drive backward |
+| 3 | D | Drive right |
+| 4 | ↑ | Arm up |
+| 5 | ↓ | Arm down |
+| 6 | ← | Bucket rotate left |
+| 7 | → | Bucket rotate right |
+
+Multiple bits may be set simultaneously. `0x00` means all keys released.
+
+**Examples:**
+```
+Wire: [O][M][1][0x01][crc] = W held (drive forward)
+Wire: [O][M][1][0x09][crc] = W + D held (forward + right)
+Wire: [O][M][1][0x00][crc] = All keys released
+```
+
+**Fixed size:** Always 5 bytes on wire (4 header + CRC).
+
+---
+
+### 5. Fault Alert (F) - Rover → Ground
 
 **Purpose:** Immediate critical fault notification (bypasses telemetry timer).
 

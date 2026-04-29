@@ -40,10 +40,11 @@ HEADER_SIZE = 3  # magic + type + length
 CRC_SIZE = 1  # 8-bit CRC (good enough for short messages)
 
 # Message types (ASCII for debugging)
-TYPE_TELEMETRY = ord('T')  # 0x54
-TYPE_COMMAND = ord('C')    # 0x43
-TYPE_ACK = ord('A')        # 0x41
-TYPE_FAULT = ord('F')      # 0x46
+TYPE_TELEMETRY    = ord('T')  # 0x54
+TYPE_COMMAND      = ord('C')  # 0x43
+TYPE_ACK          = ord('A')  # 0x41
+TYPE_FAULT        = ord('F')  # 0x46
+TYPE_MANIPULATOR  = ord('M')  # 0x4D
 
 # Mode/state codes
 MODE_STANDBY = b'0'
@@ -136,6 +137,24 @@ def encode_ack(success: bool) -> bytes:
 
     crc = crc8(frame)
     return frame + bytes([crc])
+
+
+def encode_manipulator(bitfield: int) -> bytes:
+    """Encode manipulator command: M + bitfield byte.
+
+    Wire format: [O][M][1][bitfield][crc]
+    Always 5 bytes on wire.
+
+    Bitfield:
+      bit 0 = W  (drive forward)    bit 4 = ↑ (arm up)
+      bit 1 = A  (drive left)       bit 5 = ↓ (arm down)
+      bit 2 = S  (drive backward)   bit 6 = ← (bucket rotate left)
+      bit 3 = D  (drive right)      bit 7 = → (bucket rotate right)
+    """
+    payload = bytes([bitfield & 0xFF])
+    header = struct.pack('!BBB', MAGIC, TYPE_MANIPULATOR, len(payload))
+    frame = header + payload
+    return frame + bytes([crc8(frame)])
 
 
 def encode_fault(fault_type: str, severity: str) -> bytes:
@@ -236,5 +255,9 @@ def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
             fault_char = payload[1:2].decode()
 
             return {'type': 'fault', 'severity': severity, 'fault': fault_char}
+
+    elif msg_type == TYPE_MANIPULATOR:
+        if len(payload) >= 1:
+            return {'type': 'manipulator', 'keys': payload[0]}
 
     return None

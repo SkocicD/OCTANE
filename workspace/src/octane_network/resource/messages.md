@@ -114,6 +114,56 @@ Size: 3 bytes
 
 ---
 
+## Manipulator Command (Ground → Rover)
+
+**Purpose:** Relay the current held-key state from the ground station to the rover for real-time drive and arm control.
+
+**Trigger:** Sent continuously at 20 Hz while the rover is in Manual mode. Every frame reflects the full current hold state — downstream nodes handle velocity conversion.
+
+**Type code:** `M` (0x4D)
+
+**Wire format:** `M + bitfield`
+
+### Bitfield Layout
+
+| Bit | Key | Action |
+|-----|-----|--------|
+| 0 | W | Drive forward |
+| 1 | A | Drive left |
+| 2 | S | Drive backward |
+| 3 | D | Drive right |
+| 4 | ↑ | Arm up |
+| 5 | ↓ | Arm down |
+| 6 | ← | Bucket rotate left |
+| 7 | → | Bucket rotate right |
+
+Multiple bits may be set simultaneously. `0x00` means all keys released.
+
+### Examples
+
+**Drive forward + right:**
+```
+Bytes: [M][0x09]
+Decoded: keys = 0b00001001 (W + D)
+Size: 2 bytes payload
+```
+
+**Arm up only:**
+```
+Bytes: [M][0x10]
+Decoded: keys = 0b00010000 (↑)
+```
+
+**All released:**
+```
+Bytes: [M][0x00]
+Decoded: keys = 0x00 — no inputs held
+```
+
+**ROS topic:** `/manual_control/keys` (`std_msgs/UInt8`) — raw bitfield, published every received frame.
+
+---
+
 ## Acknowledgment (Rover → Ground)
 
 **Purpose:** Confirm command received and executed.

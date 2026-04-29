@@ -11,14 +11,14 @@ Implementation: workspace/src/octane_network/octane_network/protocol.py
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String, Empty
+from std_msgs.msg import String, Empty, UInt8
 import socket
 import threading
 from typing import Optional, List
 
 from octane_network.classes.protocol import (
     encode_command, encode_telemetry, encode_ack, encode_fault,
-    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT
+    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT, TYPE_MANIPULATOR
 )
 
 
@@ -50,7 +50,8 @@ class NetworkCommNode(Node):
 
         # ROS2 publishers
         self.mode_command_pub = self.create_publisher(String, '/supervisor/mode_command', qos)
-        self.fault_reset_pub = self.create_publisher(Empty, '/supervisor/fault_reset', qos)
+        self.fault_reset_pub  = self.create_publisher(Empty,  '/supervisor/fault_reset',  qos)
+        self.manual_keys_pub  = self.create_publisher(UInt8,  '/manual_control/keys',     qos)
 
         # State
         self.current_state = 'STANDBY'
@@ -198,6 +199,11 @@ class NetworkCommNode(Node):
                     self.client_socket.sendall(ack_frame)
                 except Exception as e:
                     self.get_logger().error(f'ACK send failed: {e}')
+
+        elif msg_type == 'manipulator':
+            keys_msg = UInt8()
+            keys_msg.data = msg.get('keys', 0)
+            self.manual_keys_pub.publish(keys_msg)
 
         else:
             self.get_logger().warn(f'Unknown message type: {msg_type}')
