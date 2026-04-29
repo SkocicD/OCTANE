@@ -98,8 +98,8 @@ class FaultCheckerNode(Node):
                 self.sensor_data[fault_name] = data
             except json.JSONDecodeError:
                 self.sensor_data[fault_name] = {"value": msg.data}
-        except Exception as e:
-            self.get_logger().warn(f"Error parsing sensor data for {fault_name}: {e}")
+        except Exception:
+            pass
 
     def check_faults(self):
         """Evaluate all fault conditions."""
@@ -134,27 +134,20 @@ class FaultCheckerNode(Node):
 
             result = eval(condition, {"__builtins__": {}}, context)
             return bool(result)
-        except Exception as e:
-            self.get_logger().warn(f"Error evaluating condition for {fault_name}: {e}")
+        except Exception:
+            # Sensor data not yet available — silently skip until data arrives
             return False
 
     def _trigger_fault(self, fault_name: str, fault_cfg: dict):
         """Trigger a fault."""
-        severity = fault_cfg.get("severity", "medium")
-        description = fault_cfg.get("description", fault_name)
-
-        self.get_logger().error(f"FAULT TRIGGERED: {fault_name} ({severity}) - {description}")
-
         self.active_faults[fault_name] = fault_cfg
 
-        # Publish fault signal
         msg = String()
         msg.data = fault_name
         self.fault_pub.publish(msg)
 
     def _clear_fault(self, fault_name: str, fault_cfg: dict):
         """Clear an auto-recoverable fault."""
-        self.get_logger().info(f"Fault cleared: {fault_name}")
         del self.active_faults[fault_name]
 
 

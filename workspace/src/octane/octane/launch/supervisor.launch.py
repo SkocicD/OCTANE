@@ -15,7 +15,7 @@ import sys
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 
 
@@ -73,14 +73,11 @@ def generate_launch_description():
         ),
     ]
 
-    # State monitor - opens in new terminal window on Windows
-    # This allows you to watch state transitions as they happen on the robot
-    state_monitor = ExecuteProcess(
-        cmd=[
-            'xterm', '-e',
-            'ros2', 'run', 'octane_supervisor', 'state_monitor_node'
-        ],
-        shell=True,
+    # State monitor - runs inline on Jetson (no xterm/display available)
+    state_monitor = Node(
+        package='octane_supervisor',
+        executable='state_monitor_node',
+        name='state_monitor_node',
         output='screen',
     )
 
