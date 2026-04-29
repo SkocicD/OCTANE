@@ -23,7 +23,7 @@ Topics:
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import UInt8
+from std_msgs.msg import UInt8, Bool
 from octane_msgs.msg import DriveCommand
 
 # Bit positions matching GUI GetKeyBitfield
@@ -50,15 +50,29 @@ class ManualDriveNode(Node):
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
-        self.sub = self.create_subscription(
-            UInt8, '/manual_ctrl/key_state', self.on_key_state, qos)
+        self.manual_enabled = False
+
+        self.create_subscription(UInt8, '/manual_ctrl/key_state', self.on_key_state, qos)
+        self.create_subscription(Bool, '/supervisor/manual_enabled', self.on_manual_enabled, qos)
         self.pub = self.create_publisher(DriveCommand, '/drive/command', qos)
 
         self.get_logger().info(
             f'Manual drive node ready — throttle={self.throttle_scale}, '
             f'turn={self.turn_scale}')
 
+    def on_manual_enabled(self, msg: Bool):
+        self.manual_enabled = msg.data
+        if not msg.data:
+            # Supervisor left manual mode — publish stop immediately
+            stop = DriveCommand()
+            stop.left_velocity = 0.0
+            stop.right_velocity = 0.0
+            self.pub.publish(stop)
+
     def on_key_state(self, msg: UInt8):
+        if not self.manual_enabled:
+            return
+
         bf = msg.data
 
         forward = bit(bf, BIT_W)
