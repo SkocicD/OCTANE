@@ -63,17 +63,27 @@ class FaultCheckerNode(Node):
 
     def find_param_file(self, filename: str) -> str:
         """Find config file in package share directory."""
-        # Relative to install location
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, "..", "config", filename)
-        if os.path.exists(config_path):
-            return config_path
+        # Use ament_index to find the installed package share directory
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            config_path = os.path.join(get_package_share_directory('octane_supervisor'), 'config', filename)
+            if os.path.exists(config_path):
+                return config_path
+        except Exception:
+            pass
 
-        # Fallback to workspace path
-        workspace_root = os.environ.get("WORKSPACE_ROOT", "/workspace")
-        config_path = os.path.join(
-            workspace_root, "src", "octane_supervisor", "octane_supervisor", "config", filename
-        )
+        # Fallback: source tree (during development before install)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        for candidate in [
+            os.path.join(script_dir, '..', 'config', filename),
+            os.path.join(script_dir, '..', '..', 'config', filename),
+        ]:
+            if os.path.exists(candidate):
+                return os.path.abspath(candidate)
+
+        # Fallback: WORKSPACE_ROOT env var
+        workspace_root = os.environ.get('WORKSPACE_ROOT', '/home/csulunabotics/OCTANE/workspace')
+        config_path = os.path.join(workspace_root, 'src', 'octane_supervisor', 'octane_supervisor', 'config', filename)
         if os.path.exists(config_path):
             return config_path
 

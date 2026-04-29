@@ -79,28 +79,34 @@ def generate_launch_description():
             (f'camera_{i}/color/camera_info', f'mapping/{cam_name}/rgb/camera_info'),
         ])
 
-    nodes.append(
-        Node(
-            package='nvblox_ros',
-            executable='nvblox_node',
-            name='nvblox_node',
-            output='screen',
-            parameters=[{
-                'global_frame': 'odom',
-                'pose_frame':   'base_link',
-                'mapping_type': 'static_tsdf',
-                'voxel_size':   0.05,
-                'num_cameras':  len(cfg['cameras']),
-                'use_color':    True,
-                'use_depth':    True,
-                'use_lidar':    False,
-                'max_integration_distance_m': 5.0,
-                'integrate_color_radius_m':   5.0,
-                'esdf_mode':    'esdf_3d',
-            }],
-            remappings=nvblox_remappings,
+    try:
+        from ament_index_python.packages import get_package_share_directory as _gpsd
+        _gpsd('nvblox_ros')
+        nodes.append(
+            Node(
+                package='nvblox_ros',
+                executable='nvblox_node',
+                name='nvblox_node',
+                output='screen',
+                parameters=[{
+                    'global_frame': 'odom',
+                    'pose_frame':   'base_link',
+                    'mapping_type': 'static_tsdf',
+                    'voxel_size':   0.05,
+                    'num_cameras':  len(cfg['cameras']),
+                    'use_color':    True,
+                    'use_depth':    True,
+                    'use_lidar':    False,
+                    'max_integration_distance_m': 5.0,
+                    'integrate_color_radius_m':   5.0,
+                    'esdf_mode':    'esdf_3d',
+                }],
+                remappings=nvblox_remappings,
+            )
         )
-    )
+    except Exception:
+        import warnings
+        warnings.warn("nvblox_ros not found — nvblox node skipped. Build with ./build_system.sh --external to enable.")
 
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)

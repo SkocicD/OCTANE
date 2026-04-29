@@ -47,15 +47,20 @@ def generate_launch_description():
     # ════════════════════════════════════════════════════════════════════════
 
     # ── Orbbec depth camera ──────────────────────────────────────────────────
-    orbbec_camera_dir = get_package_share_directory('astra_camera')
-    nodes.append(
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
-            ),
-            condition=UnlessCondition(use_usb_bridge),
+    try:
+        orbbec_camera_dir = get_package_share_directory('astra_camera')
+        nodes.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
+                ),
+                condition=UnlessCondition(use_usb_bridge),
+            )
         )
-    )
+    except Exception:
+        import warnings
+        warnings.warn("astra_camera package not found — Orbbec launch skipped. Build with ./build_system.sh --orbbec to enable.")
+
     nodes.append(
         Node(
             package='octane_perception',
