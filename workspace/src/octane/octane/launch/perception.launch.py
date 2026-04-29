@@ -9,24 +9,38 @@ import os
 
 
 # Camera scheme:
-#   1× Orbbec (depth + RGB)            → perception/camera/depth_camera/{depth,rgb}/frame
-#   5× standalone RGB cameras          → perception/camera/near/{position}/rgb/frame
+#   1× Orbbec Astra Pro (depth + RGB)  → usb path 0:4.1.2.1  (Hub 1, port 2)
+#   5× Innomaker U20CAM-1080p-S1       → by-path entries below
 #
-# All nodes publish octane_msgs/CameraFrame on the remapped topics.
+# All cameras are identified by USB port path — stable across reboots as long
+# as each camera stays in the same physical port. Reassign positions here once
+# physically mounted; device paths do not need to change.
+#
+# Orbbec device paths (passed to astra_camera driver):
+#   RGB:   /dev/v4l/by-path/platform-3610000.usb-usb-0:4.1.2.1:1.0-video-index0
+#   Depth: /dev/v4l/by-path/platform-3610000.usb-usb-0:4.1.2.1:1.0-video-index1
+
+BY_PATH = 'platform-3610000.usb-usb-0'
+
 NEAR_RGB_CAMERAS = [
-    # (node_name,            position,        camera_id, usb_bridge_port, device_hint)
-    ('near_rgb_left_side',   'left_side',     0, 5557, '/dev/v4l/by-id/usb-****-left-side'),
-    ('near_rgb_left_front',  'left_front',    1, 5558, '/dev/v4l/by-id/usb-****-left-front'),
-    ('near_rgb_right_side',  'right_side',    2, 5559, '/dev/v4l/by-id/usb-****-right-side'),
-    ('near_rgb_right_front', 'right_front',   3, 5560, '/dev/v4l/by-id/usb-****-right-front'),
-    ('near_rgb_back_rear',   'back_rear',     4, 5561, '/dev/v4l/by-id/usb-****-back-rear'),
+    # (node_name,            position,       camera_id, usb_bridge_port, device_path)
+    # Hub 1 — ports 3, 4
+    ('near_rgb_left_side',   'left_side',    0, 5557, f'/dev/v4l/by-path/{BY_PATH}:4.1.3:1.0-video-index0'),
+    ('near_rgb_left_front',  'left_front',   1, 5558, f'/dev/v4l/by-path/{BY_PATH}:4.1.4:1.0-video-index0'),
+    # Hub 2 — ports 2, 3, 4
+    ('near_rgb_right_side',  'right_side',   2, 5559, f'/dev/v4l/by-path/{BY_PATH}:4.2.2:1.0-video-index0'),
+    ('near_rgb_right_front', 'right_front',  3, 5560, f'/dev/v4l/by-path/{BY_PATH}:4.2.3:1.0-video-index0'),
+    ('near_rgb_back_rear',   'back_rear',    4, 5561, f'/dev/v4l/by-path/{BY_PATH}:4.2.4:1.0-video-index0'),
 ]
+
+ORBBEC_RGB_PATH   = f'/dev/v4l/by-path/{BY_PATH}:4.1.2.1:1.0-video-index0'
+ORBBEC_DEPTH_PATH = f'/dev/v4l/by-path/{BY_PATH}:4.1.2.1:1.0-video-index1'
 
 
 def generate_launch_description():
     use_usb_bridge_arg = DeclareLaunchArgument(
         'use_usb_bridge',
-        default_value='true',
+        default_value='false',
         description='Use USB bridge for Mac development (true/false)',
     )
     enable_depth_estimation_arg = DeclareLaunchArgument(
@@ -39,6 +53,7 @@ def generate_launch_description():
 
     nodes = [
         use_usb_bridge_arg,
+        enable_depth_estimation_arg,
         LogInfo(msg='Starting perception subsystem'),
     ]
 
@@ -54,6 +69,10 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(
                     os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
                 ),
+                launch_arguments={
+                    'color_device_path': ORBBEC_RGB_PATH,
+                    'depth_device_path': ORBBEC_DEPTH_PATH,
+                }.items(),
                 condition=UnlessCondition(use_usb_bridge),
             )
         )
@@ -68,6 +87,10 @@ def generate_launch_description():
             name='astra_depth_node',
             output='screen',
             condition=UnlessCondition(use_usb_bridge),
+            parameters=[{
+                'rgb_device_path':   ORBBEC_RGB_PATH,
+                'depth_device_path': ORBBEC_DEPTH_PATH,
+            }],
             remappings=[
                 ('depth_camera/depth', 'perception/camera/depth_camera/depth/frame'),
                 ('depth_camera/color', 'perception/camera/depth_camera/rgb/frame'),
