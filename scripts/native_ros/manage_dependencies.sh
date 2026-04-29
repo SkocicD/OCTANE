@@ -50,7 +50,7 @@ list_dependencies() {
     echo "ROS packages: ${ROS_PACKAGES}"
     echo ""
     echo "External packages in src/external_pkgs/:"
-    ls -la /media/csulunabotics/SSD/OCTANE/workspace/src/external_pkgs/
+    ls -la /home/csulunabotics/OCTANE/workspace/src/external_pkgs/
 }
 
 # Parse command line arguments

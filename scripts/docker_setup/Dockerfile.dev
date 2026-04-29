@@ -5,7 +5,10 @@
 FROM octane-deps:latest
 
 # Add development tools
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     build-essential \
     gdb \
     valgrind \

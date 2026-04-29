@@ -3,6 +3,21 @@
 # Script to build Docker images with proper layering strategy
 echo "Building Docker images with layering strategy..."
 
+# Retry a docker build command up to MAX_RETRIES times on failure
+MAX_RETRIES=3
+retry_build() {
+    local attempt=1
+    until "$@"; do
+        if [ $attempt -ge $MAX_RETRIES ]; then
+            echo "ERROR: Command failed after $MAX_RETRIES attempts: $*"
+            return 1
+        fi
+        echo "Build failed (attempt $attempt/$MAX_RETRIES). Retrying in 10s..."
+        attempt=$((attempt + 1))
+        sleep 10
+    done
+}
+
 # Function to check if base image exists
 check_base_image() {
     echo "Checking if NVIDIA Isaac ROS base image exists locally..."
@@ -18,7 +33,7 @@ check_base_image() {
 # Function to pull base image if needed
 pull_base_image() {
     echo "Authenticating with NVIDIA NGC..."
-    /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/auth_ngc.sh
+    /home/csulunabotics/OCTANE/scripts/docker_setup/auth_ngc.sh
 
     echo "Pulling NVIDIA Isaac ROS base image..."
     docker pull nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos
@@ -44,7 +59,7 @@ build_layered_images() {
 
     # Build the dependencies layer first
     echo "Building dependencies layer..."
-    docker build -t octane-deps:latest -f Dockerfile.layers --target dependencies .
+    retry_build docker build -t octane-deps:latest -f Dockerfile.layers --target dependencies .
 
     if [ $? -eq 0 ]; then
         echo "Successfully built dependencies layer"
@@ -55,7 +70,7 @@ build_layered_images() {
 
     # Build the application layer
     echo "Building application layer..."
-    docker build -t octane-app:latest -f Dockerfile.layers --target application .
+    retry_build docker build -t octane-app:latest -f Dockerfile.layers --target application .
 
     if [ $? -eq 0 ]; then
         echo "Successfully built application layer"

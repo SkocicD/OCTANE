@@ -3,7 +3,7 @@
 
 set -e
 
-WORKSPACE_BASE="/media/csulunabotics/SSD/OCTANE/workspace"
+WORKSPACE_BASE="/home/csulunabotics/OCTANE/workspace"
 EPHEMERAL_WORKSPACE="/tmp/octane_workspace_$(date +%s)_$$"
 
 # Create ephemeral workspace

@@ -4,11 +4,19 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=America/New_York
 
 # Install essential packages
-RUN apt update && apt install -y python3-colcon-common-extensions git
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    python3-colcon-common-extensions git
 WORKDIR /workspace
 
 # Install Orbbec SDK dependencies
-RUN apt update && apt install -y libusb-1.0-0-dev
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    libusb-1.0-0-dev
 
 # Clone and build Orbbec SDK
 RUN cd /workspace && \
@@ -28,7 +36,10 @@ RUN cd /workspace && \
 RUN rm -rf /workspace/build/* 2>/dev/null || true
 
 # Install comprehensive ROS dependencies for external packages
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     ros-jazzy-desktop \
     ros-jazzy-camera-info-manager \
     ros-jazzy-cv-bridge \
@@ -50,7 +61,10 @@ RUN mkdir -p src/external_pkgs && \
     git clone --depth 1 https://github.com/ByteDance-Seed/Depth-Anything-3.git depth-anything-3
 
 # Install Python dependencies for depth-anything-3 (excluding pycolmap - no aarch64 wheel)
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     python3-pip \
     python3-venv \
     python3-numpy \

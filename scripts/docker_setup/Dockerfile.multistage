@@ -8,10 +8,17 @@ ARG BUILD_TYPE=minimal
 FROM nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos
 
 # Install essential system dependencies (always needed)
-RUN apt update && apt install -y python3-colcon-common-extensions git
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    python3-colcon-common-extensions git
 
 # Install core ROS dependencies
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     ros-jazzy-camera-info-manager \
     ros-jazzy-cv-bridge \
     ros-jazzy-image-publisher \
@@ -19,7 +26,10 @@ RUN apt update && apt install -y \
 
 # Install full dependencies (conditional)
 RUN if [ "$BUILD_TYPE" = "full" ]; then \
-    apt update && apt install -y \
+    apt-get update && apt-get install -y --fix-missing \
+    -o Acquire::Retries=5 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     ros-jazzy-desktop \
     libuvc-dev \
     libgoogle-glog-dev \

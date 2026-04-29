@@ -7,15 +7,15 @@ echo "=== OCTANE Docker Setup with Layered Approach ==="
 
 # Step 1: Authenticate with NVIDIA NGC
 echo "Step 1: Authenticating with NVIDIA NGC..."
-/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/auth_ngc.sh
+/home/csulunabotics/OCTANE/scripts/docker_setup/auth_ngc.sh
 
 # Step 2: Pull and preserve base image
 echo "Step 2: Preserving NVIDIA Isaac ROS base image..."
-/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/manage_base_image.sh --preserve
+/home/csulunabotics/OCTANE/scripts/docker_setup/manage_base_image.sh --preserve
 
 # Step 3: Build the application layer
 echo "Step 3: Building application image..."
-/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/build_layered.sh --layered
+/home/csulunabotics/OCTANE/scripts/docker_setup/build_layered.sh --layered
 
 echo "=== Setup Complete ==="
 echo "Docker environment is now configured with layered approach"

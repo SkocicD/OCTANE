@@ -7,7 +7,7 @@ Your Docker environment is now configured with a layered approach using NVIDIA's
 ## Directory Structure
 
 ```
-/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/
+/home/csulunabotics/OCTANE/scripts/docker_setup/
 ├── Dockerfile              # Main application Dockerfile
 ├── Dockerfile.layers       # Multi-stage Dockerfile for layered builds
 ├── Dockerfile.multistage   # Alternative multi-stage Dockerfile with build args

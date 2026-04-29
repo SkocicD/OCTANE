@@ -14,7 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Fix the workspace root to point to the actual workspace directory
-WORKSPACE_ROOT="/media/csulunabotics/SSD/OCTANE/workspace"
+WORKSPACE_ROOT="/home/csulunabotics/OCTANE/workspace"
 
 echo "=== Building Octane System ==="
 echo "Workspace: ${WORKSPACE_ROOT}"

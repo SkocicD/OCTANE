@@ -10,7 +10,7 @@ preserve_base_image() {
     # Pull the base image if not present
     if ! docker image inspect nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos >/dev/null 2>&1; then
         echo "Pulling NVIDIA Isaac ROS base image..."
-        /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/auth_ngc.sh
+        /home/csulunabotics/OCTANE/scripts/docker_setup/auth_ngc.sh
         docker pull nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos
     fi
 

@@ -13,11 +13,26 @@
 
 set -e
 
+# Retry a command up to MAX_RETRIES times on failure (useful for large network downloads)
+MAX_RETRIES=3
+retry_build() {
+    local attempt=1
+    until "$@"; do
+        if [ $attempt -ge $MAX_RETRIES ]; then
+            echo "ERROR: Command failed after $MAX_RETRIES attempts: $*"
+            return 1
+        fi
+        echo "Build failed (attempt $attempt/$MAX_RETRIES). Retrying in 10s..."
+        attempt=$((attempt + 1))
+        sleep 10
+    done
+}
+
 # Check if we're in the correct directory (should be project root)
 if [ ! -d "scripts" ] || [ ! -d "workspace" ]; then
     echo "ERROR: This script must be run from the project root directory!"
     echo "Current directory: $(pwd)"
-    echo "Please run from /media/csulunabotics/SSD/OCTANE"
+    echo "Please run from /home/csulunabotics/OCTANE"
     exit 1
 fi
 
@@ -68,7 +83,7 @@ if [ "$CLEAN_MODE" = true ]; then
     # Remove old build images to prevent clutter
     docker rmi octane-deps:latest octane-app:latest 2>/dev/null || true
     # Clean workspace build cache
-    /media/csulunabotics/SSD/OCTANE/scripts/docker_setup/clean_workspace_build.sh
+    /home/csulunabotics/OCTANE/scripts/docker_setup/clean_workspace_build.sh
     # Remove any existing containers with the same name
     docker rm -f octane_container 2>/dev/null || true
     # Remove build volumes
@@ -78,21 +93,21 @@ fi
 # Build dependencies layer if requested
 if [ "$BUILD_DEPS" = true ]; then
     echo "Building dependencies layer..."
-    docker build -t octane-deps:latest -f scripts/docker_setup/Dockerfile.layers --target dependencies .
+    retry_build docker build -t octane-deps:latest -f scripts/docker_setup/Dockerfile.layers --target dependencies .
     echo "Dependencies layer built successfully!"
 fi
 
 # Build application layer if requested
 if [ "$BUILD_APP" = true ]; then
     echo "Building application layer..."
-    docker build -t octane-app:latest -f scripts/docker_setup/Dockerfile.layers --target application .
+    retry_build docker build -t octane-app:latest -f scripts/docker_setup/Dockerfile.layers --target application .
     echo "Application layer built successfully!"
 fi
 
 # If building both layers, build the full application
 if [ "$BUILD_DEPS" = true ] && [ "$BUILD_APP" = true ]; then
     echo "Building full application..."
-    docker build -t octane-app:latest -f scripts/docker_setup/Dockerfile.layers .
+    retry_build docker build -t octane-app:latest -f scripts/docker_setup/Dockerfile.layers .
     echo "Full application built successfully!"
 fi
 

@@ -44,7 +44,7 @@ if [ "$#" -gt 0 ]; then
 fi
 
 # Create ephemeral workspace for this container
-EPHEMERAL_WORKSPACE=$(/media/csulunabotics/SSD/OCTANE/scripts/docker_setup/workspace_manager.sh create)
+EPHEMERAL_WORKSPACE=$(/home/csulunabotics/OCTANE/scripts/docker_setup/workspace_manager.sh create)
 echo "Using ephemeral workspace: $EPHEMERAL_WORKSPACE"
 
 # Run container with the ephemeral workspace
