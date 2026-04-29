@@ -1,10 +1,14 @@
 #!/bin/bash
 
-# Clean build artifacts from workspace
+# Clean build artifacts from the OCTANE workspace.
+# External packages (isaac_ros, nvblox, orbbec) are NEVER wiped unless you
+# explicitly pass --external and confirm.
+#
 # Usage:
-#   ./clean_workspace.sh           - Clean only octane packages
-#   ./clean_workspace.sh --all     - Clean everything including orbbec
-#   ./clean_workspace.sh --orbbec  - Clean only orbbec packages
+#   ./clean_workspace.sh              - Clean only octane_* packages
+#   ./clean_workspace.sh --orbbec     - Clean only orbbec packages
+#   ./clean_workspace.sh --all        - Clean octane + orbbec (keeps external)
+#   ./clean_workspace.sh --external   - Also wipe external packages (asks confirmation)
 
 set -e
 
@@ -17,126 +21,96 @@ echo ""
 
 cd "${WORKSPACE_ROOT}"
 
-# Parse command line arguments
-CLEAN_MODE="octane"
-if [ "$1" == "--all" ]; then
-    CLEAN_MODE="all"
-    echo "[MODE] Cleaning all packages"
-elif [ "$1" == "--orbbec" ]; then
-    CLEAN_MODE="orbbec"
-    echo "[MODE] Cleaning orbbec packages only"
-else
-    echo "[MODE] Cleaning octane packages only"
-fi
-echo ""
+OCTANE_PKGS=(octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane)
+ORBBEC_PKGS=(astra_camera astra_camera_msgs)
 
-# Clean based on mode
-if [ "$CLEAN_MODE" == "all" ]; then
-    # Remove everything
-    if [ -d "build" ]; then
-        echo "Removing build/"
-        rm -rf build
-    fi
+remove_pkg() {
+    local name="$1"
+    for dir in "build/${name}" "install/${name}"; do
+        if [ -d "${dir}" ]; then
+            echo "  rm -rf ${dir}"
+            rm -rf "${dir}"
+        fi
+    done
+}
 
-    if [ -d "install" ]; then
-        echo "Removing install/"
-        rm -rf install
-    fi
+clean_octane() {
+    echo "[CLEAN] Octane packages"
+    for pkg in "${OCTANE_PKGS[@]}"; do remove_pkg "$pkg"; done
+}
 
-    if [ -d "log" ]; then
-        echo "Removing log/"
-        rm -rf log
-    fi
+clean_orbbec() {
+    echo "[CLEAN] Orbbec packages"
+    for pkg in "${ORBBEC_PKGS[@]}"; do remove_pkg "$pkg"; done
+}
 
-    if [ -d "src/build" ]; then
-        echo "Removing src/build/"
-        rm -rf src/build
-    fi
+clean_external() {
+    echo "[CLEAN] External packages (build/ install/ log/ minus octane+orbbec)"
 
-elif [ "$CLEAN_MODE" == "orbbec" ]; then
-    # Remove only orbbec packages
-    if [ -d "build/orbbec_camera_msgs" ]; then
-        echo "Removing build/orbbec_camera_msgs/"
-        rm -rf build/orbbec_camera_msgs
-    fi
+    # Determine which dirs to keep
+    local keep=("${OCTANE_PKGS[@]}" "${ORBBEC_PKGS[@]}")
 
-    if [ -d "build/orbbec_camera" ]; then
-        echo "Removing build/orbbec_camera/"
-        rm -rf build/orbbec_camera
-    fi
+    for top in build install; do
+        [ -d "${top}" ] || continue
+        for entry in "${top}"/*/; do
+            pkg=$(basename "$entry")
+            protected=false
+            for k in "${keep[@]}"; do
+                [ "$pkg" = "$k" ] && { protected=true; break; }
+            done
+            if ! $protected; then
+                echo "  rm -rf ${top}/${pkg}"
+                rm -rf "${top}/${pkg}"
+            fi
+        done
+    done
 
-    if [ -d "install/orbbec_camera_msgs" ]; then
-        echo "Removing install/orbbec_camera_msgs/"
-        rm -rf install/orbbec_camera_msgs
-    fi
+    # log is always safe to wipe
+    [ -d log ] && { echo "  rm -rf log/"; rm -rf log; }
+}
 
-    if [ -d "install/orbbec_camera" ]; then
-        echo "Removing install/orbbec_camera/"
-        rm -rf install/orbbec_camera
-    fi
+case "${1:-}" in
+    --octane|"")
+        echo "[MODE] Octane packages only (external preserved)"
+        echo ""
+        clean_octane
+        ;;
+    --orbbec)
+        echo "[MODE] Orbbec packages only (external preserved)"
+        echo ""
+        clean_orbbec
+        ;;
+    --all)
+        echo "[MODE] Octane + orbbec (external preserved)"
+        echo ""
+        clean_octane
+        clean_orbbec
+        ;;
+    --external)
+        echo "[MODE] Full clean including external packages"
+        echo ""
+        echo "WARNING: This will wipe isaac_ros, nvblox, orbbec, and all other"
+        echo "         external packages. They will need to be rebuilt (takes ~30 min)."
+        echo ""
+        read -rp "Are you sure? [y/N] " confirm
+        if [[ "${confirm,,}" != "y" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+        echo ""
+        clean_octane
+        clean_orbbec
+        clean_external
+        ;;
+    *)
+        echo "Unknown option: $1"
+        echo "Usage: $0 [--octane|--orbbec|--all|--external]"
+        exit 1
+        ;;
+esac
 
-else
-    # Remove only octane packages
-    if [ -d "build/octane_msgs" ]; then
-        echo "Removing build/octane_msgs/"
-        rm -rf build/octane_msgs
-    fi
-
-    if [ -d "build/octane_perception" ]; then
-        echo "Removing build/octane_perception/"
-        rm -rf build/octane_perception
-    fi
-
-    if [ -d "build/octane_mapping" ]; then
-        echo "Removing build/octane_mapping/"
-        rm -rf build/octane_mapping
-    fi
-
-    if [ -d "build/octane_supervisor" ]; then
-        echo "Removing build/octane_supervisor/"
-        rm -rf build/octane_supervisor
-    fi
-
-    if [ -d "build/octane_network" ]; then
-        echo "Removing build/octane_network/"
-        rm -rf build/octane_network
-    fi
-
-    if [ -d "build/octane" ]; then
-        echo "Removing build/octane/"
-        rm -rf build/octane
-    fi
-
-    if [ -d "install/octane_msgs" ]; then
-        echo "Removing install/octane_msgs/"
-        rm -rf install/octane_msgs
-    fi
-
-    if [ -d "install/octane_perception" ]; then
-        echo "Removing install/octane_perception/"
-        rm -rf install/octane_perception
-    fi
-
-    if [ -d "install/octane_mapping" ]; then
-        echo "Removing install/octane_mapping/"
-        rm -rf install/octane_mapping
-    fi
-
-    if [ -d "install/octane_supervisor" ]; then
-        echo "Removing install/octane_supervisor/"
-        rm -rf install/octane_supervisor
-    fi
-
-    if [ -d "install/octane_network" ]; then
-        echo "Removing install/octane_network/"
-        rm -rf install/octane_network
-    fi
-
-    if [ -d "install/octane" ]; then
-        echo "Removing install/octane/"
-        rm -rf install/octane
-    fi
-fi
+# Always clean log for octane/orbbec modes too (small, safe)
+[ -d log ] && rm -rf log
 
 echo ""
 echo "[OK] Workspace cleaned"
