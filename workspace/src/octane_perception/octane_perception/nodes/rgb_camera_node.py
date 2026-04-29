@@ -33,10 +33,10 @@ class RGBCameraNode(Node):
         # CV bridge init
         self.bridge = CvBridge()
 
-        # Open camera
-        self.capture = cv2.VideoCapture(camera_id)
+        # Open camera — force V4L2 to avoid GStreamer backend on Jetson
+        self.capture = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
         if not self.capture.isOpened():
-            self.get_logger().error(f'Failed to open camera {camera_id}')
+            self.get_logger().error(f'Failed to open camera: {camera_id}')
             return
 
         # Set camera properties
@@ -50,6 +50,8 @@ class RGBCameraNode(Node):
         self.camera_info = self._build_camera_info(width, height, fx, fy, cx, cy)
         self.camera_param = self._build_camera_param(width, height, fx, fy, cx, cy)
 
+        self._capture_ok = True  # tracks whether last read succeeded
+
         # Capture timer
         self.timer = self.create_timer(1.0 / frame_rate, self.capture_frame)
         self.get_logger().info(
@@ -60,17 +62,22 @@ class RGBCameraNode(Node):
     def capture_frame(self):
         ret, frame = self.capture.read()
         if not ret:
-            self.get_logger().warn('Failed to capture frame')
+            if self._capture_ok:
+                self.get_logger().warn(f'Camera {self.serial}: lost feed — will retry silently')
+                self._capture_ok = False
             return
+        if not self._capture_ok:
+            self.get_logger().info(f'Camera {self.serial}: feed restored')
+            self._capture_ok = True
 
         stamp = self.get_clock().now().to_msg()
 
         image_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
         image_msg.header.stamp = stamp
-        image_msg.header.frame_id = 'camera_link'
+        image_msg.header.frame_id = f'{self.serial}_frame'
 
         self.camera_info.header.stamp = stamp
-        self.camera_info.header.frame_id = 'camera_link'
+        self.camera_info.header.frame_id = f'{self.serial}_frame'
 
         msg = CameraFrame()
         msg.serial = self.serial
