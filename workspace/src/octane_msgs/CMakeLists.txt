@@ -10,6 +10,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CameraParam.msg"
   "msg/CameraOffset.msg"
   "msg/CameraFrame.msg"
+  "msg/DriveCommand.msg"
+  "msg/ActuatorCommand.msg"
   DEPENDENCIES sensor_msgs geometry_msgs
 )
 

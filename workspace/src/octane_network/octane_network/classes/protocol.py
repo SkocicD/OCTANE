@@ -40,10 +40,11 @@ HEADER_SIZE = 3  # magic + type + length
 CRC_SIZE = 1  # 8-bit CRC (good enough for short messages)
 
 # Message types (ASCII for debugging)
-TYPE_TELEMETRY = ord('T')  # 0x54
-TYPE_COMMAND = ord('C')    # 0x43
-TYPE_ACK = ord('A')        # 0x41
-TYPE_FAULT = ord('F')      # 0x46
+TYPE_TELEMETRY = ord('T')     # 0x54
+TYPE_COMMAND = ord('C')       # 0x43
+TYPE_ACK = ord('A')           # 0x41
+TYPE_FAULT = ord('F')         # 0x46
+TYPE_MANIPULATOR = ord('M')   # 0x4D
 
 # Mode/state codes
 MODE_STANDBY = b'0'
@@ -212,6 +213,10 @@ def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
                 idx += 1
 
         return result
+
+    elif msg_type == TYPE_MANIPULATOR:
+        if len(payload) >= 1:
+            return {'type': 'manipulator', 'bitfield': payload[0]}
 
     elif msg_type == TYPE_COMMAND:
         if len(payload) >= 2:

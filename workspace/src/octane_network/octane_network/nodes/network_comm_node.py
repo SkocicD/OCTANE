@@ -11,14 +11,14 @@ Implementation: workspace/src/octane_network/octane_network/protocol.py
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import String, Empty
+from std_msgs.msg import String, Empty, UInt8
 import socket
 import threading
 from typing import Optional, List
 
 from octane_network.classes.protocol import (
     encode_command, encode_telemetry, encode_ack, encode_fault,
-    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT
+    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT, TYPE_MANIPULATOR
 )
 
 
@@ -51,6 +51,7 @@ class NetworkCommNode(Node):
         # ROS2 publishers
         self.mode_command_pub = self.create_publisher(String, '/supervisor/mode_command', qos)
         self.fault_reset_pub = self.create_publisher(Empty, '/supervisor/fault_reset', qos)
+        self.key_state_pub = self.create_publisher(UInt8, '/manual_ctrl/key_state', qos)
 
         # State
         self.current_state = 'STANDBY'
@@ -179,7 +180,12 @@ class NetworkCommNode(Node):
         """Process decoded binary message."""
         msg_type = msg.get('type')
 
-        if msg_type == 'command':
+        if msg_type == 'manipulator':
+            key_msg = UInt8()
+            key_msg.data = msg.get('bitfield', 0)
+            self.key_state_pub.publish(key_msg)
+
+        elif msg_type == 'command':
             mode = msg.get('mode', '')
             estop = msg.get('estop', False)
 
