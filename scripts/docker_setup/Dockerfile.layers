@@ -4,17 +4,8 @@
 # Stage 1: Dependencies layer (infrequently changed)
 FROM nvcr.io/nvidia/isaac/ros:isaac_ros_054e16b5c3a328b621af47d26009c348-arm64-fastos AS dependencies
 
-# Install CUDA repository and tools
-RUN apt-get update && apt-get install -y --fix-missing \
-    -o Acquire::Retries=5 \
-    -o Acquire::http::Timeout=30 \
-    -o Acquire::https::Timeout=30 \
-    software-properties-common wget
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/sbsa/cuda-keyring_1.0-1_all.deb && \
-    dpkg -i cuda-keyring_1.0-1_all.deb
-RUN apt-get update
-
 # Install system dependencies that rarely change
+# Note: base image already includes cuda-keyring 1.1 and the NVIDIA apt repo — no keyring setup needed
 RUN apt-get update && apt-get install -y --fix-missing \
     -o Acquire::Retries=5 \
     -o Acquire::http::Timeout=30 \
