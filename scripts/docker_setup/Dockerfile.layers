@@ -13,10 +13,12 @@ RUN apt-get update && apt-get install -y --fix-missing \
     python3-colcon-common-extensions \
     git \
     libusb-1.0-0-dev \
-    cuda-toolkit-12-6 \
     cuda-toolkit-config-common \
     cuda-toolkit-12-config-common \
     cuda-toolkit-12-6-config-common \
+    cuda-libraries-12-6 \
+    cuda-libraries-dev-12-6 \
+    cuda-compiler-12-6 \
     libnpp-12-6 \
     libnvjpeg-12-6 \
     libnpp-dev-12-6 \
