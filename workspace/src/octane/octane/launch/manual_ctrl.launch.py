@@ -2,8 +2,10 @@
 """Launch file for OCTANE manual control nodes.
 
 Launches:
-  - manual_drive_node: interprets WASD keys -> left/right drive velocity
+  - manual_drive_node:    interprets WASD keys -> left/right drive velocity
   - manual_actuator_node: interprets arrow keys -> arm/bucket relay commands
+  - can_drive_node:       drive velocity -> CAN bus (TODO: hw not implemented)
+  - gpio_actuator_node:   actuator command -> GPIO relays (TODO: hw not implemented)
 """
 
 from launch import LaunchDescription
@@ -44,9 +46,25 @@ def generate_launch_description():
         output='screen',
     )
 
+    can_drive_node = Node(
+        package='octane_can',
+        executable='can_drive_node',
+        name='can_drive_node',
+        output='screen',
+    )
+
+    gpio_actuator_node = Node(
+        package='octane_gpio',
+        executable='gpio_actuator_node',
+        name='gpio_actuator_node',
+        output='screen',
+    )
+
     return LaunchDescription([
         throttle_scale_arg,
         turn_scale_arg,
         drive_node,
         actuator_node,
+        can_drive_node,
+        gpio_actuator_node,
     ])
