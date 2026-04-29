@@ -14,12 +14,58 @@
 
 set -e
 
-WORKSPACE_ROOT="/home/csulunabotics/OCTANE/workspace"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+WORKSPACE_ROOT="${SCRIPT_DIR}/workspace"
 EXT_PKGS="${WORKSPACE_ROOT}/src/external_pkgs"
 
-echo "=== Building Octane System ==="
-echo "Workspace: ${WORKSPACE_ROOT}"
-echo ""
+# Ensure CUDA tools are on PATH so CMake's find_package(CUDAToolkit) works
+CUDA_HOME="/usr/local/cuda"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+
+# Redirect pip user installs to SSD so PyTorch/DA3 don't fill internal storage
+SSD_PYTHON="/media/csulunabotics/SSD1/python"
+mkdir -p "${SSD_PYTHON}"
+export PYTHONUSERBASE="${SSD_PYTHON}"
+export PATH="${SSD_PYTHON}/bin:${PATH}"
+
+# Redirect CUDA compiler temp files to SSD — nvcc can write GBs to /tmp during large builds
+# Also set TEMP and TMP for other build systems that might check these
+export TMPDIR="/media/csulunabotics/SSD1/tmp"
+export TEMP="${TMPDIR}"
+export TMP="${TMPDIR}"
+mkdir -p "${TMPDIR}"
+
+# Set Java temporary directory if Java-based builds are encountered
+export _JAVA_OPTIONS="-Djava.io.tmpdir=${TMPDIR}"
+
+# Redirect ROS logs to SSD to prevent filling internal storage
+export ROS_LOG_DIR="/media/csulunabotics/SSD1/ros/log"
+mkdir -p "${ROS_LOG_DIR}"
+
+# Redirect pip cache to SSD
+export PIP_CACHE_DIR="/media/csulunabotics/SSD1/pip/cache"
+mkdir -p "${PIP_CACHE_DIR}"
+
+# Set ISAAC ROS workspace to SSD to prevent asset downloads from using internal storage
+export ISAAC_ROS_WS="${WORKSPACE_ROOT}/isaac_ros_assets"
+ISAAC_ROS_ASSETS_DIR="/media/csulunabotics/SSD1/OCTANE/workspace/isaac_ros_assets"
+mkdir -p "${ISAAC_ROS_ASSETS_DIR}"
+# Ensure the directory exists
+mkdir -p "${ISAAC_ROS_ASSETS_DIR}/isaac_ros_nvblox"
+
+# Additional environment variables to ensure all temporary files go to SSD
+export XDG_CACHE_HOME="/media/csulunabotics/SSD1/cache"
+mkdir -p "${XDG_CACHE_HOME}"
+
+# Set CUDA cache directory to SSD
+export CUDA_CACHE_PATH="/media/csulunabotics/SSD1/cuda/cache"
+
+mkdir -p "${CUDA_CACHE_PATH}"
+
+# Set npm cache directory to SSD (if npm is used)
+export npm_config_cache="/media/csulunabotics/SSD1/npm/cache"
+mkdir -p "${npm_config_cache}"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 ext_installed() {
@@ -59,11 +105,19 @@ APT_DEPS=(
     python3-colcon-common-extensions
     python3-rosdep
     python3-vcstool
+    git-lfs
     libusb-1.0-0-dev
     libuvc-dev
     libgoogle-glog-dev
     nlohmann-json3-dev
     libeigen3-dev
+    cuda-nvtx-12-6
+    ros-${ROS_DISTRO}-camera-info-manager
+    ros-${ROS_DISTRO}-image-transport
+    ros-${ROS_DISTRO}-image-transport-plugins
+    ros-${ROS_DISTRO}-image-publisher
+    ros-${ROS_DISTRO}-diagnostic-updater
+    ros-${ROS_DISTRO}-cv-bridge
 )
 
 MISSING_APT=()
@@ -74,6 +128,7 @@ done
 if [ ${#MISSING_APT[@]} -gt 0 ]; then
     echo "[SETUP] Installing missing apt packages: ${MISSING_APT[*]}"
     sudo apt update -qq && sudo apt install -y "${MISSING_APT[@]}"
+    sudo apt-get clean  # free downloaded package cache from internal storage
 else
     echo "[OK] apt dependencies satisfied"
 fi
@@ -85,40 +140,25 @@ rosdep update --rosdistro "${ROS_DISTRO}" -q 2>/dev/null && \
     echo "[OK] rosdep updated" || \
     echo "[WARN] rosdep update failed (network?) — skipping"
 
-# ── 4. PyTorch for Jetson ─────────────────────────────────────────────────────
-if ! python3 -c "import torch" 2>/dev/null; then
-    echo "[SETUP] Installing PyTorch for Jetson (JetPack 6.2 / L4T R36)..."
-    pip3 install --no-cache \
-        https://developer.download.nvidia.com/compute/redist/jp/v62/pytorch/torch-2.5.0a0+872d972e41.nv24.08.17622132-cp310-cp310-linux_aarch64.whl
-    echo "[OK] PyTorch installed"
-else
-    echo "[OK] PyTorch already installed"
-fi
-
-# ── 5. Depth Anything 3 Python package ────────────────────────────────────────
-if ! python3 -c "from depth_anything_3.api import DepthAnything3" 2>/dev/null; then
-    echo "[SETUP] Installing depth_anything_3..."
-    pip3 install -e "${EXT_PKGS}/depth-anything-3" --quiet
-    echo "[OK] depth_anything_3 installed"
-else
-    echo "[OK] depth_anything_3 already installed"
-fi
-
-# ── 6. External repos ──────────────────────────────────────────────────────────
+# ── 4. External repos (clone before pip installs that depend on them) ─────────
 echo "[CHECK] Verifying external repos..."
 
 clone_if_missing() {
-    local dir="$1" url="$2" branch="${3:-main}"
+    local dir="$1" url="$2" branch="${3:-}"
     if [ ! -d "${EXT_PKGS}/${dir}/.git" ]; then
         echo "[CLONE] ${dir}..."
-        git clone --depth 1 -b "$branch" "$url" "${EXT_PKGS}/${dir}"
+        if [ -n "$branch" ]; then
+            git clone --depth 1 -b "$branch" "$url" "${EXT_PKGS}/${dir}"
+        else
+            git clone --depth 1 "$url" "${EXT_PKGS}/${dir}"
+        fi
     else
         echo "[OK]    ${dir}"
     fi
 }
 
 mkdir -p "${EXT_PKGS}"
-clone_if_missing ros2_astra_camera https://github.com/orbbec/ros2_astra_camera.git main
+clone_if_missing ros2_astra_camera https://github.com/orbbec/ros2_astra_camera.git
 clone_if_missing depth-anything-3  https://github.com/ByteDance-Seed/Depth-Anything-3.git main
 
 if [ -f "${WORKSPACE_ROOT}/isaac_ros.repos" ]; then
@@ -134,6 +174,42 @@ if [ -f "${WORKSPACE_ROOT}/isaac_ros.repos" ]; then
     fi
 fi
 
+# Pull Git LFS objects for all external repos (pre-built .so files are stored in LFS)
+git lfs install --skip-repo 2>/dev/null || true
+for repo in isaac_ros_common isaac_ros_nitros isaac_ros_image_pipeline isaac_ros_nvblox; do
+    REPO_PATH="${EXT_PKGS}/${repo}"
+    if [ -d "${REPO_PATH}/.git" ]; then
+        LFS_STUBS=$(find "${REPO_PATH}" -name "*.so" -exec file {} \; 2>/dev/null | grep -c "ASCII text" || true)
+        if [ "${LFS_STUBS}" -gt 0 ]; then
+            echo "[LFS] Pulling ${LFS_STUBS} binary objects for ${repo}..."
+            git -C "${REPO_PATH}" lfs pull
+        else
+            echo "[OK]  LFS objects already present: ${repo}"
+        fi
+    fi
+done
+
+# Patch VPI 2.x API → VPI 4.x: pBase renamed to data, offsetBytes removed
+for f in \
+    "${EXT_PKGS}/isaac_ros_nitros/isaac_ros_nitros_type/isaac_ros_nitros_image_type/src/nitros_image.cpp" \
+    "${EXT_PKGS}/isaac_ros_image_pipeline/isaac_ros_gxf_extensions/gxf_isaac_sgm/gxf/gems/vpi/image_wrapper.cpp" \
+    "${EXT_PKGS}/isaac_ros_image_pipeline/isaac_ros_gxf_extensions/gxf_isaac_tensorops/gxf/extensions/tensorops/core/VPITensorOperators.cpp" \
+    "${EXT_PKGS}/isaac_ros_image_pipeline/isaac_ros_gxf_extensions/gxf_isaac_tensorops/gxf/extensions/tensorops/core/VPITensorOperators.h" \
+    "${EXT_PKGS}/isaac_ros_image_pipeline/isaac_ros_gxf_extensions/gxf_isaac_image_flip/gxf/image_flip.cpp"; do
+    if [ -f "$f" ] && grep -q "\.pBase" "$f"; then
+        sed -i 's/\.pBase/.data/g' "$f"
+        sed -i '/\.offsetBytes\s*=/d' "$f"
+        echo "[PATCH] VPI4 API: $(basename $f)"
+    fi
+done
+
+# Patch isaac_ros_nitros for rclcpp API change (add_to_wait_set takes pointer, not reference)
+NITROS_PUB="${EXT_PKGS}/isaac_ros_nitros/isaac_ros_nitros/src/nitros_publisher.cpp"
+if [ -f "${NITROS_PUB}" ] && grep -q "add_to_wait_set(\*wait_set)" "${NITROS_PUB}"; then
+    sed -i 's/guard_condition_.add_to_wait_set(\*wait_set)/guard_condition_.add_to_wait_set(wait_set)/' "${NITROS_PUB}"
+    echo "[PATCH] isaac_ros_nitros: fixed add_to_wait_set dereference for humble rclcpp"
+fi
+
 # Init nvblox_core submodule if missing
 NVBLOX_CORE="${EXT_PKGS}/isaac_ros_nvblox/nvblox_ros/nvblox_core/CMakeLists.txt"
 if [ ! -f "$NVBLOX_CORE" ] && [ -d "${EXT_PKGS}/isaac_ros_nvblox/nvblox_ros" ]; then
@@ -143,7 +219,60 @@ if [ ! -f "$NVBLOX_CORE" ] && [ -d "${EXT_PKGS}/isaac_ros_nvblox/nvblox_ros" ]; 
     cd "${WORKSPACE_ROOT}"
 fi
 
-# ── 7. Stale cache check ───────────────────────────────────────────────────────
+# ── 5. PyTorch for Jetson ─────────────────────────────────────────────────────
+# Wheels are Jetson-specific (JetPack 6.x / L4T R36, cp310, aarch64).
+# If the CDN wheel can't be found, the build stops — install manually and re-run.
+if ! pip3 show torch &>/dev/null; then
+    echo "[SETUP] Installing PyTorch for Jetson (JetPack 6.2 / L4T R36)..."
+    # JetPack 6.2 CDN path is empty — wheels ship under v61 (L4T R36, same ABI)
+    for JP_VER in v62 v61 v60; do
+        TORCH_BASE="https://developer.download.nvidia.com/compute/redist/jp/${JP_VER}/pytorch"
+        TORCH_WHEEL=$(curl -s "${TORCH_BASE}/" 2>/dev/null \
+            | grep -o 'torch[^"<> ]*cp310[^"<> ]*aarch64\.whl' | sort -V | tail -1)
+        [ -n "$TORCH_WHEEL" ] && break
+    done
+    if [ -z "$TORCH_WHEEL" ]; then
+        echo "[ERROR] PyTorch wheel not discoverable from NVIDIA CDN."
+        echo "        Install manually then re-run: https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048"
+        exit 1
+    fi
+    pip3 install --no-cache "${TORCH_BASE}/${TORCH_WHEEL}"
+    echo "[OK] PyTorch installed"
+else
+    echo "[OK] PyTorch already installed"
+fi
+
+# ── 6. Depth Anything 3 Python package ────────────────────────────────────────
+# pycolmap has no aarch64 wheel — install without it (only needed for SfM, not inference).
+if ! pip3 show depth-anything-3 &>/dev/null; then
+    echo "[SETUP] Installing depth_anything_3..."
+    pip3 install -e "${EXT_PKGS}/depth-anything-3" --no-deps
+    # Install inference-only deps — timm is installed with --no-deps to prevent
+    # it pulling in standard PyPI torch and overwriting the JetPack-specific wheel.
+    pip3 install "numpy<2" pillow imageio safetensors einops omegaconf opencv-python-headless
+    pip3 install timm --no-deps
+    echo "[OK] depth_anything_3 installed"
+else
+    echo "[OK] depth_anything_3 already installed"
+fi
+
+# ── 7. rosdep install for external packages ───────────────────────────────────
+echo "[SETUP] Installing ROS deps for external packages via rosdep..."
+# Skip JetPack-native packages that rosdep can't resolve — they ship with JetPack
+ROSDEP_SKIP_KEYS=(
+    libnvvpi4 vpi4-dev cvcuda0-dev libucx0 tensorrt
+    libnvvpi3 libnvvpi2
+    posix_ipc nlohmann_json
+    python3-onnxscript-pip-shim
+    isaac_ros_peoplenet_models_install
+    ament_python
+)
+rosdep install --from-paths "${EXT_PKGS}" --ignore-src -r -y \
+    --rosdistro "${ROS_DISTRO}" \
+    --skip-keys="${ROSDEP_SKIP_KEYS[*]}" 2>&1 | grep -v "^#" || true
+echo "[OK] rosdep install done"
+
+# ── 8. Stale cache check ───────────────────────────────────────────────────────
 if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; then
     echo "[WARN] Stale build cache — wiping octane build artifacts..."
     for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network; do
@@ -151,14 +280,14 @@ if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; t
     done
 fi
 
-# ── 8. Build ───────────────────────────────────────────────────────────────────
+# ── 9. Build ───────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)
-EXT_COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DUSE_NATIVE_CUDA_ARCHITECTURE=1)
+EXT_COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DUSE_NVTX=OFF -DCMAKE_CUDA_ARCHITECTURES=87)
 
 # ── External packages: build once, skip if already installed ──────────────────
 build_external() {
@@ -169,7 +298,16 @@ build_external() {
 
     echo "[EXTERNAL] Building remaining external packages..."
     colcon build --base-paths "${EXT_PKGS}" \
-        --packages-skip isaac_ros_common "${EXT_COLCON_ARGS[@]}"
+        --packages-skip isaac_ros_common \
+        --packages-skip nvblox_image_padding nvblox_examples_bringup \
+            multi_realsense_emitter_synchronizer realsense_splitter semantic_label_conversion \
+            gxf_isaac_sgm gxf_isaac_image_flip gxf_isaac_tensorops gxf_isaac_camera_utils \
+            isaac_ros_vpi_utils isaac_ros_stereo_image_proc isaac_ros_depth_image_proc isaac_ros_image_proc \
+            custom_nitros_dnn_image_encoder isaac_ros_pynitros \
+            isaac_ros_image_pipeline \
+            custom_nitros_string custom_nitros_message_filter \
+            isaac_ros_nitros_topic_tools isaac_ros_nitros_bridge_ros2 \
+        "${EXT_COLCON_ARGS[@]}"
     source "${WORKSPACE_ROOT}/install/setup.bash" 2>/dev/null || true
     echo "[OK] External packages built"
 }
@@ -232,3 +370,13 @@ esac
 echo ""
 echo "[OK] Build complete"
 echo "Source the workspace: source ${WORKSPACE_ROOT}/install/setup.bash"
+
+# Patch cv_bridge includes to use .h instead of .hpp
+for f in \
+    "${EXT_PKGS}/isaac_ros_nvblox/nvblox_ros/include/nvblox_ros/conversions/image_conversions.hpp" \
+    "${EXT_PKGS}/isaac_ros_nvblox/nvblox_examples/nvblox_image_padding/include/nvblox_image_padding/image_padding_cropping_node.hpp"; do
+    if [ -f "$f" ] && grep -q "cv_bridge.hpp" "$f"; then
+        sed -i 's|#include <cv_bridge/cv_bridge.hpp>|#include <cv_bridge/cv_bridge.h>|g' "$f"
+        echo "[PATCH] cv_bridge: $(basename $f)"
+    fi
+done
