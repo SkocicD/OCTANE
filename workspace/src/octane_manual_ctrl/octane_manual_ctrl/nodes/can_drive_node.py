@@ -9,6 +9,8 @@ Motor layout (node IDs 0-5):
   Right side: 3=back-right, 4=mid-right, 5=front-right  (polarity flipped)
 """
 
+import time
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
@@ -45,7 +47,9 @@ class CANDriveNode(Node):
             for nid in ALL_IDS:
                 m = MotorController(nid, tx)
                 m.turn_on()
+                time.sleep(0.05)   # allow motor to complete NMT boot before SDO config
                 m.set_mode()
+                time.sleep(0.05)
                 self._motors.append(m)
             self._publish_status(f'OK — {len(self._motors)} motors initialised on nodes {ALL_IDS}')
             self.get_logger().info(f'CAN drive ready, motors {ALL_IDS}')
