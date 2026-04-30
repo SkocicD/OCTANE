@@ -62,6 +62,22 @@ ext_installed() {
     [ -d "${WORKSPACE_ROOT}/install/$1" ]
 }
 
+# Remove dist-info dirs that are missing METADATA — left behind by interrupted pip installs.
+clean_corrupted_pip() {
+    local site_pkgs="${SSD_PYTHON}/lib/python3.10/site-packages"
+    [ -d "$site_pkgs" ] || return 0
+    local removed=0
+    for dist_info in "${site_pkgs}"/*.dist-info; do
+        [ -d "$dist_info" ] || continue
+        if [ ! -f "${dist_info}/METADATA" ]; then
+            rm -rf "$dist_info"
+            removed=$((removed + 1))
+        fi
+    done
+    [ "$removed" -gt 0 ] && echo "[CLEANUP] Removed ${removed} corrupted pip dist-info dir(s)"
+}
+clean_corrupted_pip
+
 # ── 1. ROS 2 ──────────────────────────────────────────────────────────────────
 UBUNTU_CODENAME=$(lsb_release -sc 2>/dev/null || echo "jammy")
 case "$UBUNTU_CODENAME" in
@@ -212,21 +228,35 @@ fi
 # ── 5. PyTorch for Jetson ─────────────────────────────────────────────────────
 # Wheels are Jetson-specific (JetPack 6.x / L4T R36, cp310, aarch64).
 # If the CDN wheel can't be found, the build stops — install manually and re-run.
-if ! pip3 show torch &>/dev/null; then
+TORCH_WHEEL_CACHE="${SSD_CACHE}/pip/torch-jetson"
+mkdir -p "${TORCH_WHEEL_CACHE}"
+
+# Check against our own site-packages directly — pip3 show can miss PYTHONUSERBASE installs
+TORCH_DIST_INFO=$(find "${SSD_PYTHON}/lib" -maxdepth 4 -name "torch-*.dist-info" -type d 2>/dev/null | head -1)
+if [ -z "$TORCH_DIST_INFO" ] || [ ! -f "${TORCH_DIST_INFO}/METADATA" ]; then
     echo "[SETUP] Installing PyTorch for Jetson (JetPack 6.2 / L4T R36)..."
-    # JetPack 6.2 CDN path is empty — wheels ship under v61 (L4T R36, same ABI)
-    for JP_VER in v62 v61 v60; do
-        TORCH_BASE="https://developer.download.nvidia.com/compute/redist/jp/${JP_VER}/pytorch"
-        TORCH_WHEEL=$(curl -s "${TORCH_BASE}/" 2>/dev/null \
-            | grep -o 'torch[^"<> ]*cp310[^"<> ]*aarch64\.whl' | sort -V | tail -1)
-        [ -n "$TORCH_WHEEL" ] && break
-    done
-    if [ -z "$TORCH_WHEEL" ]; then
-        echo "[ERROR] PyTorch wheel not discoverable from NVIDIA CDN."
-        echo "        Install manually then re-run: https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048"
-        exit 1
+    # Check if we have a cached wheel already
+    CACHED_WHEEL=$(find "${TORCH_WHEEL_CACHE}" -name "torch-*cp310*aarch64*.whl" | sort -V | tail -1)
+    if [ -n "$CACHED_WHEEL" ]; then
+        echo "[CACHE] Using cached wheel: $(basename "$CACHED_WHEEL")"
+        pip3 install "$CACHED_WHEEL"
+    else
+        # JetPack 6.2 CDN path is empty — wheels ship under v61 (L4T R36, same ABI)
+        for JP_VER in v62 v61 v60; do
+            TORCH_BASE="https://developer.download.nvidia.com/compute/redist/jp/${JP_VER}/pytorch"
+            TORCH_WHEEL=$(curl -s "${TORCH_BASE}/" 2>/dev/null \
+                | grep -o 'torch[^"<> ]*cp310[^"<> ]*aarch64\.whl' | sort -V | tail -1)
+            [ -n "$TORCH_WHEEL" ] && break
+        done
+        if [ -z "$TORCH_WHEEL" ]; then
+            echo "[ERROR] PyTorch wheel not discoverable from NVIDIA CDN."
+            echo "        Install manually then re-run: https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048"
+            exit 1
+        fi
+        echo "[DOWNLOAD] Fetching ${TORCH_WHEEL}..."
+        curl -L "${TORCH_BASE}/${TORCH_WHEEL}" -o "${TORCH_WHEEL_CACHE}/${TORCH_WHEEL}"
+        pip3 install "${TORCH_WHEEL_CACHE}/${TORCH_WHEEL}"
     fi
-    pip3 install --no-cache "${TORCH_BASE}/${TORCH_WHEEL}"
     echo "[OK] PyTorch installed"
 else
     echo "[OK] PyTorch already installed"
