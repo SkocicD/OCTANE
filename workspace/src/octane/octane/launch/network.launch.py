@@ -55,11 +55,10 @@ def generate_launch_description():
         description='Heartbeat rate in Hz (0.33 = once every ~3 s)'
     )
 
-    udp_bind_ip_arg = DeclareLaunchArgument(
-        'udp_bind_ip',
-        default_value='',
-        description='Local IP to bind heartbeat socket to (pins to a specific interface). '
-                    'Set to rover WiFi/Ethernet IP if broadcast goes to wrong interface.'
+    rover_hostname_arg = DeclareLaunchArgument(
+        'rover_hostname',
+        default_value='octane',
+        description='mDNS hostname of the rover (resolves to bind address for heartbeat)'
     )
 
     # TCP node (mode commands + telemetry)
@@ -85,10 +84,10 @@ def generate_launch_description():
         output='screen',   # show HB log lines in the launch terminal
         parameters=[
             {
-                'host':    LaunchConfiguration('udp_host'),
-                'port':    LaunchConfiguration('udp_port'),
-                'rate_hz': LaunchConfiguration('heartbeat_rate'),
-                'bind_ip': LaunchConfiguration('udp_bind_ip'),
+                'host':            LaunchConfiguration('udp_host'),
+                'port':            LaunchConfiguration('udp_port'),
+                'rate_hz':         LaunchConfiguration('heartbeat_rate'),
+                'rover_hostname':  LaunchConfiguration('rover_hostname'),
             }
         ],
     )
@@ -110,7 +109,7 @@ def generate_launch_description():
         udp_host_arg,
         udp_port_arg,
         heartbeat_rate_arg,
-        udp_bind_ip_arg,
+        rover_hostname_arg,
         tcp_node,
         udp_node,
         network_monitor_terminal,

@@ -69,42 +69,59 @@ class HeartbeatSenderNode(Node):
     def __init__(self):
         super().__init__('heartbeat_sender')
 
-        # Declare parameters
         self.declare_parameter('host', DEFAULT_HOST)
         self.declare_parameter('port', DEFAULT_PORT)
         self.declare_parameter('rate_hz', DEFAULT_RATE_HZ)
-        self.declare_parameter('bind_ip', '')   # e.g. '192.168.1.100' — pins to a specific interface
+        self.declare_parameter('rover_hostname', 'octane')  # resolves via mDNS to pick interface
 
-        self.host    = self.get_parameter('host').value
-        self.port    = self.get_parameter('port').value
-        self.rate_hz = self.get_parameter('rate_hz').value
-        self.bind_ip = self.get_parameter('bind_ip').value
+        self.host          = self.get_parameter('host').value
+        self.port          = self.get_parameter('port').value
+        self.rate_hz       = self.get_parameter('rate_hz').value
+        rover_hostname     = self.get_parameter('rover_hostname').value
 
-        # Current state
-        self.current_state = '0'  # STANDBY by default ('0' char)
+        self.current_state = '0'
+        self.seq_num       = 0
 
-        # Sequence number
-        self.seq_num = 0
-
-        # UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        if self.bind_ip:
-            # Bind to a specific local IP so the packet goes out the right interface
-            self.sock.bind((self.bind_ip, 0))
+
+        # Resolve the rover's own hostname so the broadcast goes out the right
+        # interface (whichever one mDNS / avahi advertises on).
+        bind_ip = self._resolve_own_ip(rover_hostname)
+        if bind_ip:
+            self.sock.bind((bind_ip, 0))
+            self.get_logger().info(f'Resolved {rover_hostname}.local -> {bind_ip}, bound')
+        else:
+            self.get_logger().warn(
+                f'Could not resolve {rover_hostname}.local — sending on default route interface'
+            )
 
         interval_sec = 1.0 / self.rate_hz
         self.timer = self.create_timer(interval_sec, self.send_heartbeat)
 
-        # Subscribe to supervisor state
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(String, '/supervisor/state', self.state_callback, qos)
 
-        bind_str = f', bound to {self.bind_ip}' if self.bind_ip else ''
         self.get_logger().info(
-            f'Heartbeat sender ready: {self.host}:{self.port} '
-            f'at {self.rate_hz:.1f} Hz{bind_str}'
+            f'Heartbeat sender ready: -> {self.host}:{self.port} every {1/self.rate_hz:.0f}s'
         )
+
+    def _resolve_own_ip(self, hostname: str) -> str:
+        """Resolve rover hostname to its mDNS-advertised IP.
+
+        Tries <hostname>.local first (mDNS), then bare hostname.
+        Returns the first non-loopback IPv4 address found, or '' on failure.
+        """
+        for candidate in (hostname + '.local', hostname):
+            try:
+                results = socket.getaddrinfo(candidate, None, socket.AF_INET)
+                for _, _, _, _, sockaddr in results:
+                    ip = sockaddr[0]
+                    if not ip.startswith('127.'):
+                        return ip
+            except OSError:
+                pass
+        return ''
 
     def state_callback(self, msg: String):
         """Update current state from supervisor."""
