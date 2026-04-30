@@ -2,9 +2,12 @@
 """Launch file for OCTANE manual control nodes.
 
 Launches:
-  - manual_drive_node:  WASD key state -> DriveCommand (left/right velocity)
-  - can_drive_node:     DriveCommand -> CANOpen PDO motor commands
-  - can_debug_node:     purple xterm live view (transceiver status, keys, velocity bars)
+  - manual_drive_node:    WASD key state -> DriveCommand (left/right velocity)
+  - can_drive_node:       DriveCommand -> CANOpen PDO motor commands
+  - can_debug_node:       purple xterm live view (transceiver status, keys, velocity bars)
+  - manual_actuator_node: arrow key state -> ActuatorCommand (arm + bucket)
+  - gpio_actuator_node:   ActuatorCommand -> Jetson GPIO relay pins
+  - actuator_debug_node:  sky-blue xterm live view (arrow keys, arm/bucket state)
 """
 
 from launch import LaunchDescription
@@ -55,10 +58,37 @@ def generate_launch_description():
         output='log',
     )
 
+    manual_actuator_node = Node(
+        package='octane_manual_ctrl',
+        executable='manual_actuator_node',
+        name='manual_actuator_node',
+        output='log',
+    )
+
+    gpio_actuator_node = Node(
+        package='octane_gpio',
+        executable='gpio_actuator_node',
+        name='gpio_actuator_node',
+        output='log',
+    )
+
+    actuator_debug_terminal = ExecuteProcess(
+        cmd=[
+            'xterm', '-title', 'OCTANE | Actuator Debug',
+            '-fa', 'Monospace', '-fs', '10',
+            '-bg', '#0d1117', '-fg', '#00cfff', '-hold',
+            '-e', 'ros2', 'run', 'octane_manual_ctrl', 'actuator_debug_node',
+        ],
+        output='log',
+    )
+
     return LaunchDescription([
         throttle_scale_arg,
         turn_scale_arg,
         drive_node,
         can_drive_node,
         can_debug_terminal,
+        manual_actuator_node,
+        gpio_actuator_node,
+        actuator_debug_terminal,
     ])
