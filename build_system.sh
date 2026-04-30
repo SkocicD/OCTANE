@@ -74,7 +74,9 @@ clean_corrupted_pip() {
             removed=$((removed + 1))
         fi
     done
-    [ "$removed" -gt 0 ] && echo "[CLEANUP] Removed ${removed} corrupted pip dist-info dir(s)"
+    if [ "$removed" -gt 0 ]; then
+        echo "[CLEANUP] Removed ${removed} corrupted pip dist-info dir(s)"
+    fi
 }
 clean_corrupted_pip
 
