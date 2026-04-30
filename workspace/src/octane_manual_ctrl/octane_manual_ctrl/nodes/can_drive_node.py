@@ -7,6 +7,9 @@ Only drives motors when state == MANUAL.
 Motor layout (node IDs 0-5):
   Left  side: 0=front-left, 1=mid-left,  2=back-left
   Right side: 3=back-right, 4=mid-right, 5=front-right  (polarity flipped)
+
+Velocity ramping: a 20 Hz control loop steps current velocity toward the
+target at RAMP_RATE units/sec so motors never see a step change.
 """
 
 import time
@@ -24,6 +27,9 @@ LEFT_IDS  = [0, 1, 2]
 RIGHT_IDS = [3, 4, 5]
 ALL_IDS   = LEFT_IDS + RIGHT_IDS
 
+CONTROL_HZ = 20      # PDO send rate
+RAMP_RATE  = 3.0     # velocity units / second  (0→1 in ~330 ms)
+
 
 class CANDriveNode(Node):
 
@@ -34,7 +40,11 @@ class CANDriveNode(Node):
         self._manual = False
         self._motors: list[MotorController] = []
 
-        # Latched status so can_debug_node sees it even if it starts late
+        self._target_l  = 0.0
+        self._target_r  = 0.0
+        self._current_l = 0.0
+        self._current_r = 0.0
+
         status_qos = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -47,7 +57,7 @@ class CANDriveNode(Node):
             for nid in ALL_IDS:
                 m = MotorController(nid, tx)
                 m.turn_on()
-                time.sleep(0.05)   # allow motor to complete NMT boot before SDO config
+                time.sleep(0.05)
                 m.set_mode()
                 time.sleep(0.05)
                 self._motors.append(m)
@@ -58,8 +68,11 @@ class CANDriveNode(Node):
             self.get_logger().error(f'CAN init failed: {e}')
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
-        self.create_subscription(String,       '/supervisor/state', self._on_state,    qos)
-        self.create_subscription(DriveCommand, '/drive/command',    self._on_drive,    qos)
+        self._tx_pub = self.create_publisher(String, '/manual_ctrl/can_tx', qos)
+        self.create_subscription(String,       '/supervisor/state', self._on_state, qos)
+        self.create_subscription(DriveCommand, '/drive/command',    self._on_drive, qos)
+
+        self.create_timer(1.0 / CONTROL_HZ, self._control_loop)
 
     def _publish_status(self, text: str):
         msg = String()
@@ -70,21 +83,54 @@ class CANDriveNode(Node):
         was = self._manual
         self._manual = msg.data == 'MANUAL'
         if was and not self._manual:
-            self._stop_all()
+            self._target_l = 0.0
+            self._target_r = 0.0
 
     def _on_drive(self, msg: DriveCommand):
-        if not self._manual or not self._motors:
+        if not self._manual:
+            status = String()
+            status.data = f'GATED:STANDBY  L={msg.left_velocity:+.2f} R={msg.right_velocity:+.2f}'
+            self._tx_pub.publish(status)
+            return
+        self._target_l = max(-1.0, min(1.0, msg.left_velocity))
+        self._target_r = max(-1.0, min(1.0, msg.right_velocity))
+
+    def _control_loop(self):
+        step = RAMP_RATE / CONTROL_HZ
+
+        def ramp(current, target):
+            diff = target - current
+            if abs(diff) <= step:
+                return target
+            return current + step * (1 if diff > 0 else -1)
+
+        self._current_l = ramp(self._current_l, self._target_l)
+        self._current_r = ramp(self._current_r, self._target_r)
+
+        if not self._manual:
+            # Ramp down to zero even after leaving MANUAL, then stop
+            if self._current_l == 0.0 and self._current_r == 0.0:
+                return
+            self._target_l = 0.0
+            self._target_r = 0.0
+
+        if not self._motors:
             return
 
-        l = max(-1.0, min(1.0, msg.left_velocity))
-        r = max(-1.0, min(1.0, msg.right_velocity))
+        for m in self._motors[:3]:
+            m.move(abs(self._current_l), reverse=(self._current_l < 0))
+        for m in self._motors[3:]:
+            m.move(abs(self._current_r), reverse=(self._current_r < 0))
 
-        for m in self._motors[:3]:   # left side
-            m.move(abs(l), reverse=(l < 0))
-        for m in self._motors[3:]:   # right side
-            m.move(abs(r), reverse=(r < 0))
+        status = String()
+        status.data = f'TX  L={self._current_l:+.3f} R={self._current_r:+.3f}'
+        self._tx_pub.publish(status)
 
     def _stop_all(self):
+        self._target_l  = 0.0
+        self._target_r  = 0.0
+        self._current_l = 0.0
+        self._current_r = 0.0
         for m in self._motors:
             try:
                 m.stop()

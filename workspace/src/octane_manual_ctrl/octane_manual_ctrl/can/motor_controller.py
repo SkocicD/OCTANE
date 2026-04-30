@@ -1,6 +1,7 @@
 # Motor node IDs 0-5
 # Left side:  0=front-left, 1=mid-left,  2=back-left
-# Right side: 3=back-right, 4=mid-right, 5=front-right  (polarity flipped — mirrored mount)
+# Right side: 3=back-right, 4=mid-right, 5=front-right  (right side polarity flipped — mirrored mount)
+# Node 3 (back-right) is additionally flipped relative to the other right-side motors
 
 from octane_manual_ctrl.can.can_open_handler import CANOpenMessageFactory
 
@@ -20,7 +21,8 @@ class MotorController:
         self._node_id = node_id
         self._tx = transceiver
         self._factory = CANOpenMessageFactory()
-        self._right_side = node_id > 2  # right-side motors mount mirrored
+        self._right_side = node_id > 2   # right-side motors mount mirrored
+        self._extra_flip = node_id == 3  # back-right physically opposite the other right-side motors
 
     def turn_on(self):
         can_id, data = self._factory.create_nmt_start(self._node_id)
@@ -36,6 +38,8 @@ class MotorController:
         speed = max(0.0, min(1.0, speed))
 
         if self._right_side:
+            reverse = not reverse
+        if self._extra_flip:
             reverse = not reverse
 
         raw = int(MAX_SPEED_RAW * speed)
