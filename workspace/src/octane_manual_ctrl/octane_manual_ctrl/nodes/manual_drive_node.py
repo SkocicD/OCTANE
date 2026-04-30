@@ -63,6 +63,7 @@ class ManualDriveNode(Node):
     def on_supervisor_state(self, msg: String):
         was_active = self.manual_active
         self.manual_active = msg.data == 'MANUAL'
+        self.get_logger().info(f'[STATE] got "{msg.data}" → manual_active={self.manual_active}')
         if was_active and not self.manual_active:
             stop = DriveCommand()
             stop.left_velocity = 0.0
@@ -70,6 +71,7 @@ class ManualDriveNode(Node):
             self.pub.publish(stop)
 
     def on_key_state(self, msg: UInt8):
+        self.get_logger().info(f'[KEY] got 0x{msg.data:02X}, manual_active={self.manual_active}')
         if not self.manual_active:
             return
 

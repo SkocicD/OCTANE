@@ -37,6 +37,7 @@ class CANDebugNode(Node):
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
         self._log: deque = deque(maxlen=20)
+        self._tx_log: deque = deque(maxlen=8)
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         status_qos = QoSProfile(
@@ -49,6 +50,7 @@ class CANDebugNode(Node):
         self.create_subscription(UInt8,        '/manual_ctrl/key_state',  self._on_keys,       qos)
         self.create_subscription(DriveCommand, '/drive/command',          self._on_drive,      qos)
         self.create_subscription(String,       '/manual_ctrl/can_status', self._on_can_status, status_qos)
+        self.create_subscription(String,       '/manual_ctrl/can_tx',     self._on_can_tx,     qos)
 
         self.create_timer(0.1, self._render)
         self._render()
@@ -61,6 +63,14 @@ class CANDebugNode(Node):
             self._can_status = f'{GREEN}{BOLD}{msg.data}{RESET}'
         else:
             self._can_status = f'{RED}{BOLD}{msg.data}{RESET}'
+
+    def _on_can_tx(self, msg: String):
+        ts = time.strftime('%H:%M:%S')
+        if msg.data.startswith('GATED'):
+            entry = f'{DIM}[{ts}]{RESET}  {RED}{msg.data}{RESET}'
+        else:
+            entry = f'{DIM}[{ts}]{RESET}  {GREEN}{msg.data}{RESET}'
+        self._tx_log.append(entry)
 
     def _on_keys(self, msg: UInt8):
         self._keys = msg.data
@@ -108,6 +118,15 @@ class CANDebugNode(Node):
             print(f'  {DIM}Waiting for /drive/command...{RESET}')
         else:
             for entry in self._log:
+                print(f'  {entry}')
+
+        print()
+        print(f'{BOLD}  CAN TX LOG  {DIM}(green=sent, red=gated){RESET}')
+        print(f'  {DIM}{"-" * 50}{RESET}')
+        if not self._tx_log:
+            print(f'  {DIM}No CAN TX yet — is state MANUAL?{RESET}')
+        else:
+            for entry in self._tx_log:
                 print(f'  {entry}')
         print(f'\n{BOLD}{PURPLE}{"=" * 58}{RESET}')
         sys.stdout.flush()
