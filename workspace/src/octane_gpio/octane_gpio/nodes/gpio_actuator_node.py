@@ -7,8 +7,8 @@ two-channel relay modules for arm (up/down) and bucket (two directions).
 Wiring (Jetson AGX Orin 40-pin header, BOARD numbering):
   Pin 11 -> IN1 -> Arm UP relay    (NO1/COM1 closes when arm=1)
   Pin 13 -> IN2 -> Arm DOWN relay  (NO2/COM2 closes when arm=-1)
-  Pin 12 -> IN3 -> Bucket dir-A    (second relay module)
-  Pin  7 -> IN4 -> Bucket dir-B    (second relay module)
+  Pin 15 -> IN3 -> Bucket dir-A    (second relay module)
+  Pin 18 -> IN4 -> Bucket dir-B    (second relay module)
   Pin 6  -> DC- (shared GND between Jetson and relay module)
 
 Command values: -1 (reverse), 0 (stop), 1 (forward)
@@ -35,8 +35,8 @@ except ImportError:
 # All four pins use tegra234-gpio (not AON) — no permission issues
 PIN_ARM_UP   = 11
 PIN_ARM_DOWN = 13
-PIN_BUCKET_A = 12   # confirmed in official NVIDIA jetson-gpio examples
-PIN_BUCKET_B =  7   # MCLK05, tegra234-gpio, no PWM, no AON
+PIN_BUCKET_A = 15   # enabled via jetson-io overlay (see resources/jetson_gpio_setup.md)
+PIN_BUCKET_B = 18   # enabled via jetson-io overlay (see resources/jetson_gpio_setup.md)
 
 _ARM_PINS    = (PIN_ARM_UP, PIN_ARM_DOWN)
 _BUCKET_PINS = (PIN_BUCKET_A, PIN_BUCKET_B)
