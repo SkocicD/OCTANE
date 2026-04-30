@@ -95,6 +95,8 @@ case "$SUBSYSTEM" in
         PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" mapping.launch.py &
         PIDS+=($!)
+        ros2 launch "$LAUNCH_PKG" manual_ctrl.launch.py &
+        PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" network.launch.py \
             tcp_port:="${OCTANE_TCP_PORT}" \
             udp_port:="${OCTANE_UDP_PORT}" &
