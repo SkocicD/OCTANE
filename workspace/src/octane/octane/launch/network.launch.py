@@ -10,7 +10,7 @@ Launches:
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration
 
 
@@ -60,7 +60,7 @@ def generate_launch_description():
         package='octane_network',
         executable='network_comm_node',
         name='network_comm_node',
-        output='screen',
+        output='log',
         parameters=[
             {
                 'host': LaunchConfiguration('tcp_host'),
@@ -75,7 +75,7 @@ def generate_launch_description():
         package='octane_network',
         executable='heartbeat_sender',
         name='heartbeat_sender',
-        output='screen',
+        output='log',
         parameters=[
             {
                 'host': LaunchConfiguration('udp_host'),
@@ -83,6 +83,16 @@ def generate_launch_description():
                 'rate_hz': LaunchConfiguration('heartbeat_rate'),
             }
         ],
+    )
+
+    network_monitor_terminal = ExecuteProcess(
+        cmd=[
+            'xterm', '-title', 'OCTANE | Network Monitor',
+            '-fa', 'Monospace', '-fs', '10',
+            '-bg', '#0d1117', '-fg', '#58a6ff', '-hold',
+            '-e', 'ros2', 'run', 'octane_network', 'network_monitor_node',
+        ],
+        output='log',
     )
 
     return LaunchDescription([
@@ -94,4 +104,5 @@ def generate_launch_description():
         heartbeat_rate_arg,
         tcp_node,
         udp_node,
+        network_monitor_terminal,
     ])

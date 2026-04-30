@@ -63,17 +63,30 @@ run_launch() {
     ros2 launch "$LAUNCH_PKG" "${name}.launch.py"
 }
 
+kill_port() {
+    local port="$1"
+    local pid
+    pid=$(fuser "${port}/tcp" 2>/dev/null) || true
+    if [ -n "$pid" ]; then
+        echo "[CLEANUP] Killing stale process on port ${port} (pid ${pid})..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+}
+
 case "$SUBSYSTEM" in
     supervisor)  run_launch supervisor ;;
     perception)  run_launch perception ;;
     mapping)     run_launch mapping ;;
     network)
+        kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting network (TCP :${OCTANE_TCP_PORT}, UDP :${OCTANE_UDP_PORT})..."
         ros2 launch "$LAUNCH_PKG" network.launch.py \
             tcp_port:="${OCTANE_TCP_PORT}" \
             udp_port:="${OCTANE_UDP_PORT}"
         ;;
     all)
+        kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting all OCTANE subsystems..."
         PIDS=()
         ros2 launch "$LAUNCH_PKG" supervisor.launch.py &

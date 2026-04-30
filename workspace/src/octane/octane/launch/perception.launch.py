@@ -41,21 +41,24 @@ def generate_launch_description():
     # ════════════════════════════════════════════════════════════════════════
 
     # ── Orbbec depth camera ──────────────────────────────────────────────────
-    orbbec_camera_dir = get_package_share_directory('orbbec_camera')
-    nodes.append(
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
-            ),
-            condition=UnlessCondition(use_usb_bridge),
+    try:
+        orbbec_camera_dir = get_package_share_directory('orbbec_camera')
+        nodes.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
+                ),
+                condition=UnlessCondition(use_usb_bridge),
+            )
         )
-    )
+    except Exception:
+        print('[WARN] orbbec_camera not found — skipping Orbbec launch include')
     nodes.append(
         Node(
             package='octane_perception',
             executable='astra_depth_node',
             name='astra_depth_node',
-            output='screen',
+            output='log',
             condition=UnlessCondition(use_usb_bridge),
             remappings=[
                 ('depth_camera/depth', 'perception/camera/depth_camera/depth/frame'),
@@ -71,7 +74,7 @@ def generate_launch_description():
                 package='octane_perception',
                 executable='rgb_camera_node',
                 name=node_name,
-                output='screen',
+                output='log',
                 parameters=[{
                     'device_path': device_path,
                     'camera_id': cam_id,
@@ -95,7 +98,7 @@ def generate_launch_description():
             package='octane_perception',
             executable='usb_bridge_camera_node',
             name='orbbec_depth_bridge',
-            output='screen',
+            output='log',
             parameters=[{
                 'bridge_host': 'host.docker.internal',
                 'bridge_port': 5555,
@@ -115,7 +118,7 @@ def generate_launch_description():
             package='octane_perception',
             executable='usb_bridge_camera_node',
             name='orbbec_rgb_bridge',
-            output='screen',
+            output='log',
             parameters=[{
                 'bridge_host': 'host.docker.internal',
                 'bridge_port': 5556,
@@ -138,7 +141,7 @@ def generate_launch_description():
                 package='octane_perception',
                 executable='usb_bridge_camera_node',
                 name=f'{node_name}_bridge',
-                output='screen',
+                output='log',
                 parameters=[{
                     'bridge_host': 'host.docker.internal',
                     'bridge_port': bridge_port,
@@ -166,7 +169,7 @@ def generate_launch_description():
             package='octane_perception',
             executable='depth_estimation_node',
             name='depth_estimation_node',
-            output='screen',
+            output='log',
             parameters=[{
                 'model_name': 'depth-anything/DA3METRIC-LARGE',
                 'input_topics': near_rgb_topics,

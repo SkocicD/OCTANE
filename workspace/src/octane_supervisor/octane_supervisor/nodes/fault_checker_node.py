@@ -25,8 +25,11 @@ class FaultCheckerNode(Node):
     def __init__(self):
         super().__init__("fault_checker_node")
 
-        # Load fault configuration
-        config_path = self.find_param_file("faults.yaml")
+        # Load fault configuration — use the faults_config parameter from the launch file
+        self.declare_parameter('faults_config', '')
+        config_path = self.get_parameter('faults_config').get_parameter_value().string_value
+        if not config_path or not os.path.exists(config_path):
+            config_path = self.find_param_file("faults.yaml")
         with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
 
@@ -124,6 +127,8 @@ class FaultCheckerNode(Node):
 
             result = eval(condition, {"__builtins__": {}}, context)
             return bool(result)
+        except NameError:
+            return False  # sensor data not yet received — not an error
         except Exception as e:
             self.get_logger().warn(f"Error evaluating condition for {fault_name}: {e}")
             return False
