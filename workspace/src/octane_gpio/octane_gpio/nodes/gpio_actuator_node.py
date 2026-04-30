@@ -7,8 +7,8 @@ two-channel relay modules for arm (up/down) and bucket (two directions).
 Wiring (Jetson AGX Orin 40-pin header, BOARD numbering):
   Pin 11 -> IN1 -> Arm UP relay    (NO1/COM1 closes when arm=1)
   Pin 13 -> IN2 -> Arm DOWN relay  (NO2/COM2 closes when arm=-1)
-  Pin 15 -> IN3 -> Bucket dir-A    (second relay module, when fitted)
-  Pin 16 -> IN4 -> Bucket dir-B    (second relay module, when fitted)
+  Pin 12 -> IN3 -> Bucket dir-A    (second relay module)
+  Pin  7 -> IN4 -> Bucket dir-B    (second relay module)
   Pin 6  -> DC- (shared GND between Jetson and relay module)
 
 Command values: -1 (reverse), 0 (stop), 1 (forward)
@@ -32,10 +32,11 @@ except ImportError:
     _GPIO_AVAILABLE = False
 
 # Jetson AGX Orin 40-pin header, BOARD (physical) numbering
+# All four pins use tegra234-gpio (not AON) — no permission issues
 PIN_ARM_UP   = 11
 PIN_ARM_DOWN = 13
-PIN_BUCKET_A = 15   # second relay module — not yet fitted
-PIN_BUCKET_B = 16   # second relay module — not yet fitted
+PIN_BUCKET_A = 12   # confirmed in official NVIDIA jetson-gpio examples
+PIN_BUCKET_B =  7   # MCLK05, tegra234-gpio, no PWM, no AON
 
 _ARM_PINS    = (PIN_ARM_UP, PIN_ARM_DOWN)
 _BUCKET_PINS = (PIN_BUCKET_A, PIN_BUCKET_B)
@@ -73,13 +74,15 @@ class GpioActuatorNode(Node):
         if _GPIO_AVAILABLE:
             GPIO.output(PIN_ARM_UP,   GPIO.HIGH if value == 1  else GPIO.LOW)
             GPIO.output(PIN_ARM_DOWN, GPIO.HIGH if value == -1 else GPIO.LOW)
-        self.get_logger().debug(f'Arm: {value}')
+        if value != 0:
+            self.get_logger().info(f'ARM gpio: pin {PIN_ARM_UP if value==1 else PIN_ARM_DOWN} HIGH')
 
     def _set_bucket(self, value: int):
         if _GPIO_AVAILABLE:
-            GPIO.output(PIN_BUCKET_A, GPIO.HIGH if value == -1 else GPIO.LOW)
-            GPIO.output(PIN_BUCKET_B, GPIO.HIGH if value == 1  else GPIO.LOW)
-        self.get_logger().debug(f'Bucket: {value}')
+            GPIO.output(PIN_BUCKET_A, GPIO.HIGH if value == 1  else GPIO.LOW)
+            GPIO.output(PIN_BUCKET_B, GPIO.HIGH if value == -1 else GPIO.LOW)
+        if value != 0:
+            self.get_logger().info(f'BUCKET gpio: pin {PIN_BUCKET_A if value==1 else PIN_BUCKET_B} HIGH')
 
     def _all_off(self):
         if _GPIO_AVAILABLE:
