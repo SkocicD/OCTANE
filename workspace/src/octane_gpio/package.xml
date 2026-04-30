@@ -3,14 +3,13 @@
 <package format="3">
   <name>octane_gpio</name>
   <version>0.0.0</version>
-  <description>GPIO hardware interface for OCTANE actuator relays. Subscribes to actuator commands and triggers Jetson GPIO pins for arm and bucket relays.</description>
+  <description>Serial bridge for OCTANE actuator relays. Subscribes to ActuatorCommand and emits a 4-bit relay state byte over UART; an Arduino drives the relays.</description>
   <maintainer email="adam.r.carbone@live.com">Adam Carbone</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>octane_msgs</depend>
-
-  <!-- TODO: add Jetson.GPIO dependency once pin mapping is confirmed -->
+  <exec_depend>python3-serial</exec_depend>
 
   <test_depend>pytest</test_depend>
 

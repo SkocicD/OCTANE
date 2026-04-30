@@ -6,7 +6,7 @@ Launches:
   - can_drive_node:       DriveCommand -> CANOpen PDO motor commands
   - can_debug_node:       purple xterm live view (transceiver status, keys, velocity bars)
   - manual_actuator_node: arrow key state -> ActuatorCommand (arm + bucket)
-  - gpio_actuator_node:   ActuatorCommand -> Jetson GPIO relay pins
+  - serial_actuator_node: ActuatorCommand -> 4-bit relay state byte over UART (Arduino drives relays)
   - actuator_debug_node:  sky-blue xterm live view (arrow keys, arm/bucket state)
 """
 
@@ -65,10 +65,10 @@ def generate_launch_description():
         output='log',
     )
 
-    gpio_actuator_node = Node(
+    serial_actuator_node = Node(
         package='octane_gpio',
-        executable='gpio_actuator_node',
-        name='gpio_actuator_node',
+        executable='serial_actuator_node',
+        name='serial_actuator_node',
         output='log',
     )
 

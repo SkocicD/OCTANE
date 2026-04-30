@@ -10,16 +10,16 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pyserial'],
     zip_safe=True,
     maintainer='Adam Carbone',
     maintainer_email='adam.r.carbone@live.com',
-    description='GPIO hardware interface for OCTANE actuator relays.',
+    description='Serial bridge: ActuatorCommand -> 4-bit relay state byte over UART (Arduino drives relays).',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'gpio_actuator_node = octane_gpio.nodes.gpio_actuator_node:main',
+            'serial_actuator_node = octane_gpio.nodes.serial_actuator_node:main',
         ],
     },
 )
