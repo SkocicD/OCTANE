@@ -29,7 +29,7 @@ from typing import Optional
 MAGIC = 0x4F
 DEFAULT_HOST = "255.255.255.255"  # Broadcast by default
 DEFAULT_PORT = 5001  # Separate port from TCP command port
-DEFAULT_RATE_HZ = 0.3333  # 3 second interval between heartbeats
+DEFAULT_RATE_HZ = 0.3333  # ~3 s interval; GUI timeout should be >= 7 s
 
 
 def calc_crc8(data: bytes) -> int:
@@ -73,18 +73,12 @@ class HeartbeatSenderNode(Node):
         self.declare_parameter('host', DEFAULT_HOST)
         self.declare_parameter('port', DEFAULT_PORT)
         self.declare_parameter('rate_hz', DEFAULT_RATE_HZ)
+        self.declare_parameter('bind_ip', '')   # e.g. '192.168.1.100' — pins to a specific interface
 
-        self.host = self.get_parameter('host').value
-        self.port = self.get_parameter('port').value
+        self.host    = self.get_parameter('host').value
+        self.port    = self.get_parameter('port').value
         self.rate_hz = self.get_parameter('rate_hz').value
-
-        # Validate timeout vs rate
-        if self.rate_hz > 0:
-            interval_sec = 1.0 / self.rate_hz
-            self.get_logger().info(
-                f"Heartbeat interval: {interval_sec:.1f}s, "
-                f"GUI timeout should be >= {interval_sec * 2:.1f}s (2x interval)"
-            )
+        self.bind_ip = self.get_parameter('bind_ip').value
 
         # Current state
         self.current_state = '0'  # STANDBY by default ('0' char)
@@ -95,29 +89,21 @@ class HeartbeatSenderNode(Node):
         # UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock.settimeout(0.1)  # Short timeout for non-blocking send
+        if self.bind_ip:
+            # Bind to a specific local IP so the packet goes out the right interface
+            self.sock.bind((self.bind_ip, 0))
 
-        # Timer
-        interval_sec = 1.0 / self.rate_hz  # 3 seconds
+        interval_sec = 1.0 / self.rate_hz
         self.timer = self.create_timer(interval_sec, self.send_heartbeat)
-
-        self.get_logger().info(
-            f"Heartbeat sender initialized: {self.host}:{self.port} "
-            f"every {interval_sec:.1f}s"
-        )
 
         # Subscribe to supervisor state
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
-        self.create_subscription(
-            String,
-            '/supervisor/state',
-            self.state_callback,
-            qos
-        )
+        self.create_subscription(String, '/supervisor/state', self.state_callback, qos)
 
+        bind_str = f', bound to {self.bind_ip}' if self.bind_ip else ''
         self.get_logger().info(
-            f"Heartbeat sender initialized: {self.host}:{self.port} "
-            f"at {self.rate_hz:.2f}Hz"
+            f'Heartbeat sender ready: {self.host}:{self.port} '
+            f'at {self.rate_hz:.1f} Hz{bind_str}'
         )
 
     def state_callback(self, msg: String):
@@ -133,23 +119,14 @@ class HeartbeatSenderNode(Node):
     def send_heartbeat(self):
         """Send heartbeat packet."""
         try:
-            # Encode heartbeat
             frame = encode_heartbeat(self.current_state, self.seq_num)
-
-            # Send via UDP
             self.sock.sendto(frame, (self.host, self.port))
-
-            # Increment sequence
+            self.get_logger().info(
+                f'HB seq={self.seq_num} state={self.current_state} -> {self.host}:{self.port}'
+            )
             self.seq_num = (self.seq_num + 1) % 65536
-
-            # Debug logging every 30th packet
-            if self.seq_num % 30 == 0:
-                self.get_logger().debug(
-                    f"Heartbeat sent: state={self.current_state}, seq={self.seq_num}"
-                )
-
         except Exception as e:
-            self.get_logger().warn(f"Heartbeat send failed: {e}")
+            self.get_logger().warn(f'Heartbeat send failed: {e}')
 
 
 def main(args=None):

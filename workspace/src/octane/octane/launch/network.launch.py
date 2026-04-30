@@ -52,7 +52,14 @@ def generate_launch_description():
     heartbeat_rate_arg = DeclareLaunchArgument(
         'heartbeat_rate',
         default_value='0.33',
-        description='Heartbeat rate in Hz (recommended: 0.33 = 300ms interval)'
+        description='Heartbeat rate in Hz (0.33 = once every ~3 s)'
+    )
+
+    udp_bind_ip_arg = DeclareLaunchArgument(
+        'udp_bind_ip',
+        default_value='',
+        description='Local IP to bind heartbeat socket to (pins to a specific interface). '
+                    'Set to rover WiFi/Ethernet IP if broadcast goes to wrong interface.'
     )
 
     # TCP node (mode commands + telemetry)
@@ -75,12 +82,13 @@ def generate_launch_description():
         package='octane_network',
         executable='heartbeat_sender',
         name='heartbeat_sender',
-        output='log',
+        output='screen',   # show HB log lines in the launch terminal
         parameters=[
             {
-                'host': LaunchConfiguration('udp_host'),
-                'port': LaunchConfiguration('udp_port'),
+                'host':    LaunchConfiguration('udp_host'),
+                'port':    LaunchConfiguration('udp_port'),
                 'rate_hz': LaunchConfiguration('heartbeat_rate'),
+                'bind_ip': LaunchConfiguration('udp_bind_ip'),
             }
         ],
     )
@@ -102,6 +110,7 @@ def generate_launch_description():
         udp_host_arg,
         udp_port_arg,
         heartbeat_rate_arg,
+        udp_bind_ip_arg,
         tcp_node,
         udp_node,
         network_monitor_terminal,
