@@ -2,21 +2,22 @@
 """GPIO hardware interface for OCTANE actuator relays.
 
 Subscribes to actuator commands and drives Jetson GPIO pins to control
-two-channel relays for arm (up/down) and bucket (two directions).
+two-channel relay modules for arm (up/down) and bucket (two directions).
 
-Relay wiring (two channels each):
-  Arm:    one pin = up relay,   one pin = down relay
-  Bucket: one pin = dir-A relay, one pin = dir-B relay
+Wiring (Jetson AGX Orin 40-pin header, BOARD numbering):
+  Pin 11 -> IN1 -> Arm UP relay    (NO1/COM1 closes when arm=1)
+  Pin 13 -> IN2 -> Arm DOWN relay  (NO2/COM2 closes when arm=-1)
+  Pin 15 -> IN3 -> Bucket dir-A    (second relay module, when fitted)
+  Pin 16 -> IN4 -> Bucket dir-B    (second relay module, when fitted)
+  Pin 6  -> DC- (shared GND between Jetson and relay module)
 
 Command values: -1 (reverse), 0 (stop), 1 (forward)
-  arm=1  -> arm_up ON,   arm_down OFF
-  arm=-1 -> arm_up OFF,  arm_down ON
-  arm=0  -> both OFF
+  arm=1  -> PIN_ARM_UP HIGH,   PIN_ARM_DOWN LOW
+  arm=-1 -> PIN_ARM_UP LOW,    PIN_ARM_DOWN HIGH
+  arm=0  -> both LOW (stop)
 
 Topics:
   /actuator/command (octane_msgs/ActuatorCommand) - arm + bucket int8 (sub)
-
-TODO: fill in GPIO pin numbers and library calls once wiring is confirmed.
 """
 
 import rclpy
@@ -24,14 +25,21 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from octane_msgs.msg import ActuatorCommand
 
-# TODO: import Jetson GPIO once pin mapping confirmed
-# import Jetson.GPIO as GPIO
+try:
+    import Jetson.GPIO as GPIO
+    _GPIO_AVAILABLE = True
+except ImportError:
+    _GPIO_AVAILABLE = False
 
-# TODO: set actual GPIO pin numbers (BCM numbering)
-# PIN_ARM_UP    = None
-# PIN_ARM_DOWN  = None
-# PIN_BUCKET_A  = None
-# PIN_BUCKET_B  = None
+# Jetson AGX Orin 40-pin header, BOARD (physical) numbering
+PIN_ARM_UP   = 11
+PIN_ARM_DOWN = 13
+PIN_BUCKET_A = 15   # second relay module — not yet fitted
+PIN_BUCKET_B = 16   # second relay module — not yet fitted
+
+_ARM_PINS    = (PIN_ARM_UP, PIN_ARM_DOWN)
+_BUCKET_PINS = (PIN_BUCKET_A, PIN_BUCKET_B)
+_ALL_PINS    = _ARM_PINS + _BUCKET_PINS
 
 
 class GpioActuatorNode(Node):
@@ -44,40 +52,44 @@ class GpioActuatorNode(Node):
         self.sub = self.create_subscription(
             ActuatorCommand, '/actuator/command', self.on_actuator_command, qos)
 
-        # TODO: configure GPIO pins
-        # GPIO.setmode(GPIO.BCM)
-        # GPIO.setup(PIN_ARM_UP,   GPIO.OUT, initial=GPIO.LOW)
-        # GPIO.setup(PIN_ARM_DOWN, GPIO.OUT, initial=GPIO.LOW)
-        # GPIO.setup(PIN_BUCKET_A, GPIO.OUT, initial=GPIO.LOW)
-        # GPIO.setup(PIN_BUCKET_B, GPIO.OUT, initial=GPIO.LOW)
-
-        self.get_logger().info('GPIO actuator node ready (hardware not yet implemented)')
+        if _GPIO_AVAILABLE:
+            GPIO.setmode(GPIO.BOARD)
+            for pin in _ALL_PINS:
+                GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+            self.get_logger().info(
+                f'GPIO actuator node ready — pins ARM({PIN_ARM_UP},{PIN_ARM_DOWN}) '
+                f'BUCKET({PIN_BUCKET_A},{PIN_BUCKET_B})'
+            )
+        else:
+            self.get_logger().warn(
+                'Jetson.GPIO not found — running in simulation mode (no hardware output)'
+            )
 
     def on_actuator_command(self, msg: ActuatorCommand):
         self._set_arm(msg.arm)
         self._set_bucket(msg.bucket)
 
     def _set_arm(self, value: int):
-        # value: -1=down, 0=stop, 1=up
-        # TODO: replace with actual GPIO calls
-        # GPIO.output(PIN_ARM_UP,   GPIO.HIGH if value == 1  else GPIO.LOW)
-        # GPIO.output(PIN_ARM_DOWN, GPIO.HIGH if value == -1 else GPIO.LOW)
+        if _GPIO_AVAILABLE:
+            GPIO.output(PIN_ARM_UP,   GPIO.HIGH if value == 1  else GPIO.LOW)
+            GPIO.output(PIN_ARM_DOWN, GPIO.HIGH if value == -1 else GPIO.LOW)
         self.get_logger().debug(f'Arm: {value}')
 
     def _set_bucket(self, value: int):
-        # value: -1=dir-A, 0=stop, 1=dir-B
-        # TODO: replace with actual GPIO calls
-        # GPIO.output(PIN_BUCKET_A, GPIO.HIGH if value == -1 else GPIO.LOW)
-        # GPIO.output(PIN_BUCKET_B, GPIO.HIGH if value == 1  else GPIO.LOW)
+        if _GPIO_AVAILABLE:
+            GPIO.output(PIN_BUCKET_A, GPIO.HIGH if value == -1 else GPIO.LOW)
+            GPIO.output(PIN_BUCKET_B, GPIO.HIGH if value == 1  else GPIO.LOW)
         self.get_logger().debug(f'Bucket: {value}')
 
+    def _all_off(self):
+        if _GPIO_AVAILABLE:
+            for pin in _ALL_PINS:
+                GPIO.output(pin, GPIO.LOW)
+
     def destroy_node(self):
-        # TODO: ensure all relays are de-energised on shutdown
-        # GPIO.output(PIN_ARM_UP,   GPIO.LOW)
-        # GPIO.output(PIN_ARM_DOWN, GPIO.LOW)
-        # GPIO.output(PIN_BUCKET_A, GPIO.LOW)
-        # GPIO.output(PIN_BUCKET_B, GPIO.LOW)
-        # GPIO.cleanup()
+        self._all_off()
+        if _GPIO_AVAILABLE:
+            GPIO.cleanup()
         super().destroy_node()
 
 
