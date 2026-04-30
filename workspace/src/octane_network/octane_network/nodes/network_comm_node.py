@@ -17,7 +17,7 @@ import threading
 from typing import Optional, List
 
 from octane_network.classes.protocol import (
-    encode_command, encode_telemetry, encode_ack, encode_fault,
+    encode_command, encode_telemetry, encode_ack, encode_fault, encode_heartbeat,
     decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT, TYPE_MANIPULATOR
 )
 
@@ -32,10 +32,12 @@ class NetworkCommNode(Node):
         self.declare_parameter('host', '0.0.0.0')
         self.declare_parameter('port', 5000)
         self.declare_parameter('telemetry_rate', 10.0)
+        self.declare_parameter('heartbeat_rate', 0.3333)
 
-        self.host = self.get_parameter('host').value
-        self.port = self.get_parameter('port').value
+        self.host           = self.get_parameter('host').value
+        self.port           = self.get_parameter('port').value
         self.telemetry_rate = self.get_parameter('telemetry_rate').value
+        self.heartbeat_rate = self.get_parameter('heartbeat_rate').value
 
         # QoS
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
@@ -49,9 +51,10 @@ class NetworkCommNode(Node):
         )
 
         # ROS2 publishers
-        self.mode_command_pub = self.create_publisher(String, '/supervisor/mode_command', qos)
-        self.fault_reset_pub = self.create_publisher(Empty, '/supervisor/fault_reset', qos)
-        self.key_state_pub = self.create_publisher(UInt8, '/manual_ctrl/key_state', qos)
+        self.mode_command_pub  = self.create_publisher(String, '/supervisor/mode_command', qos)
+        self.fault_reset_pub   = self.create_publisher(Empty,  '/supervisor/fault_reset',  qos)
+        self.key_state_pub     = self.create_publisher(UInt8,  '/manual_ctrl/key_state',   qos)
+        self._hb_status_pub    = self.create_publisher(String, '/network/heartbeat_tx',    qos)
 
         # State
         self.current_state = 'STANDBY'
@@ -59,6 +62,7 @@ class NetworkCommNode(Node):
         self.client_socket = None
         self.connected = False
         self.running = False
+        self._hb_seq = 0
 
         # Binary buffer for partial frames
         self.buffer: bytes = b''
@@ -69,11 +73,9 @@ class NetworkCommNode(Node):
         self.accept_thread = None
         self.recv_thread = None
 
-        # Timer
-        period = 1.0 / self.telemetry_rate
-        self.timer = self.create_timer(period, self.send_telemetry)
+        self.create_timer(1.0 / self.telemetry_rate,  self.send_telemetry)
+        self.create_timer(1.0 / self.heartbeat_rate, self._send_heartbeat)
 
-        # Start server
         self.start_server()
         self.get_logger().info(f'Network node listening on {self.host}:{self.port}')
 
@@ -245,6 +247,20 @@ class NetworkCommNode(Node):
                 self.client_socket.sendall(fault_frame)
             except Exception as e:
                 self.get_logger().error(f'Fault alert send failed: {e}')
+
+    def _send_heartbeat(self):
+        if not self.connected or not self.client_socket:
+            return
+        try:
+            frame = encode_heartbeat(self.current_state, self._hb_seq)
+            self.client_socket.sendall(frame)
+            status = f'OK  seq={self._hb_seq}  state={self.current_state}'
+            self._hb_seq = (self._hb_seq + 1) % 65536
+        except Exception as e:
+            status = f'ERR {e}'
+        pub_msg = String()
+        pub_msg.data = status
+        self._hb_status_pub.publish(pub_msg)
 
     def send_telemetry(self):
         """Send periodic telemetry to GUI using binary protocol."""

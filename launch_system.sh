@@ -82,9 +82,7 @@ case "$SUBSYSTEM" in
         kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting network (TCP :${OCTANE_TCP_PORT}, UDP :${OCTANE_UDP_PORT})..."
         ros2 launch "$LAUNCH_PKG" network.launch.py \
-            tcp_port:="${OCTANE_TCP_PORT}" \
-            udp_port:="${OCTANE_UDP_PORT}" \
-            rover_hostname:="${OCTANE_HOSTNAME}"
+            tcp_port:="${OCTANE_TCP_PORT}"
         ;;
     all)
         kill_port "${OCTANE_TCP_PORT}"
@@ -99,9 +97,7 @@ case "$SUBSYSTEM" in
         ros2 launch "$LAUNCH_PKG" manual_ctrl.launch.py &
         PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" network.launch.py \
-            tcp_port:="${OCTANE_TCP_PORT}" \
-            udp_port:="${OCTANE_UDP_PORT}" \
-            rover_hostname:="${OCTANE_HOSTNAME}" &
+            tcp_port:="${OCTANE_TCP_PORT}" &
         PIDS+=($!)
 
         trap 'echo ""; echo "[STOP] Shutting down all subsystems..."; kill "${PIDS[@]}" 2>/dev/null; wait "${PIDS[@]}" 2>/dev/null; exit 0' SIGINT SIGTERM

@@ -6,10 +6,11 @@ Frame format (minimal):
   Total overhead: 4 bytes + variable payload
 
 Types:
-  T = Telemetry (0x54)
-  C = Command (0x43)
-  A = Ack (0x41)
-  F = Fault (0x46)
+  T = Telemetry  (0x54)
+  C = Command    (0x43)
+  A = Ack        (0x41)
+  F = Fault      (0x46)
+  H = Heartbeat  (0x48)
 
 Modes (single char):
   0 = Standby
@@ -40,11 +41,12 @@ HEADER_SIZE = 3  # magic + type + length
 CRC_SIZE = 1  # 8-bit CRC (good enough for short messages)
 
 # Message types (ASCII for debugging)
-TYPE_TELEMETRY = ord('T')     # 0x54
-TYPE_COMMAND = ord('C')       # 0x43
-TYPE_ACK = ord('A')           # 0x41
-TYPE_FAULT = ord('F')         # 0x46
+TYPE_TELEMETRY   = ord('T')   # 0x54
+TYPE_COMMAND     = ord('C')   # 0x43
+TYPE_ACK         = ord('A')   # 0x41
+TYPE_FAULT       = ord('F')   # 0x46
 TYPE_MANIPULATOR = ord('M')   # 0x4D
+TYPE_HEARTBEAT   = ord('H')   # 0x48
 
 # Mode/state codes
 MODE_STANDBY = b'0'
@@ -156,6 +158,21 @@ def encode_fault(fault_type: str, severity: str) -> bytes:
 
     crc = crc8(frame)
     return frame + bytes([crc])
+
+
+def encode_heartbeat(state: str, seq: int) -> bytes:
+    """Encode heartbeat: H + state_char + seq_hi + seq_lo.
+
+    Wire format: [O][H][3][state][seq_hi][seq_lo][crc]  — 7 bytes total.
+    """
+    state_map = {'STANDBY': b'0', 'MANUAL': b'1', 'AUTONOMOUS': b'2', 'FAULT': b'3'}
+    state_byte = state_map.get(state, b'0')
+    seq_hi = (seq >> 8) & 0xFF
+    seq_lo = seq & 0xFF
+    payload = state_byte + bytes([seq_hi, seq_lo])
+    header = struct.pack('!BBB', MAGIC, TYPE_HEARTBEAT, len(payload))
+    frame = header + payload
+    return frame + bytes([crc8(frame)])
 
 
 def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
