@@ -16,8 +16,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 import socket
-import struct
-from typing import Optional
 
 # Minimal heartbeat frame format:
 # [MAGIC:1B][STATE:1B][SEQ:2B][CRC:1B] = 5 bytes total
@@ -82,6 +80,9 @@ class HeartbeatSenderNode(Node):
         self.current_state = '0'
         self.seq_num       = 0
 
+        hb_qos = QoSProfile(depth=4, reliability=ReliabilityPolicy.RELIABLE)
+        self._status_pub = self.create_publisher(String, '/network/heartbeat_tx', hb_qos)
+
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
@@ -138,12 +139,13 @@ class HeartbeatSenderNode(Node):
         try:
             frame = encode_heartbeat(self.current_state, self.seq_num)
             self.sock.sendto(frame, (self.host, self.port))
-            self.get_logger().info(
-                f'HB seq={self.seq_num} state={self.current_state} -> {self.host}:{self.port}'
-            )
+            status = f'OK  seq={self.seq_num}  state={self.current_state}  -> {self.host}:{self.port}'
             self.seq_num = (self.seq_num + 1) % 65536
         except Exception as e:
-            self.get_logger().warn(f'Heartbeat send failed: {e}')
+            status = f'ERR {e}'
+        msg = String()
+        msg.data = status
+        self._status_pub.publish(msg)
 
 
 def main(args=None):

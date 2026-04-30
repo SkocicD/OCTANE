@@ -48,15 +48,18 @@ class NetworkMonitorNode(Node):
     def __init__(self):
         super().__init__('network_monitor_node')
 
-        self.current_state = '---'
+        self.current_state  = '---'
         self.last_cmd_time: float = 0.0
+        self.last_hb_status = ''
+        self.last_hb_time:  float = 0.0
         self.log: deque = deque(maxlen=16)
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
-        self.create_subscription(String, '/supervisor/mode_command', self._on_mode_command, qos)
-        self.create_subscription(Empty,  '/supervisor/fault_reset',  self._on_fault_reset,  qos)
-        self.create_subscription(String, '/supervisor/state',        self._on_state,         qos)
+        self.create_subscription(String, '/supervisor/mode_command',  self._on_mode_command, qos)
+        self.create_subscription(Empty,  '/supervisor/fault_reset',   self._on_fault_reset,  qos)
+        self.create_subscription(String, '/supervisor/state',         self._on_state,        qos)
+        self.create_subscription(String, '/network/heartbeat_tx',     self._on_heartbeat,    qos)
 
         self.create_timer(1.0, self._refresh)
         self._render()
@@ -77,6 +80,10 @@ class NetworkMonitorNode(Node):
 
     def _on_state(self, msg: String):
         self.current_state = msg.data
+
+    def _on_heartbeat(self, msg: String):
+        self.last_hb_status = msg.data
+        self.last_hb_time   = time.time()
 
     # ── display ───────────────────────────────────────────────────────────────
 
@@ -102,8 +109,18 @@ class NetworkMonitorNode(Node):
         print(f'{self.BOLD}{self.BLUE}{"=" * 60}{self.RESET}')
         print(f'{self.BOLD}{self.BLUE}    OCTANE NETWORK MONITOR{self.RESET}')
         print(f'{self.BOLD}{self.BLUE}{"=" * 60}{self.RESET}')
+        if self.last_hb_time:
+            hb_age = time.time() - self.last_hb_time
+            if self.last_hb_status.startswith('ERR'):
+                hb_str = f'\033[91m{self.BOLD}{self.last_hb_status}{self.RESET}'
+            else:
+                hb_str = f'\033[92m{self.last_hb_status}{self.RESET}  {self.DIM}({hb_age:.0f}s ago){self.RESET}'
+        else:
+            hb_str = f'{self.DIM}waiting...{self.RESET}'
+
         print(f'    Rover state : {state_color}{self.BOLD}{self.current_state}{self.RESET}')
         print(f'    GUI link    : {idle_str}')
+        print(f'    Heartbeat   : {hb_str}')
         print(f'    TCP port    : 5000\n')
 
         print(f'{self.BOLD}    COMMAND LOG{self.RESET}')
