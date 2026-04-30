@@ -85,10 +85,12 @@ def generate_launch_description():
     return LaunchDescription([
         throttle_scale_arg,
         turn_scale_arg,
+        # xterms first — ensures terminals open even if a background node crashes
+        can_debug_terminal,
+        actuator_debug_terminal,
+        # background nodes
         drive_node,
         can_drive_node,
-        can_debug_terminal,
         manual_actuator_node,
         gpio_actuator_node,
-        actuator_debug_terminal,
     ])
