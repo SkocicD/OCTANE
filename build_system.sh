@@ -278,7 +278,16 @@ else
     echo "[OK] depth_anything_3 already installed"
 fi
 
-# ── 7. rosdep install for external packages ───────────────────────────────────
+# ── 7. gs-usb (CAN adapter Python library) ────────────────────────────────────
+if ! python3 -c "import gs_usb" &>/dev/null; then
+    echo "[SETUP] Installing gs-usb..."
+    pip3 install gs-usb
+    echo "[OK] gs-usb installed"
+else
+    echo "[OK] gs-usb already installed"
+fi
+
+# ── 8. rosdep install for external packages ───────────────────────────────────
 echo "[SETUP] Installing ROS deps for external packages via rosdep..."
 # Skip JetPack-native packages that rosdep can't resolve — they ship with JetPack
 ROSDEP_SKIP_KEYS=(
@@ -294,7 +303,7 @@ rosdep install --from-paths "${EXT_PKGS}" --ignore-src -r -y \
     --skip-keys="${ROSDEP_SKIP_KEYS[*]}" 2>&1 | grep -v "^#" || true
 echo "[OK] rosdep install done"
 
-# ── 8. Stale cache check ───────────────────────────────────────────────────────
+# ── 9. Stale cache check ───────────────────────────────────────────────────────
 if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; then
     echo "[WARN] Stale build cache — wiping octane build artifacts..."
     for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network; do
@@ -302,10 +311,10 @@ if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; t
     done
 fi
 
-# ── 9. Build ───────────────────────────────────────────────────────────────────
+# ── 10. Build ──────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
-OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane"
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)
