@@ -28,6 +28,11 @@ if [ ! -d "${WORKSPACE_ROOT}/src/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/
     echo ""
 fi
 
+# Install Python dependencies
+echo "[DEPS] Installing Python dependencies..."
+pip install Jetson.GPIO --quiet 2>/dev/null && echo "[DEPS] Jetson.GPIO installed" || echo "[DEPS] Jetson.GPIO unavailable (not a Jetson — skipping)"
+echo ""
+
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane"
 ORBBEC_PKGS="orbbec_camera_msgs orbbec_camera"
 
