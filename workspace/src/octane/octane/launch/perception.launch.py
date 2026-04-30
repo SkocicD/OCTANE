@@ -26,7 +26,7 @@ NEAR_RGB_CAMERAS = [
 def generate_launch_description():
     use_usb_bridge_arg = DeclareLaunchArgument(
         'use_usb_bridge',
-        default_value='true',
+        default_value='false',
         description='Use USB bridge for Mac development (true/false)',
     )
     use_usb_bridge = LaunchConfiguration('use_usb_bridge')
