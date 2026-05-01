@@ -2,20 +2,24 @@
 """Serial actuator node for OCTANE.
 
 Subscribes to /actuator/command and emits a single byte over UART whenever the
-relay state changes. The byte's low 4 bits encode the four relay channels:
+relay state changes. The byte's low 4 bits encode the four relay channels;
+the high 4 bits are always zero (padding):
 
-    bit 3 (0x08)  arm UP
-    bit 2 (0x04)  arm DOWN
-    bit 1 (0x02)  bucket A
-    bit 0 (0x01)  bucket B
+    bit 7..4  always 0
+    bit 3  arm UP
+    bit 2  arm DOWN
+    bit 1  bucket A
+    bit 0  bucket B
 
-High 4 bits are always zero. Byte is sent only on state change.
+So the wire byte looks like:  0000ABCD  where ABCD are the four relay bits
+(LSB on the right, as usual).
 
 If both bits in a pair are set (which manual_actuator_node already prevents,
 but enforce here as well), the pair is forced to 0,0 — the receiver should
 never see both relays of one module energised.
 
-Default port is /dev/ttyTHS1 (40-pin header pins 8 TX / 10 RX on AGX Orin).
+Default port is the stable by-id symlink to the OCTANE Arduino Uno R3 connected
+over USB. Override with `-p port:=...` if the Arduino is replaced.
 """
 
 import rclpy
@@ -46,7 +50,10 @@ class SerialActuatorNode(Node):
     def __init__(self):
         super().__init__('serial_actuator_node')
 
-        self.declare_parameter('port', '/dev/ttyTHS1')
+        self.declare_parameter(
+            'port',
+            '/dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_750313034313514022F1-if00',
+        )
         self.declare_parameter('baud', 9600)
         port = self.get_parameter('port').value
         baud = int(self.get_parameter('baud').value)
@@ -74,13 +81,13 @@ class SerialActuatorNode(Node):
                 self.ser.write(bytes([b]))
             except serial.SerialException as e:
                 self.get_logger().warn(f'Serial write failed: {e}')
-        self.get_logger().info(f'sent 0x{b:02X}  ({b:04b})  arm={msg.arm} bucket={msg.bucket}')
+        self.get_logger().info(f'sent {b:08b}  arm={msg.arm} bucket={msg.bucket}')
 
     def destroy_node(self):
         # Send all-off on shutdown so the Arduino releases everything.
         if self.ser is not None:
             try:
-                self.ser.write(bytes([0x00]))
+                self.ser.write(bytes([0b00000000]))
                 self.ser.close()
             except Exception:
                 pass
