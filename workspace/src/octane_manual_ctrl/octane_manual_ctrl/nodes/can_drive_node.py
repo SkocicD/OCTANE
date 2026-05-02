@@ -23,8 +23,8 @@ from octane_msgs.msg import DriveCommand
 from octane_manual_ctrl.can.can_transceiver import CANTransceiver
 from octane_manual_ctrl.can.motor_controller import MotorController
 
-LEFT_IDS  = [0, 1, 2]
-RIGHT_IDS = [3, 4, 5]
+LEFT_IDS  = [1, 2, 3]
+RIGHT_IDS = [4, 5, 6]
 ALL_IDS   = LEFT_IDS + RIGHT_IDS
 
 CONTROL_HZ      = 20    # ramp update rate (Hz)

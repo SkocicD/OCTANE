@@ -92,5 +92,5 @@ def generate_launch_description():
         drive_node,
         can_drive_node,
         manual_actuator_node,
-        gpio_actuator_node,
+        serial_actuator_node,
     ])

@@ -24,7 +24,8 @@ over USB. Override with `-p port:=...` if the Arduino is replaced.
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from std_msgs.msg import String
 from octane_msgs.msg import ActuatorCommand
 
 import serial
@@ -60,12 +61,25 @@ class SerialActuatorNode(Node):
 
         self._last_byte: int | None = None
 
+        # Latched status topic so late subscribers (the debug terminal) get
+        # the connection result even if they start after this node.
+        status_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._status_pub = self.create_publisher(
+            String, '/serial_actuator/status', status_qos)
+
         try:
             self.ser = serial.Serial(port, baud, timeout=0.1)
+            status = f'ready: {port}'
             self.get_logger().info(f'Serial actuator ready on {port} @ {baud}')
         except serial.SerialException as e:
             self.ser = None
+            status = f'FAIL: {e}'
             self.get_logger().error(f'Failed to open {port}: {e}')
+        self._status_pub.publish(String(data=status))
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(
@@ -76,11 +90,15 @@ class SerialActuatorNode(Node):
         if b == self._last_byte:
             return
         self._last_byte = b
-        if self.ser is not None:
-            try:
-                self.ser.write(bytes([b]))
-            except serial.SerialException as e:
-                self.get_logger().warn(f'Serial write failed: {e}')
+        if self.ser is None:
+            self.get_logger().warn(
+                f'would send {b:08b} but port is not open  arm={msg.arm} bucket={msg.bucket}')
+            return
+        try:
+            self.ser.write(bytes([b]))
+        except serial.SerialException as e:
+            self.get_logger().warn(f'Serial write failed: {e}')
+            return
         self.get_logger().info(f'sent {b:08b}  arm={msg.arm} bucket={msg.bucket}')
 
     def destroy_node(self):

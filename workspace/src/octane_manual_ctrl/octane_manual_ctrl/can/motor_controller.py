@@ -37,7 +37,7 @@ class MotorController:
 
     def move(self, speed: float, reverse: bool = False):
         """Drive motor. speed in [0.0, 1.0]. reverse flips direction."""
-        speed = max(0.0, min(1.0, speed))
+        speed = 0.2 * (max(0.0, min(1.0, speed)))
 
         if self._right_side:
             reverse = not reverse
