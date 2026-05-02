@@ -227,6 +227,21 @@ if [ ! -f "$NVBLOX_CORE" ] && [ -d "${EXT_PKGS}/isaac_ros_nvblox/nvblox_ros" ]; 
     cd "${WORKSPACE_ROOT}"
 fi
 
+# Patch nvblox kMaxNumCameras 4 → 6 for our 6-camera rig (5 near + 1 Orbbec).
+# Also ensures the topic base name arrays have entries for camera_4 and camera_5.
+NVBLOX_NODE_HPP="${EXT_PKGS}/isaac_ros_nvblox/nvblox_ros/include/nvblox_ros/nvblox_node.hpp"
+if [ -f "$NVBLOX_NODE_HPP" ] && grep -q "kMaxNumCameras = 4" "$NVBLOX_NODE_HPP"; then
+    sed -i 's/kMaxNumCameras = 4/kMaxNumCameras = 6/' "$NVBLOX_NODE_HPP"
+    sed -i 's|"camera_3/depth",|"camera_3/depth",\n    "camera_4/depth",\n    "camera_5/depth",|' "$NVBLOX_NODE_HPP"
+    sed -i 's|"camera_3/color",|"camera_3/color",\n    "camera_4/color",\n    "camera_5/color",|' "$NVBLOX_NODE_HPP"
+    sed -i 's|"camera_3/mask",|"camera_3/mask",\n    "camera_4/mask",\n    "camera_5/mask",|' "$NVBLOX_NODE_HPP"
+    # Stale partial build must be wiped so the patched header triggers a full recompile
+    rm -rf "${WORKSPACE_ROOT}/build/nvblox_ros" "${WORKSPACE_ROOT}/install/nvblox_ros"
+    echo "[PATCH] nvblox: kMaxNumCameras → 6, wiped stale build"
+else
+    echo "[OK]    nvblox kMaxNumCameras already patched"
+fi
+
 # ── 5. PyTorch for Jetson ─────────────────────────────────────────────────────
 # Wheels are Jetson-specific (JetPack 6.x / L4T R36, cp310, aarch64).
 # If the CDN wheel can't be found, the build stops — install manually and re-run.
@@ -394,9 +409,14 @@ build_external() {
 
 check_and_build_external() {
     local missing=false
-    for pkg in isaac_ros_common nvblox_ros nvblox_msgs astra_camera; do
+    for pkg in isaac_ros_common nvblox_msgs astra_camera; do
         ext_installed "$pkg" || { missing=true; break; }
     done
+    # nvblox_ros gets a share-only install even on failed builds — check for the
+    # actual binary, not just the directory.
+    if [ ! -f "${WORKSPACE_ROOT}/install/nvblox_ros/lib/nvblox_ros/nvblox_node" ]; then
+        missing=true
+    fi
     if [ "$missing" = true ]; then
         echo "[EXTERNAL] Some external packages not yet built — building now (this takes a while)..."
         build_external

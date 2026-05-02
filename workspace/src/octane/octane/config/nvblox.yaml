@@ -2,7 +2,7 @@
   ros__parameters:
     # ── Core ──────────────────────────────────────────────────────────────────
     voxel_size: 0.05
-    num_cameras: 6           # 5 near RGB + 1 Orbbec
+    num_cameras: 6           # 5 near RGB + 1 Orbbec (kMaxNumCameras patched to 6 in build_system.sh)
     use_tf_transforms: true
     mapping_type: "static_tsdf"
 
