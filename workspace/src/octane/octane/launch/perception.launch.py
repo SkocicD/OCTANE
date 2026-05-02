@@ -27,7 +27,7 @@ NEAR_RGB_CAMERAS = [
 
 def generate_launch_description():
     debug_images_arg = DeclareLaunchArgument(
-        'debug_images', default_value='false',
+        'debug_images', default_value='true',
         description='Publish raw sensor_msgs/Image alongside CameraFrame (for RViz/rqt)',
     )
     debug_images = LaunchConfiguration('debug_images')
