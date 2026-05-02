@@ -394,7 +394,7 @@ build_external() {
     echo "[EXTERNAL] Building remaining external packages..."
     colcon build --base-paths "${EXT_PKGS}" \
         --packages-skip isaac_ros_common \
-        --packages-skip nvblox_image_padding nvblox_examples_bringup \
+        --packages-skip nvblox_image_padding nvblox_examples_bringup nvblox_test_data \
             multi_realsense_emitter_synchronizer realsense_splitter semantic_label_conversion \
             gxf_isaac_sgm gxf_isaac_image_flip gxf_isaac_tensorops gxf_isaac_camera_utils \
             isaac_ros_vpi_utils isaac_ros_stereo_image_proc isaac_ros_depth_image_proc isaac_ros_image_proc \
