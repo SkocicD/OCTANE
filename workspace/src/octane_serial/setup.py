@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'octane_gpio'
+package_name = 'octane_serial'
 
 setup(
     name=package_name,
@@ -19,7 +19,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'serial_actuator_node = octane_gpio.nodes.serial_actuator_node:main',
+            'serial_actuator_node = octane_serial.nodes.serial_actuator_node:main',
         ],
     },
 )

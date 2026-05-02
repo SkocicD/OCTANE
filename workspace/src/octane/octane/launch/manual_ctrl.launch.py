@@ -66,7 +66,7 @@ def generate_launch_description():
     )
 
     serial_actuator_node = Node(
-        package='octane_gpio',
+        package='octane_serial',
         executable='serial_actuator_node',
         name='serial_actuator_node',
         output='log',
