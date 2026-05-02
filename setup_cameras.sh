@@ -11,11 +11,13 @@ cat > "$RULES_FILE" << 'EOF'
 # Rebuild by running setup_cameras.sh whenever cameras are reassigned.
 
 # ── Orbbec Astra Pro ──────────────────────────────────────────────────────────
-# RGB UVC interface → /dev/cam_orbbec (video capture device only, not metadata)
-SUBSYSTEM=="video4linux", ENV{ID_PATH}=="platform-3610000.usb-usb-0:4.2.4.1:1.0", ATTR{index}=="0", SYMLINK+="cam_orbbec", MODE="0666"
+# Matched by vendor+product (not port path) so it works in any USB port.
+# Only one Orbbec in the system so no ambiguity.
+# RGB UVC interface → /dev/cam_orbbec
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0501", ATTR{index}=="0", SYMLINK+="cam_orbbec", MODE="0666"
 # Depth/IR sensor — grant non-root access for OpenNI2 / ros2_astra_camera driver
-SUBSYSTEM=="usb", ATTR{idVendor}=="2bc5", ATTR{idProduct}=="0403", MODE="0666", GROUP="video"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2bc5", ATTR{idProduct}=="0501", MODE="0666", GROUP="video"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0403", MODE="0666", GROUP="video"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2bc5", ATTRS{idProduct}=="0501", MODE="0666", GROUP="video"
 
 # ── Innomaker U20CAM 1080p (5×) ───────────────────────────────────────────────
 # Positions assigned by USB port — cables must stay in assigned ports.
