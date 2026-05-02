@@ -112,6 +112,16 @@ class CameraFrameSplitter(Node):
         qx, qy, qz, qw = _euler_deg_to_quat(
             offset['rot']['x'], offset['rot']['y'], offset['rot']['z']
         )
+        # Camera modules are physically mounted rotated 90° CCW around their
+        # optical axis.  Post-multiply by Rz(+90°) in camera frame to correct
+        # image roll without affecting where the camera points.
+        s = math.sqrt(0.5)
+        qx, qy, qz, qw = (
+            (qx + qy) * s,
+            (qy - qx) * s,
+            (qw + qz) * s,
+            (qw - qz) * s,
+        )
         t.transform.rotation.x = qx
         t.transform.rotation.y = qy
         t.transform.rotation.z = qz
