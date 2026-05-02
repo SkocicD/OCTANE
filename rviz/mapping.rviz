@@ -1,0 +1,102 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /NvbloxMesh1
+        - /TF1
+      Splitter Ratio: 0.55
+    Tree Height: 600
+  - Class: rviz_common/Views
+    Name: Views
+    Tree Height: 200
+
+Visualization Manager:
+  Class: ""
+  Displays:
+
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Color: 80; 80; 80
+      Line Style:
+        Value: Lines
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: odom
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Marker Scale: 0.25
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Frame Timeout: 15
+
+    - Class: nvblox_rviz_plugin/NvbloxMesh
+      Name: NvbloxMesh
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /nvblox_node/mesh
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ESDF
+      Enabled: true
+      Alpha: 0.8
+      Color: 0; 200; 255
+      Color Transformer: FlatColor
+      Size (m): 0.05
+      Style: Flat Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /nvblox_node/static_esdf_pointcloud
+
+  Enabled: true
+  Global Options:
+    Background Color: 32; 32; 32
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive: false
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 4.0
+      Focal Point:
+        X: 0.3
+        Y: 0.0
+        Z: 0.0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 0.65
+      Target Frame: base_link
+      Value: Orbit (rviz)
+      Yaw: 5.5
+    Saved: ~
+
+Window Geometry:
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: false
+  Height: 1000
+  Width: 1600
+  X: 0
+  Y: 0
