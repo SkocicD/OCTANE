@@ -264,6 +264,25 @@ else
     echo "[OK] PyTorch already installed"
 fi
 
+# ── 5b. libcusparseLt ─────────────────────────────────────────────────────────
+# JetPack's CUDA 12.x ships libcusparse but not libcusparseLt — PyTorch links
+# against it. Install the real library from the CUDA apt repo.
+if ! dpkg -s libcusparselt0 &>/dev/null 2>&1; then
+    echo "[SETUP] Installing libcusparseLt for PyTorch CUDA support..."
+    # Add CUDA apt keyring + repo for aarch64 if not already present
+    if [ ! -f /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list ]; then
+        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
+        CUDA_KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/${CUDA_KEYRING_DEB}"
+        wget -q "$CUDA_KEYRING_URL" -O "/tmp/${CUDA_KEYRING_DEB}"
+        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
+        sudo apt-get update -qq
+    fi
+    sudo apt-get install -y libcusparselt0 libcusparselt-dev
+    echo "[OK] libcusparseLt installed"
+else
+    echo "[OK] libcusparseLt already installed"
+fi
+
 # ── 6. Depth Anything 3 Python package ────────────────────────────────────────
 # pycolmap has no aarch64 wheel — install without it (only needed for SfM, not inference).
 if ! pip3 show depth-anything-3 &>/dev/null; then
