@@ -37,7 +37,7 @@ Visualization Manager:
 
     - Class: rviz_default_plugins/Marker
       Name: ColorLayer
-      Enabled: true
+      Enabled: false
       Topic:
         Depth: 100
         Durability Policy: Volatile
