@@ -56,7 +56,7 @@ Update these from the NASA field specification PDF before each competition.
 | Zone | Description |
 |------|-------------|
 | `start` | Robot starting position, also where it returns to deposit |
-| `excavation_nav` | Transition corridor between start and excavation area |
+| `nav` | Transition corridor between start and excavation area |
 | `excavation` | Active digging area — regolith is here |
 | `deposition` | Area directly in front of the berm where bucket is dumped |
 | `berm` | The physical berm structure itself |

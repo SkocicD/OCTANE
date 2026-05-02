@@ -16,7 +16,7 @@ from launch_ros.actions import Node
 # These values are placeholders based on a typical Lunabotics arena layout.
 #
 #  ┌────────────────────────────────────────────┐  Y = 3.81m
-#  │  start / deposition  │  excav_nav  │ excav │
+#  │  start / deposition  │     nav     │ excav │
 #  │   (includes berm)    │             │       │
 #  └────────────────────────────────────────────┘  Y = 0.00m
 #  X=0                   X=1.50       X=3.50   X=7.62
@@ -28,7 +28,7 @@ ZONES = {
         'x2': 1.50, 'y2': 3.81,
     },
     # Transition corridor — robot drives through here between start and digging.
-    'excavation_nav': {
+    'nav': {
         'x1': 1.50, 'y1': 0.00,
         'x2': 3.50, 'y2': 3.81,
     },
