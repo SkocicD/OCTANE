@@ -45,6 +45,7 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(
                     os.path.join(astra_camera_dir, 'launch', 'astra.launch.py')
                 ),
+                launch_arguments={'use_uvc_camera': 'true'}.items(),
             )
         )
     except Exception:
