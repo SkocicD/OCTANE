@@ -17,6 +17,7 @@ from cv_bridge import CvBridge
 from rclpy.node import Node
 
 from octane_msgs.msg import CameraFrame
+from sensor_msgs.msg import Image
 
 
 def _derive_depth_topic(rgb_topic: str) -> str:
@@ -38,12 +39,14 @@ class DepthEstimationNode(Node):
         self.declare_parameter('input_topics', ['/cam0/frame'])
         self.declare_parameter('inference_rate', 10.0)
         self.declare_parameter('process_res', 504)
+        self.declare_parameter('debug_images', False)
 
         model_name = self.get_parameter('model_name').value
         model_cache_dir = self.get_parameter('model_cache_dir').value
         input_topics = self.get_parameter('input_topics').value
         inference_rate = self.get_parameter('inference_rate').value
         self.process_res = self.get_parameter('process_res').value
+        debug_images = self.get_parameter('debug_images').value
 
         self.bridge = CvBridge()
 
@@ -64,16 +67,25 @@ class DepthEstimationNode(Node):
         self.model = DepthAnything3.from_pretrained(model_name).to(device)
         self.device = device
         self.is_metric = 'METRIC' in model_name.upper() or 'NESTED' in model_name.upper()
+        # Library forces this off globally; re-enable for fixed-size inputs to let cuDNN
+        # benchmark and cache the fastest conv kernels.
+        torch.backends.cudnn.benchmark = True
         self.get_logger().info(f'Model loaded on {device}  (metric={self.is_metric})')
 
         # Per-camera subs and pubs
         self._latest_frames: dict[str, CameraFrame] = {}
         self._lock = threading.Lock()
+        self._inferring = False
         self._depth_pubs: dict[str, object] = {}
+
+        self._debug_pubs: dict[str, object] = {}
 
         for topic in input_topics:
             depth_topic = _derive_depth_topic(topic)
             self._depth_pubs[topic] = self.create_publisher(CameraFrame, depth_topic, 10)
+            if debug_images:
+                debug_topic = depth_topic.replace('/frame', '/image')
+                self._debug_pubs[topic] = self.create_publisher(Image, debug_topic, 10)
             self.create_subscription(
                 CameraFrame, topic,
                 lambda msg, t=topic: self._frame_callback(t, msg),
@@ -92,6 +104,15 @@ class DepthEstimationNode(Node):
             self._latest_frames[topic] = msg
 
     def _run_inference(self):
+        if self._inferring:
+            return
+        self._inferring = True
+        try:
+            self._do_inference()
+        finally:
+            self._inferring = False
+
+    def _do_inference(self):
         with self._lock:
             snapshot = dict(self._latest_frames)
 
@@ -114,13 +135,12 @@ class DepthEstimationNode(Node):
 
         # Single batched forward pass for all cameras
         with torch.inference_mode():
-            prediction = self.model.inference(rgb_images)
+            prediction = self.model.inference(rgb_images, process_res=self.process_res)
 
         for i, topic in enumerate(topics):
             depth = prediction.depth[i]
 
-            if self.is_metric:
-                # Canonical metric → meters
+            if self.is_metric and prediction.intrinsics is not None:
                 fx = prediction.intrinsics[i, 0, 0]
                 fy = prediction.intrinsics[i, 1, 1]
                 focal_px = (fx + fy) / 2.0
@@ -147,6 +167,9 @@ class DepthEstimationNode(Node):
             out.param = frames[i].param
             out.offset = frames[i].offset
             self._depth_pubs[topic].publish(out)
+
+            if topic in self._debug_pubs:
+                self._debug_pubs[topic].publish(depth_img_msg)
 
 
 def main(args=None):

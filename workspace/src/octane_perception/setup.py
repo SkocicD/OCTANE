@@ -25,7 +25,6 @@ setup(
     entry_points={
         'console_scripts': [
             'astra_depth_node = octane_perception.nodes.astra_depth_node:main',
-            'usb_bridge_camera_node = octane_perception.nodes.usb_bridge_camera_node:main',
             'rgb_camera_node = octane_perception.nodes.rgb_camera_node:main',
             'depth_estimation_node = octane_perception.nodes.depth_estimation_node:main',
         ],
