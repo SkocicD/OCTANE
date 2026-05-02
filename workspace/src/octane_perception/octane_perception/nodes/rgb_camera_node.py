@@ -39,22 +39,32 @@ class RGBCameraNode(Node):
             self.get_logger().error(f'Failed to open camera {camera_id}')
             return
 
-        # Set camera properties
+        # MJPEG must be set before resolution — required for 5× USB2 cameras at 30fps.
+        # YUY2 at 640×480×5 cameras saturates USB2 bandwidth; MJPEG keeps it ~5× lower.
+        self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.capture.set(cv2.CAP_PROP_FPS, float(frame_rate))
+
+        # Log what the driver actually negotiated (may differ from requested)
+        actual_w   = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h   = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_fps = self.capture.get(cv2.CAP_PROP_FPS)
+        fourcc_int = int(self.capture.get(cv2.CAP_PROP_FOURCC))
+        actual_fmt = ''.join([chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)])
 
         # Build static camera info + param (update these once calibrated)
-        fx = fy = float(width)
-        cx = width / 2.0
-        cy = height / 2.0
-        self.camera_info = self._build_camera_info(width, height, fx, fy, cx, cy)
-        self.camera_param = self._build_camera_param(width, height, fx, fy, cx, cy)
+        fx = fy = float(actual_w)
+        cx = actual_w / 2.0
+        cy = actual_h / 2.0
+        self.camera_info = self._build_camera_info(actual_w, actual_h, fx, fy, cx, cy)
+        self.camera_param = self._build_camera_param(actual_w, actual_h, fx, fy, cx, cy)
 
         # Capture timer
         self.timer = self.create_timer(1.0 / frame_rate, self.capture_frame)
         self.get_logger().info(
-            f'RGB Camera node started (id={camera_id}, serial={self.serial}, '
-            f'{width}x{height} @ {frame_rate}Hz)'
+            f'RGB Camera node started  id={camera_id}  serial={self.serial}  '
+            f'{actual_w}x{actual_h} @ {actual_fps:.0f}Hz  fmt={actual_fmt}'
         )
 
     def capture_frame(self):
