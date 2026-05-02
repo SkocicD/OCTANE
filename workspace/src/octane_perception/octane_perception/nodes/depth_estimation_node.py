@@ -67,11 +67,15 @@ class DepthEstimationNode(Node):
         self.model = DepthAnything3.from_pretrained(model_name).to(device)
         self.device = device
         self.is_metric = 'METRIC' in model_name.upper() or 'NESTED' in model_name.upper()
+        # Library forces this off globally; re-enable for fixed-size inputs to let cuDNN
+        # benchmark and cache the fastest conv kernels.
+        torch.backends.cudnn.benchmark = True
         self.get_logger().info(f'Model loaded on {device}  (metric={self.is_metric})')
 
         # Per-camera subs and pubs
         self._latest_frames: dict[str, CameraFrame] = {}
         self._lock = threading.Lock()
+        self._inferring = False
         self._depth_pubs: dict[str, object] = {}
 
         self._debug_pubs: dict[str, object] = {}
@@ -100,6 +104,15 @@ class DepthEstimationNode(Node):
             self._latest_frames[topic] = msg
 
     def _run_inference(self):
+        if self._inferring:
+            return
+        self._inferring = True
+        try:
+            self._do_inference()
+        finally:
+            self._inferring = False
+
+    def _do_inference(self):
         with self._lock:
             snapshot = dict(self._latest_frames)
 
@@ -122,7 +135,7 @@ class DepthEstimationNode(Node):
 
         # Single batched forward pass for all cameras
         with torch.inference_mode():
-            prediction = self.model.inference(rgb_images)
+            prediction = self.model.inference(rgb_images, process_res=self.process_res)
 
         for i, topic in enumerate(topics):
             depth = prediction.depth[i]

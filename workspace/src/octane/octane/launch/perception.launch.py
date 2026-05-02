@@ -101,7 +101,7 @@ def generate_launch_description():
                 'model_name': 'depth-anything/DA3METRIC-LARGE',
                 'input_topics': near_rgb_topics,
                 'inference_rate': 10.0,
-                'process_res': 504,
+                'process_res': 392,
                 'debug_images': ParameterValue(debug_images, value_type=bool),
             }],
         )
