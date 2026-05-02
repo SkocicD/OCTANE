@@ -114,34 +114,33 @@ def generate_launch_description():
         nodes.append(LogInfo(msg='nvblox skipped (nvblox_ros not built)'))
 
     # ── Colored point clouds — one per near camera via depth_image_proc ──────────
-    # Each near camera has registered depth (DA3 32FC1 meters) + RGB so
-    # PointCloudXyzrgbNode produces a full-resolution colored point cloud.
-    # All 5 nodes share one component container to reduce overhead.
-    near_cam_nodes = []
+    # Each camera gets its own container + namespace so topic routing never
+    # collides.  Within namespace mapping/<cam>, the node's default topics are:
+    #   rgb/image_rect_color  →  remapped to rgb/image      (our splitter output)
+    #   rgb/camera_info       →  matches directly            (no remap needed)
+    #   depth_registered/image_rect → remapped to depth/image
+    #   points                →  resolves to mapping/<cam>/points automatically
     for cam_name in cfg['cameras']:
         if cam_name == 'orbbec_depth':
             continue
-        near_cam_nodes.append(
-            ComposableNode(
-                package='depth_image_proc',
-                plugin='depth_image_proc::PointCloudXyzrgbNode',
-                name=f'{cam_name}_point_cloud',
-                remappings=[
-                    ('rgb/camera_info',             f'mapping/{cam_name}/rgb/camera_info'),
-                    ('rgb/image_rect_color',        f'mapping/{cam_name}/rgb/image'),
-                    ('depth_registered/image_rect', f'mapping/{cam_name}/depth/image'),
-                    ('points',                      f'mapping/{cam_name}/points'),
-                ],
-            )
-        )
-    if near_cam_nodes:
         nodes.append(
             ComposableNodeContainer(
-                name='point_cloud_container',
-                namespace='',
+                name=f'{cam_name}_pc_container',
+                namespace=f'mapping/{cam_name}',
                 package='rclcpp_components',
                 executable='component_container',
-                composable_node_descriptions=near_cam_nodes,
+                composable_node_descriptions=[
+                    ComposableNode(
+                        package='depth_image_proc',
+                        plugin='depth_image_proc::PointCloudXyzrgbNode',
+                        name='point_cloud',
+                        parameters=[{'exact_sync': False, 'queue_size': 10}],
+                        remappings=[
+                            ('rgb/image_rect_color',        'rgb/image'),
+                            ('depth_registered/image_rect', 'depth/image'),
+                        ],
+                    )
+                ],
                 output='log',
             )
         )
