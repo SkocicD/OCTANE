@@ -1,0 +1,34 @@
+[submodule "workspace/src/external_pkgs/depth-anything-3"]
+	path = workspace/src/external_pkgs/depth-anything-3
+	url = https://github.com/ByteDance-Seed/Depth-Anything-3.git
+	ignore = dirty
+
+[submodule "workspace/src/external_pkgs/isaac_ros_common"]
+	path = workspace/src/external_pkgs/isaac_ros_common
+	url = https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_common.git
+	ignore = dirty
+
+[submodule "workspace/src/external_pkgs/isaac_ros_nitros"]
+	path = workspace/src/external_pkgs/isaac_ros_nitros
+	url = https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nitros.git
+	ignore = dirty
+
+[submodule "workspace/src/external_pkgs/isaac_ros_image_pipeline"]
+	path = workspace/src/external_pkgs/isaac_ros_image_pipeline
+	url = https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_image_pipeline.git
+	ignore = dirty
+
+[submodule "workspace/src/external_pkgs/isaac_ros_nvblox"]
+	path = workspace/src/external_pkgs/isaac_ros_nvblox
+	url = https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nvblox.git
+	ignore = dirty
+
+[submodule "workspace/src/external_pkgs/negotiated"]
+	path = workspace/src/external_pkgs/negotiated
+	url = https://github.com/osrf/negotiated.git
+	ignore = dirty
+
+[submodule "workspace/src/external_pkgs/ros2_astra_camera"]
+	path = workspace/src/external_pkgs/ros2_astra_camera
+	url = https://github.com/orbbec/ros2_astra_camera.git
+	ignore = dirty
