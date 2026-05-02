@@ -39,16 +39,16 @@ def generate_launch_description():
 
     # ── Orbbec depth camera ──────────────────────────────────────────────────
     try:
-        orbbec_camera_dir = get_package_share_directory('orbbec_camera')
+        astra_camera_dir = get_package_share_directory('astra_camera')
         nodes.append(
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
-                    os.path.join(orbbec_camera_dir, 'launch', 'astra.launch.py')
+                    os.path.join(astra_camera_dir, 'launch', 'astra.launch.py')
                 ),
             )
         )
     except Exception:
-        print('[WARN] orbbec_camera not found — skipping Orbbec launch include')
+        print('[WARN] astra_camera not found — skipping Orbbec launch include')
     nodes.append(
         Node(
             package='octane_perception',
