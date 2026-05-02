@@ -1,2 +1,13 @@
 NVIDIA Isaac/
 .cache/
+
+# ROS 2 build artifacts
+workspace/build/
+workspace/install/
+workspace/log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
