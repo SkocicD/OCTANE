@@ -37,8 +37,8 @@ class RGBCameraNode(Node):
         # CV bridge init
         self.bridge = CvBridge()
 
-        # Open camera
-        self.capture = cv2.VideoCapture(camera_id)
+        # Force V4L2 — Jetson OpenCV defaults to GStreamer which can't handle /dev paths
+        self.capture = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
         if not self.capture.isOpened():
             self.get_logger().error(f'Failed to open camera {camera_id}')
             return
