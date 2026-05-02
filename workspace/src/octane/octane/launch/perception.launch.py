@@ -101,6 +101,7 @@ def generate_launch_description():
                 'input_topics': near_rgb_topics,
                 'inference_rate': 10.0,
                 'process_res': 504,
+                'debug_images': debug_images,
             }],
         )
     )
