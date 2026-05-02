@@ -17,6 +17,7 @@ from cv_bridge import CvBridge
 from rclpy.node import Node
 
 from octane_msgs.msg import CameraFrame
+from sensor_msgs.msg import Image
 
 
 def _derive_depth_topic(rgb_topic: str) -> str:
@@ -126,8 +127,7 @@ class DepthEstimationNode(Node):
         for i, topic in enumerate(topics):
             depth = prediction.depth[i]
 
-            if self.is_metric:
-                # Canonical metric → meters
+            if self.is_metric and prediction.intrinsics is not None:
                 fx = prediction.intrinsics[i, 0, 0]
                 fy = prediction.intrinsics[i, 1, 1]
                 focal_px = (fx + fy) / 2.0

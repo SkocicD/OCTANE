@@ -3,6 +3,7 @@ from launch.actions import IncludeLaunchDescription, LogInfo, DeclareLaunchArgum
 from launch.launch_description_sources import PythonLaunchDescriptionSource, AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 import os
 
@@ -76,7 +77,7 @@ def generate_launch_description():
                     'frame_rate': 30,
                     'width': 480,
                     'height': 360,
-                    'debug_images': debug_images,
+                    'debug_images': ParameterValue(debug_images, value_type=bool),
                 }],
                 remappings=[
                     ('camera/frame', f'perception/camera/near/{position}/rgb/frame'),
@@ -101,7 +102,7 @@ def generate_launch_description():
                 'input_topics': near_rgb_topics,
                 'inference_rate': 10.0,
                 'process_res': 504,
-                'debug_images': debug_images,
+                'debug_images': ParameterValue(debug_images, value_type=bool),
             }],
         )
     )

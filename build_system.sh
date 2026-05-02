@@ -283,17 +283,47 @@ else
     echo "[OK] libcusparseLt already installed"
 fi
 
+# ── 5c. torchvision for Jetson ────────────────────────────────────────────────
+# No pre-built aarch64 wheel is ABI-compatible with the JetPack torch — must build
+# from source against it. Wheel is cached so subsequent runs skip the 30-min build.
+TV_WHEEL_CACHE="${SSD_CACHE}/pip/torchvision-jetson"
+mkdir -p "${TV_WHEEL_CACHE}"
+if ! python3 -c "import torchvision; import torch; torchvision.ops.nms" &>/dev/null 2>&1; then
+    CACHED_TV=$(find "${TV_WHEEL_CACHE}" -name "torchvision-*.whl" | sort -V | tail -1)
+    if [ -n "$CACHED_TV" ]; then
+        echo "[CACHE] Using cached torchvision wheel: $(basename "$CACHED_TV")"
+        pip3 install "$CACHED_TV" --no-deps
+    else
+        echo "[SETUP] Building torchvision 0.20.0 from source (SM87, ~30 min)..."
+        TV_BUILD="/tmp/torchvision_build"
+        rm -rf "$TV_BUILD"
+        git clone --depth 1 --branch v0.20.0 https://github.com/pytorch/vision "$TV_BUILD"
+        cd "$TV_BUILD"
+        FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="8.7" python3 setup.py bdist_wheel
+        TV_WHL=$(find "$TV_BUILD/dist" -name "torchvision-*.whl" | head -1)
+        cp "$TV_WHL" "${TV_WHEEL_CACHE}/"
+        pip3 install "$TV_WHL" --no-deps
+        cd "${WORKSPACE_ROOT}"
+        echo "[OK] torchvision built and installed"
+    fi
+else
+    echo "[OK] torchvision already installed"
+fi
+
 # ── 6. Depth Anything 3 Python package ────────────────────────────────────────
-# pycolmap has no aarch64 wheel — install without it (only needed for SfM, not inference).
+# pycolmap/trimesh/gsplat have no aarch64 wheel — export/__init__.py guards their
+# imports so inference works without them (only SfM/3DGS export paths are affected).
 if ! pip3 show depth-anything-3 &>/dev/null; then
     echo "[SETUP] Installing depth_anything_3..."
     pip3 install -e "${EXT_PKGS}/depth-anything-3" --no-deps
-    # Install inference-only deps — timm is installed with --no-deps to prevent
-    # it pulling in standard PyPI torch and overwriting the JetPack-specific wheel.
-    pip3 install "numpy<2" pillow imageio safetensors einops omegaconf opencv-python-headless huggingface-hub
+    # Install inference-only deps — timm/torchvision installed with --no-deps to
+    # prevent pulling in standard PyPI torch over the JetPack-specific wheel.
+    pip3 install "numpy<2" pillow imageio safetensors einops omegaconf opencv-python-headless huggingface-hub addict "moviepy==1.0.3" evo e3nn pypose numba pandas prettytable
     pip3 install timm --no-deps
     echo "[OK] depth_anything_3 installed"
 else
+    # Ensure deps added after initial install are present
+    pip3 install addict "moviepy==1.0.3" evo e3nn pypose numba pandas prettytable --quiet
     echo "[OK] depth_anything_3 already installed"
 fi
 
