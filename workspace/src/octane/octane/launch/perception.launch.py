@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, LogInfo, DeclareLaunchArgument
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.launch_description_sources import PythonLaunchDescriptionSource, AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -42,10 +42,9 @@ def generate_launch_description():
         astra_camera_dir = get_package_share_directory('astra_camera')
         nodes.append(
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(astra_camera_dir, 'launch', 'astra.launch.py')
+                AnyLaunchDescriptionSource(
+                    os.path.join(astra_camera_dir, 'launch', 'astra_pro.launch.xml')
                 ),
-                launch_arguments={'use_uvc_camera': 'true'}.items(),
             )
         )
     except Exception:
