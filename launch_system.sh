@@ -41,6 +41,7 @@ if [ ! -f "$WORKSPACE_SETUP" ]; then
 fi
 
 source "$WORKSPACE_SETUP"
+export FASTRTPS_DEFAULT_PROFILES_FILE="${SCRIPT_DIR}/fastdds_no_shm.xml"
 echo "[OK] ROS 2 environment sourced"
 
 # Verify avahi is running so octane.local resolves before nodes start
