@@ -1,0 +1,35 @@
+supervisor:
+  fault_check_rate: 10.0
+
+faults:
+  battery_undervoltage:
+    source: /sensors/battery
+    condition: "value < threshold"
+    threshold: 10.5
+    severity: critical
+    description: "Battery undervoltage (<10.5V)"
+    auto_recover: false
+
+  battery_overcurrent:
+    source: /sensors/battery_current
+    condition: "value > threshold"
+    threshold: 30.0
+    severity: critical
+    description: "Battery overcurrent (>30A)"
+    auto_recover: false
+
+  motor_overcurrent:
+    source: /sensors/motor_current
+    condition: "value > threshold"
+    threshold: 20.0
+    severity: warning
+    description: "Motor overcurrent (>20A)"
+    auto_recover: true
+
+  network_timeout:
+    source: /network/connection_status
+    condition: "value == 0"
+    threshold: 0
+    severity: warning
+    description: "Network connection lost"
+    auto_recover: true

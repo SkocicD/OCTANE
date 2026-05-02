@@ -77,9 +77,29 @@ elif [ "$CLEAN_MODE" == "orbbec" ]; then
 
 else
     # Remove only octane packages
+    if [ -d "build/octane_msgs" ]; then
+        echo "Removing build/octane_msgs/"
+        rm -rf build/octane_msgs
+    fi
+
     if [ -d "build/octane_perception" ]; then
         echo "Removing build/octane_perception/"
         rm -rf build/octane_perception
+    fi
+
+    if [ -d "build/octane_mapping" ]; then
+        echo "Removing build/octane_mapping/"
+        rm -rf build/octane_mapping
+    fi
+
+    if [ -d "build/octane_supervisor" ]; then
+        echo "Removing build/octane_supervisor/"
+        rm -rf build/octane_supervisor
+    fi
+
+    if [ -d "build/octane_network" ]; then
+        echo "Removing build/octane_network/"
+        rm -rf build/octane_network
     fi
 
     if [ -d "build/octane" ]; then
@@ -87,9 +107,29 @@ else
         rm -rf build/octane
     fi
 
+    if [ -d "install/octane_msgs" ]; then
+        echo "Removing install/octane_msgs/"
+        rm -rf install/octane_msgs
+    fi
+
     if [ -d "install/octane_perception" ]; then
         echo "Removing install/octane_perception/"
         rm -rf install/octane_perception
+    fi
+
+    if [ -d "install/octane_mapping" ]; then
+        echo "Removing install/octane_mapping/"
+        rm -rf install/octane_mapping
+    fi
+
+    if [ -d "install/octane_supervisor" ]; then
+        echo "Removing install/octane_supervisor/"
+        rm -rf install/octane_supervisor
+    fi
+
+    if [ -d "install/octane_network" ]; then
+        echo "Removing install/octane_network/"
+        rm -rf install/octane_network
     fi
 
     if [ -d "install/octane" ]; then

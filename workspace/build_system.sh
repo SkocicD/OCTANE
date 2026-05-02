@@ -1,11 +1,14 @@
 #!/bin/bash
 
-# Build all Octane system packages
+# Build all Octane system packages.
+# Auto-discovers any packages in src/ — if Isaac ROS / nvblox sources are
+# cloned (via clone_isaac_ros.sh), they get built automatically.
+#
 # Usage:
 #   ./build_system.sh           - Smart build (skip orbbec if already built)
-#   ./build_system.sh --all     - Force build all packages
-#   ./build_system.sh --orbbec  - Only build orbbec packages
-#   ./build_system.sh --octane  - Only build octane packages
+#   ./build_system.sh --all     - Force build everything in src/
+#   ./build_system.sh --octane  - Only octane_* packages
+#   ./build_system.sh --orbbec  - Only orbbec packages
 
 set -e
 
@@ -18,87 +21,48 @@ echo ""
 
 cd "${WORKSPACE_ROOT}"
 
-# Parse command line arguments
-BUILD_MODE="smart"
-if [ "$1" == "--all" ]; then
-    BUILD_MODE="all"
-    echo "[MODE] Force building all packages"
-elif [ "$1" == "--orbbec" ]; then
-    BUILD_MODE="orbbec"
-    echo "[MODE] Building orbbec packages only"
-elif [ "$1" == "--octane" ]; then
-    BUILD_MODE="octane"
-    echo "[MODE] Building octane packages only"
-else
-    echo "[MODE] Smart build (skip orbbec if already built)"
+# Auto-clone Isaac ROS deps (nvblox + supporting packages) if missing
+if [ ! -d "${WORKSPACE_ROOT}/src/isaac_ros_nvblox" ] && [ -f "${WORKSPACE_ROOT}/clone_isaac_ros.sh" ]; then
+    echo "[INFO] Isaac ROS sources not found — cloning…"
+    "${WORKSPACE_ROOT}/clone_isaac_ros.sh"
+    echo ""
 fi
+
+# Install Python dependencies
+echo "[DEPS] Installing Python dependencies..."
+pip install Jetson.GPIO --quiet 2>/dev/null && echo "[DEPS] Jetson.GPIO installed" || echo "[DEPS] Jetson.GPIO unavailable (not a Jetson — skipping)"
 echo ""
 
-# Build based on mode
-if [ "$BUILD_MODE" == "orbbec" ]; then
-    # Only build orbbec packages
-    echo "Building orbbec packages..."
-    MAKEFLAGS="-j2" colcon build \
-        --base-paths "${WORKSPACE_ROOT}/src" \
-        --packages-select \
-        orbbec_camera_msgs orbbec_camera \
-        --parallel-workers 1 \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-        --event-handlers console_cohesion+
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane"
+ORBBEC_PKGS="orbbec_camera_msgs orbbec_camera"
 
-elif [ "$BUILD_MODE" == "octane" ]; then
-    # Only build octane packages
-    echo "Building octane packages..."
-    MAKEFLAGS="-j2" colcon build \
-        --base-paths "${WORKSPACE_ROOT}/src" \
-        --packages-select \
-        octane_perception octane \
-        --parallel-workers 1 \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-        --event-handlers console_cohesion+
+CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"
+COLCON_FLAGS="--base-paths ${WORKSPACE_ROOT}/src --parallel-workers 1 --event-handlers console_cohesion+"
 
-elif [ "$BUILD_MODE" == "all" ]; then
-    # Force build everything
-    echo "Building all packages..."
-    MAKEFLAGS="-j2" colcon build \
-        --base-paths "${WORKSPACE_ROOT}/src" \
-        --packages-select \
-        orbbec_camera_msgs orbbec_camera octane_perception octane \
-        --parallel-workers 1 \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-        --event-handlers console_cohesion+
-
-else
-    # Smart build - check if orbbec is already built
-    ORBBEC_BUILT=false
-    if [ -d "${WORKSPACE_ROOT}/install/orbbec_camera_msgs" ] && [ -d "${WORKSPACE_ROOT}/install/orbbec_camera" ]; then
-        echo "[INFO] Orbbec packages already built, skipping..."
-        ORBBEC_BUILT=true
-        echo ""
-    fi
-
-    if [ "$ORBBEC_BUILT" = true ]; then
-        # Skip orbbec, only build our packages (fast)
-        echo "Building octane packages only..."
-        MAKEFLAGS="-j2" colcon build \
-            --base-paths "${WORKSPACE_ROOT}/src" \
-            --packages-select \
-            octane_perception octane \
-            --parallel-workers 1 \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-            --event-handlers console_cohesion+
-    else
-        # Build everything including orbbec (slow)
-        echo "Building all packages including orbbec..."
-        MAKEFLAGS="-j2" colcon build \
-            --base-paths "${WORKSPACE_ROOT}/src" \
-            --packages-select \
-            orbbec_camera_msgs orbbec_camera octane_perception octane \
-            --parallel-workers 1 \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-            --event-handlers console_cohesion+
-    fi
-fi
+case "$1" in
+    --orbbec)
+        echo "[MODE] Building orbbec packages only"
+        MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-select ${ORBBEC_PKGS} --cmake-args ${CMAKE_ARGS}
+        ;;
+    --octane)
+        echo "[MODE] Building octane packages only"
+        MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-select ${OCTANE_PKGS} --cmake-args ${CMAKE_ARGS}
+        ;;
+    --all)
+        echo "[MODE] Force building everything in src/"
+        MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --cmake-args ${CMAKE_ARGS}
+        ;;
+    *)
+        # Smart build: skip orbbec if already built, build everything else
+        if [ -d "${WORKSPACE_ROOT}/install/orbbec_camera" ] && [ -d "${WORKSPACE_ROOT}/install/orbbec_camera_msgs" ]; then
+            echo "[MODE] Smart build (orbbec cached, building everything else)"
+            MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --packages-skip ${ORBBEC_PKGS} --cmake-args ${CMAKE_ARGS}
+        else
+            echo "[MODE] Smart build (first run, building everything)"
+            MAKEFLAGS="-j2" colcon build ${COLCON_FLAGS} --cmake-args ${CMAKE_ARGS}
+        fi
+        ;;
+esac
 
 echo ""
 echo "[OK] Build complete"
