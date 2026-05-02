@@ -16,8 +16,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 import socket
-import struct
-from typing import Optional
 
 # Minimal heartbeat frame format:
 # [MAGIC:1B][STATE:1B][SEQ:2B][CRC:1B] = 5 bytes total
@@ -29,7 +27,7 @@ from typing import Optional
 MAGIC = 0x4F
 DEFAULT_HOST = "255.255.255.255"  # Broadcast by default
 DEFAULT_PORT = 5001  # Separate port from TCP command port
-DEFAULT_RATE_HZ = 0.3333  # 3 second interval between heartbeats
+DEFAULT_RATE_HZ = 0.3333  # ~3 s interval; GUI timeout should be >= 7 s
 
 
 def calc_crc8(data: bytes) -> int:
@@ -69,57 +67,62 @@ class HeartbeatSenderNode(Node):
     def __init__(self):
         super().__init__('heartbeat_sender')
 
-        # Declare parameters
         self.declare_parameter('host', DEFAULT_HOST)
         self.declare_parameter('port', DEFAULT_PORT)
         self.declare_parameter('rate_hz', DEFAULT_RATE_HZ)
+        self.declare_parameter('rover_hostname', 'octane')  # resolves via mDNS to pick interface
 
-        self.host = self.get_parameter('host').value
-        self.port = self.get_parameter('port').value
-        self.rate_hz = self.get_parameter('rate_hz').value
+        self.host          = self.get_parameter('host').value
+        self.port          = self.get_parameter('port').value
+        self.rate_hz       = self.get_parameter('rate_hz').value
+        rover_hostname     = self.get_parameter('rover_hostname').value
 
-        # Validate timeout vs rate
-        if self.rate_hz > 0:
-            interval_sec = 1.0 / self.rate_hz
-            self.get_logger().info(
-                f"Heartbeat interval: {interval_sec:.1f}s, "
-                f"GUI timeout should be >= {interval_sec * 2:.1f}s (2x interval)"
-            )
+        self.current_state = '0'
+        self.seq_num       = 0
 
-        # Current state
-        self.current_state = '0'  # STANDBY by default ('0' char)
+        hb_qos = QoSProfile(depth=4, reliability=ReliabilityPolicy.RELIABLE)
+        self._status_pub = self.create_publisher(String, '/network/heartbeat_tx', hb_qos)
 
-        # Sequence number
-        self.seq_num = 0
-
-        # UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock.settimeout(0.1)  # Short timeout for non-blocking send
 
-        # Timer
-        interval_sec = 1.0 / self.rate_hz  # 3 seconds
+        # Resolve the rover's own hostname so the broadcast goes out the right
+        # interface (whichever one mDNS / avahi advertises on).
+        bind_ip = self._resolve_own_ip(rover_hostname)
+        if bind_ip:
+            self.sock.bind((bind_ip, 0))
+            self.get_logger().info(f'Resolved {rover_hostname}.local -> {bind_ip}, bound')
+        else:
+            self.get_logger().warn(
+                f'Could not resolve {rover_hostname}.local — sending on default route interface'
+            )
+
+        interval_sec = 1.0 / self.rate_hz
         self.timer = self.create_timer(interval_sec, self.send_heartbeat)
 
-        self.get_logger().info(
-            f"Heartbeat sender initialized: {self.host}:{self.port} "
-            f"every {interval_sec:.1f}s"
-        )
-        self.timer = self.create_timer(period, self.send_heartbeat)
-
-        # Subscribe to supervisor state
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
-        self.create_subscription(
-            String,
-            '/supervisor/state',
-            self.state_callback,
-            qos
-        )
+        self.create_subscription(String, '/supervisor/state', self.state_callback, qos)
 
         self.get_logger().info(
-            f"Heartbeat sender initialized: {self.host}:{self.port} "
-            f"at {self.rate_hz:.2f}Hz"
+            f'Heartbeat sender ready: -> {self.host}:{self.port} every {1/self.rate_hz:.0f}s'
         )
+
+    def _resolve_own_ip(self, hostname: str) -> str:
+        """Resolve rover hostname to its mDNS-advertised IP.
+
+        Tries <hostname>.local first (mDNS), then bare hostname.
+        Returns the first non-loopback IPv4 address found, or '' on failure.
+        """
+        for candidate in (hostname + '.local', hostname):
+            try:
+                results = socket.getaddrinfo(candidate, None, socket.AF_INET)
+                for _, _, _, _, sockaddr in results:
+                    ip = sockaddr[0]
+                    if not ip.startswith('127.'):
+                        return ip
+            except OSError:
+                pass
+        return ''
 
     def state_callback(self, msg: String):
         """Update current state from supervisor."""
@@ -134,23 +137,15 @@ class HeartbeatSenderNode(Node):
     def send_heartbeat(self):
         """Send heartbeat packet."""
         try:
-            # Encode heartbeat
             frame = encode_heartbeat(self.current_state, self.seq_num)
-
-            # Send via UDP
             self.sock.sendto(frame, (self.host, self.port))
-
-            # Increment sequence
+            status = f'OK  seq={self.seq_num}  state={self.current_state}  -> {self.host}:{self.port}'
             self.seq_num = (self.seq_num + 1) % 65536
-
-            # Debug logging every 30th packet
-            if self.seq_num % 30 == 0:
-                self.get_logger().debug(
-                    f"Heartbeat sent: state={self.current_state}, seq={self.seq_num}"
-                )
-
         except Exception as e:
-            self.get_logger().warn(f"Heartbeat send failed: {e}")
+            status = f'ERR {e}'
+        msg = String()
+        msg.data = status
+        self._status_pub.publish(msg)
 
 
 def main(args=None):

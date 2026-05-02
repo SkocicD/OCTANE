@@ -37,9 +37,11 @@ class ModeManagerNode(Node):
             namespace="",
             parameters=[
                 ("check_rate", 10.0),
+                ("disable_faults", False),
             ],
         )
         check_rate = self.get_parameter("check_rate").get_parameter_value().double_value
+        self.disable_faults = self.get_parameter("disable_faults").get_parameter_value().bool_value
 
         # QoS for reliable command receipt
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
@@ -75,6 +77,9 @@ class ModeManagerNode(Node):
 
         # Timer for state publishing
         self.timer = self.create_timer(1.0 / check_rate, self.publish_state)
+
+        if self.disable_faults:
+            self.get_logger().warn("DEV MODE: fault tripping is DISABLED — FAULT state will never be entered")
 
         self.get_logger().info("Mode manager node initialized")
         self.publish_state()
@@ -121,10 +126,13 @@ class ModeManagerNode(Node):
     def fault_signal_callback(self, msg: String):
         """Handle fault signal from fault detector."""
         fault_type = msg.data
+
+        if self.disable_faults:
+            self.get_logger().warn(f"DEV MODE: fault suppressed ({fault_type}) — FAULT transition skipped")
+            return
+
         self.get_logger().error(f"Fault signal received: {fault_type}")
-
         transition = self.state_machine.transition(Mode.STANDBY, fault_type=fault_type)
-
         if transition.success:
             self.get_logger().error(f"Entered FAULT state due to: {fault_type}")
         self.publish_state()
