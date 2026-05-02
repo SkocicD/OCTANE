@@ -74,8 +74,8 @@ def generate_launch_description():
                     'device_path': device_path,
                     'serial': position,
                     'frame_rate': 30,
-                    'width': 640,
-                    'height': 480,
+                    'width': 480,
+                    'height': 360,
                     'debug_images': debug_images,
                 }],
                 remappings=[
