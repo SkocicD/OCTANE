@@ -2,20 +2,77 @@ import os
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import LogInfo
 from launch_ros.actions import Node
 
 
-# Mapping subsystem launch:
-#   - One CameraFrameSplitter per camera (CameraFrame → Image+CameraInfo + TF)
-#   - nvblox node consuming the shimmed topics for multi-camera TSDF mapping (if built)
+# ── Arena zone definitions ────────────────────────────────────────────────────
+# Rectangles defined by two opposite corners (x1,y1) → (x2,y2).
+# Coordinate frame: origin at SW corner of arena, X east (away from berm),
+# Y north.  Units: meters.
 #
-# All cameras are read from the central cameras.yaml config.
+# UPDATE THESE from the NASA field specification PDF before each competition.
+# These values are placeholders based on a typical Lunabotics arena layout.
+#
+#  ┌────────────────────────────────────────────┐  Y = 3.81m
+#  │  start / deposition  │  excav_nav  │ excav │
+#  │   (includes berm)    │             │       │
+#  └────────────────────────────────────────────┘  Y = 0.00m
+#  X=0                   X=1.50       X=3.50   X=7.62
+#
+ZONES = {
+    # Robot starts here; also where it returns to dump regolith.
+    'start': {
+        'x1': 0.00, 'y1': 0.00,
+        'x2': 1.50, 'y2': 3.81,
+    },
+    # Transition corridor — robot drives through here between start and digging.
+    'excavation_nav': {
+        'x1': 1.50, 'y1': 0.00,
+        'x2': 3.50, 'y2': 3.81,
+    },
+    # Active digging area — regolith is here.
+    'excavation': {
+        'x1': 3.50, 'y1': 0.00,
+        'x2': 7.62, 'y2': 3.81,
+    },
+    # Area directly in front of the berm where the bucket is raised and dumped.
+    'deposition': {
+        'x1': 0.00, 'y1': 0.75,
+        'x2': 1.00, 'y2': 3.06,
+    },
+    # The physical berm structure itself.
+    'berm': {
+        'x1': 0.00, 'y1': 1.40,
+        'x2': 0.40, 'y2': 2.41,
+    },
+}
+
+# Nav2 goal waypoints — center of each target zone, used by the supervisor to
+# send goals.  Derived from ZONES above; update if ZONES change.
+ZONE_CENTERS = {
+    name: {
+        'x': (z['x1'] + z['x2']) / 2.0,
+        'y': (z['y1'] + z['y2']) / 2.0,
+    }
+    for name, z in ZONES.items()
+}
+
 
 def generate_launch_description():
-    nodes = [LogInfo(msg='Starting mapping subsystem')]
+    nodes = [
+        LogInfo(msg='Starting mapping subsystem'),
+        # Stub identity odom→base_link until octane_localization is ready
+        # (April tags + IMU fusion).  Replace this node with the real source then.
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='odom_to_base_link',
+            arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link'],
+            output='log',
+        ),
+    ]
 
     # Load camera config
     try:
@@ -30,10 +87,9 @@ def generate_launch_description():
         return LaunchDescription(nodes)
 
     # ── Camera frame splitters (one per camera) ──────────────────────────────
-    # Each splitter takes a CameraFrame topic and re-publishes Image +
-    # CameraInfo on standard topic names that nvblox subscribes to.
+    # Unpacks each CameraFrame into Image + CameraInfo on nav2/AI-compatible
+    # topic names, and broadcasts the static TF base_link → <cam>_frame.
     for cam_name, cam_cfg in cfg['cameras'].items():
-        # RGB stream: rgb_topic → mapping/<cam>/rgb/{image,camera_info}
         nodes.append(
             Node(
                 package='octane_mapping',
@@ -50,7 +106,6 @@ def generate_launch_description():
                 }],
             )
         )
-        # Depth stream: depth_topic → mapping/<cam>/depth/{image,camera_info}
         nodes.append(
             Node(
                 package='octane_mapping',
@@ -68,49 +123,13 @@ def generate_launch_description():
             )
         )
 
-    # ── nvblox (multi-camera TSDF mapping) ───────────────────────────────────
-    # Subscribes to the splitter outputs for each camera and produces TSDF,
-    # mesh, occupancy grid, and ESDF.  Camera poses come from the TF tree
-    # published by the splitters (base_link → <cam>_frame).
+    # ── Nav2 (path planning against static arena map) ────────────────────────
+    # Publishes /plan continuously as the AI policy's path hint.
+    # Zone goal waypoints (ZONE_CENTERS above) are sent by the supervisor.
     #
-    # Uses input remappings to route each camera's shimmed topics into
-    # nvblox's expected topic names.  Single nvblox instance handles all
-    # cameras via the multi-camera input mode.
-    nvblox_remappings = []
-    for i, cam_name in enumerate(cfg['cameras'].keys()):
-        nvblox_remappings.extend([
-            (f'camera_{i}/depth/image',       f'mapping/{cam_name}/depth/image'),
-            (f'camera_{i}/depth/camera_info', f'mapping/{cam_name}/depth/camera_info'),
-            (f'camera_{i}/color/image',       f'mapping/{cam_name}/rgb/image'),
-            (f'camera_{i}/color/camera_info', f'mapping/{cam_name}/rgb/camera_info'),
-        ])
-
-    try:
-        get_package_share_directory('nvblox_ros')
-        nodes.append(
-            Node(
-                package='nvblox_ros',
-                executable='nvblox_node',
-                name='nvblox_node',
-                output='log',
-                parameters=[{
-                    'global_frame': 'odom',
-                    'pose_frame':   'base_link',
-                    'mapping_type': 'static_tsdf',
-                    'voxel_size':   0.05,
-                    'num_cameras':  len(cfg['cameras']),
-                    'use_color':    True,
-                    'use_depth':    True,
-                    'use_lidar':    False,
-                    'max_integration_distance_m': 5.0,
-                    'integrate_color_radius_m':   5.0,
-                    'esdf_mode':    'esdf_3d',
-                }],
-                remappings=nvblox_remappings,
-            )
-        )
-    except PackageNotFoundError:
-        print('[WARN] nvblox_ros not found — skipping nvblox node')
+    # map_server and nav2_bringup are expected to be launched separately via
+    # the nav2 bringup package once the static arena map .pgm/.yaml is ready.
+    # Add those nodes here when the map file is available.
 
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)
