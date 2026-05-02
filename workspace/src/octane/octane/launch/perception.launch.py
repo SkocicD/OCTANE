@@ -14,11 +14,13 @@ import os
 # Update these once cameras are physically assigned to rover positions.
 NEAR_RGB_CAMERAS = [
     # (node_name,            position,        device_path)
-    ('near_rgb_left_side',   'left_side',     '/dev/v4l/by-path/****-left-side'),
-    ('near_rgb_left_front',  'left_front',    '/dev/v4l/by-path/****-left-front'),
-    ('near_rgb_right_side',  'right_side',    '/dev/v4l/by-path/****-right-side'),
-    ('near_rgb_right_front', 'right_front',   '/dev/v4l/by-path/****-right-front'),
-    ('near_rgb_back_rear',   'back_rear',     '/dev/v4l/by-path/****-back-rear'),
+    # Paths are udev symlinks defined in /etc/udev/rules.d/99-octane-cameras.rules
+    # (setup_cameras.sh in repo root).  Cables must stay in assigned USB ports.
+    ('near_rgb_left_front',  'left_front',    '/dev/cam_left_front'),
+    ('near_rgb_left_side',   'left_side',     '/dev/cam_left_side'),
+    ('near_rgb_right_front', 'right_front',   '/dev/cam_right_front'),
+    ('near_rgb_right_side',  'right_side',    '/dev/cam_right_side'),
+    ('near_rgb_back_rear',   'back_rear',     '/dev/cam_back_rear'),
 ]
 
 
