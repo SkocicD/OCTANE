@@ -174,6 +174,20 @@ if [ -f "${WORKSPACE_ROOT}/isaac_ros.repos" ]; then
     for repo in isaac_ros_common isaac_ros_nitros isaac_ros_image_pipeline isaac_ros_nvblox negotiated; do
         [ -d "${EXT_PKGS}/${repo}" ] || { NEEDS_VCS=true; break; }
     done
+    # Also re-clone if repos are on the wrong branch (e.g. main → release/3.2)
+    EXPECTED_VER=$(grep -A2 "isaac_ros_common" "${WORKSPACE_ROOT}/isaac_ros.repos" | grep version | awk '{print $2}')
+    # For tag checkouts HEAD is detached — compare the tag description instead
+    ACTUAL_VER=$(git -C "${EXT_PKGS}/isaac_ros_common" describe --tags --exact-match 2>/dev/null \
+                 || git -C "${EXT_PKGS}/isaac_ros_common" rev-parse --abbrev-ref HEAD 2>/dev/null \
+                 || echo "none")
+    if [ "$ACTUAL_VER" != "$EXPECTED_VER" ]; then
+        echo "[UPDATE] Isaac ROS repos on wrong branch (${ACTUAL_VER} → ${EXPECTED_VER}), re-cloning..."
+        for repo in isaac_ros_common isaac_ros_nitros isaac_ros_image_pipeline isaac_ros_nvblox negotiated; do
+            rm -rf "${EXT_PKGS}/${repo}"
+            rm -rf "${WORKSPACE_ROOT}/build/${repo}"* "${WORKSPACE_ROOT}/install/${repo}"*
+        done
+        NEEDS_VCS=true
+    fi
     if [ "$NEEDS_VCS" = true ]; then
         echo "[CLONE] Isaac ROS repos via vcs..."
         cd "${EXT_PKGS}" && vcs import < "${WORKSPACE_ROOT}/isaac_ros.repos" && cd "${WORKSPACE_ROOT}"
@@ -397,7 +411,7 @@ build_external() {
         --packages-skip nvblox_image_padding nvblox_examples_bringup nvblox_test_data \
             multi_realsense_emitter_synchronizer realsense_splitter semantic_label_conversion \
             gxf_isaac_sgm gxf_isaac_image_flip gxf_isaac_tensorops gxf_isaac_camera_utils \
-            isaac_ros_vpi_utils isaac_ros_stereo_image_proc isaac_ros_depth_image_proc isaac_ros_image_proc \
+            isaac_ros_stereo_image_proc isaac_ros_depth_image_proc isaac_ros_image_proc \
             custom_nitros_dnn_image_encoder isaac_ros_pynitros \
             isaac_ros_image_pipeline \
             custom_nitros_string custom_nitros_message_filter \

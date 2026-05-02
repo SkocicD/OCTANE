@@ -11,19 +11,19 @@ repositories:
   isaac_ros_common:
     type: git
     url: https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_common.git
-    version: main
+    version: v3.2-9
   isaac_ros_nitros:
     type: git
     url: https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nitros.git
-    version: main
+    version: v3.2-9
   isaac_ros_image_pipeline:
     type: git
     url: https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_image_pipeline.git
-    version: main
+    version: v3.2-9
   isaac_ros_nvblox:
     type: git
     url: https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nvblox.git
-    version: main
+    version: v3.2-9
   negotiated:
     type: git
     url: https://github.com/osrf/negotiated.git
