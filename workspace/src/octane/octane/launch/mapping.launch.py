@@ -2,6 +2,7 @@ import os
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import LogInfo
 from launch_ros.actions import Node
@@ -49,8 +50,8 @@ ZONES = {
     },
 }
 
-# Nav2 goal waypoints — center of each target zone, used by the supervisor to
-# send goals.  Derived from ZONES above; update if ZONES change.
+# Center of each zone — consumed by octane_localization's zone manager to
+# determine the next nav goal coordinate.
 ZONE_CENTERS = {
     name: {
         'x': (z['x1'] + z['x2']) / 2.0,
@@ -76,18 +77,18 @@ def generate_launch_description():
 
     # Load camera config
     try:
-        config_file = os.path.join(
-            get_package_share_directory('octane'), 'config', 'cameras.yaml'
-        )
+        octane_share = get_package_share_directory('octane')
+        config_file = os.path.join(octane_share, 'config', 'cameras.yaml')
+        nvblox_params = os.path.join(octane_share, 'config', 'nvblox.yaml')
         with open(config_file) as f:
             cfg = yaml.safe_load(f)
     except Exception as e:
-        print(f'[WARN] Could not load cameras.yaml: {e} — skipping mapping nodes')
-        nodes.append(LogInfo(msg='Mapping subsystem skipped (cameras.yaml unavailable)'))
+        print(f'[WARN] Could not load config: {e} — skipping mapping nodes')
+        nodes.append(LogInfo(msg='Mapping subsystem skipped (config unavailable)'))
         return LaunchDescription(nodes)
 
-    # ── Camera frame splitters (one per camera) ──────────────────────────────
-    # Unpacks each CameraFrame into Image + CameraInfo on nav2/AI-compatible
+    # ── Camera frame splitters (one per camera, per stream) ───────────────────
+    # Unpacks each CameraFrame into Image + CameraInfo on nvblox-compatible
     # topic names, and broadcasts the static TF base_link → <cam>_frame.
     for cam_name, cam_cfg in cfg['cameras'].items():
         nodes.append(
@@ -123,13 +124,40 @@ def generate_launch_description():
             )
         )
 
-    # ── Nav2 (path planning against static arena map) ────────────────────────
-    # Publishes /plan continuously as the AI policy's path hint.
-    # Zone goal waypoints (ZONE_CENTERS above) are sent by the supervisor.
-    #
-    # map_server and nav2_bringup are expected to be launched separately via
-    # the nav2 bringup package once the static arena map .pgm/.yaml is ready.
-    # Add those nodes here when the map file is available.
+    # ── nvblox — live 3D view around the robot ────────────────────────────────
+    # Integrates depth from all 6 cameras into a rolling TSDF/ESDF.
+    # TSDF decay + 4 m radius clearing keeps it a live view, not a persistent
+    # global map.  Camera poses come from the TF tree above.
+    nvblox_remappings = []
+    for i, cam_name in enumerate(cfg['cameras'].keys()):
+        nvblox_remappings.extend([
+            (f'camera_{i}/depth/image',       f'mapping/{cam_name}/depth/image'),
+            (f'camera_{i}/depth/camera_info', f'mapping/{cam_name}/depth/camera_info'),
+            (f'camera_{i}/color/image',       f'mapping/{cam_name}/rgb/image'),
+            (f'camera_{i}/color/camera_info', f'mapping/{cam_name}/rgb/camera_info'),
+        ])
+
+    try:
+        get_package_share_directory('nvblox_ros')
+        nodes.append(
+            Node(
+                package='nvblox_ros',
+                executable='nvblox_node',
+                name='nvblox_node',
+                output='log',
+                parameters=[
+                    nvblox_params,
+                    {
+                        'global_frame': 'odom',
+                        'pose_frame':   'base_link',
+                    },
+                ],
+                remappings=nvblox_remappings,
+            )
+        )
+    except PackageNotFoundError:
+        print('[WARN] nvblox_ros not found — build isaac_ros_nvblox first')
+        nodes.append(LogInfo(msg='nvblox skipped (nvblox_ros not built)'))
 
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)

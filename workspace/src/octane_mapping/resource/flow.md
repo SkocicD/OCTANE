@@ -2,56 +2,57 @@
 
 ## Overview
 
-The mapping package is intentionally lightweight. Rather than building a live
-TSDF map at runtime, it loads a pre-built static arena map and runs nav2 on top
-of it. The AI policy handles all reactive obstacle avoidance from live camera
-input; nav2's only job is to publish a continuously-updated path hint that
-tells the AI which direction to head toward the current goal zone.
+The mapping package runs nvblox to produce a live 3D TSDF/ESDF view of what is
+immediately around the robot from all 6 cameras.  It is not a persistent global
+map — TSDF decay and radius clearing keep it as a rolling window centered on
+the robot.  The AI policy uses the live depth frames directly for reactive
+driving; nvblox's ESDF output is available for any obstacle distance queries.
 
 ```
-                   cameras.yaml (intrinsics + mount offsets)
-                          |
-  octane_perception       |
-  ─────────────────       |
-  rgb_camera_node  ──►  CameraFrame (RGB)   ─►  CameraFrameSplitter ─► Image + CameraInfo + TF
-  depth_est_node   ──►  CameraFrame (depth) ─►  CameraFrameSplitter ─► Image + CameraInfo + TF
-                                                        │
-                                               TF tree (base_link → camera_N_frame)
-                                               fed directly into AI input stack
+  octane_perception
+  ─────────────────
+  rgb_camera_node ×5  ──►  CameraFrame (RGB)   ─┐
+  astra_depth_node    ──►  CameraFrame (RGB)   ─┤
+                                                 │  CameraFrameSplitter ─► sensor_msgs/Image
+  depth_est_node  ×5  ──►  CameraFrame (depth) ─┤  (one per camera,      ► sensor_msgs/CameraInfo
+  astra_depth_node    ──►  CameraFrame (depth) ─┘   per stream)          ► TF: base_link→cam_frame
 
   octane_mapping
   ──────────────
-  map_server  ──►  static arena map (.pgm/.yaml)
-                          │
-                        nav2  ──►  /plan  (nav_msgs/Path, replanned continuously)
-                          │               │
-                    ESDF costmap          └──► AI policy conditioning input
-                    (from static map)
+  nvblox_node  ◄──  Image + CameraInfo (×6 depth, ×6 color)
+               ◄──  TF tree (base_link → each camera frame)
+               ◄──  TF: odom → base_link  (stub now, real from octane_localization)
+                │
+                ├──► /nvblox/mesh          (live 3D mesh of surroundings)
+                ├──► /nvblox/esdf_slice    (2D obstacle distance field)
+                └──► /nvblox/map_slice     (2D occupancy slice)
+
+  octane_localization (future)
+  ────────────────────────────
+  April tag detections + IMU ──► odom → base_link TF  (replaces stub)
+  Zone manager               ──► current goal zone center (for AI conditioning)
 
   octane_ai (future)
   ──────────────────
-  AI policy:  [live depth frames]  +  [/plan path hint]  ──►  DriveCommand
+  [live depth CameraFrames]  +  [goal zone coordinate]  ──►  DriveCommand
 ```
 
-## Why static map + nav2 instead of live TSDF
+## Why nvblox as a rolling live view (not global map)
 
-- The Lunabotics arena layout is published by NASA ahead of time — zone
-  boundaries and berm positions are known before the run starts.
-- The AI policy (trained in Isaac Sim with domain-randomized terrain) handles
-  reactive obstacle avoidance from live depth input. It does not need a
-  persistent 3D map.
-- nav2 path replanning on a static costmap is fast and reliable. The AI treats
-  the `/plan` output as a soft goal-direction hint, not a hard constraint.
-- This avoids the odom drift / TSDF accumulation complexity for a task where
-  the field geometry is already known.
+- The arena terrain (rocks, craters, regolith mounds) is unknown until seen.
+- The AI handles reactive navigation; it does not consume the nvblox map directly.
+- nvblox provides an ESDF that can be queried for obstacle proximity if needed.
+- TSDF decay + map radius clearing keeps memory bounded and the view current as
+  the robot moves through the arena.
 
 ## Arena zones
 
-Defined in `mapping.launch.py` as corner-to-corner rectangles in the arena
-coordinate frame. Origin (0, 0) is the SW corner of the arena; X points east
-(away from berm), Y points north.
+Defined in `mapping.launch.py` as corner-to-corner rectangles.  These are used
+by `octane_localization`'s zone manager to determine which zone the robot is
+currently in and what the next goal coordinate should be.
 
-Update these from the NASA field specification PDF before each competition.
+Origin (0, 0) is the SW corner of the arena; X east (away from berm), Y north.
+Update from the NASA field spec PDF before each competition.
 
 | Zone | Description |
 |------|-------------|
@@ -61,32 +62,24 @@ Update these from the NASA field specification PDF before each competition.
 | `deposition` | Area directly in front of the berm where bucket is dumped |
 | `berm` | The physical berm structure itself |
 
-Zone parameters are loaded by the map_server and will be consumed by the
-supervisor (mission sequencer) to determine which nav2 goal to send next.
+## nvblox configuration
 
-## Nav2 path hint
+Key parameters tuned for a rolling live view on the Jetson AGX Orin:
 
-nav2 publishes its current planned path on `/plan` (`nav_msgs/Path`).
-The AI policy receives the next N waypoints from `/plan` transformed into
-robot-relative coordinates as a conditioning input alongside camera frames.
-If the AI deviates to avoid an obstacle, nav2 replans around the new robot
-position automatically.
+| Parameter | Value | Why |
+|-----------|-------|-----|
+| `voxel_size` | 0.05 m | 5 cm resolution — enough detail for obstacles |
+| `num_cameras` | 6 | All 5 near + 1 Orbbec |
+| `map_clearing_radius_m` | 4.0 m | Discard voxels beyond 4 m from robot |
+| `tsdf_decay_factor` | 0.95 | Voxels fade when not re-observed |
+| `esdf_mode` | 2d | Ground robot, 2D slice is sufficient |
+| `max_integration_distance_m` | 3.5 m | Matches camera range at process_res=392 |
 
 ## Launch order
 
 ```
 1. perception.launch.py   — cameras + DA3 depth estimation
-2. mapping.launch.py      — map server + nav2 + zone params
-3. supervisor.launch.py   — mission sequencer (sends goals to nav2)
-4. octane_ai (future)     — AI policy node subscribing to /plan + camera frames
+2. mapping.launch.py      — camera splitters + nvblox live view
+3. localization (future)  — April tags + IMU → odom TF + zone manager
+4. octane_ai (future)     — AI policy node
 ```
-
-## Localization (future — octane_localization)
-
-The static `odom → base_link` stub in the mapping launch will be replaced by
-the localization package, which fuses:
-- April tag detections (absolute position fixes)
-- IMU (Jetson AGX Orin onboard BMI088, orientation + short-term dead reckoning)
-
-April tags will be placed at known arena positions so the robot can correct
-accumulated drift whenever one comes into camera view.
