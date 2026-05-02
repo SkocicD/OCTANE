@@ -35,30 +35,16 @@ Visualization Manager:
       Show Names: true
       Frame Timeout: 15
 
-    - Class: nvblox_rviz_plugin/NvbloxMesh
-      Name: NvbloxMesh
+    - Class: rviz_default_plugins/Marker
+      Name: ColorLayer
       Enabled: true
       Topic:
-        Depth: 5
-        Durability Policy: Transient Local
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /nvblox_node/mesh
-
-    - Class: rviz_default_plugins/PointCloud2
-      Name: ESDF
-      Enabled: true
-      Alpha: 0.8
-      Color: 0; 200; 255
-      Color Transformer: FlatColor
-      Size (m): 0.05
-      Style: Flat Squares
-      Topic:
-        Depth: 5
+        Depth: 100
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /nvblox_node/static_esdf_pointcloud
+        Value: /nvblox_node/color_layer_marker
+
 
   Enabled: true
   Global Options:

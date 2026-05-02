@@ -12,6 +12,7 @@ based on the camera's mounting offset (loaded from cameras.yaml).
 import math
 import os
 
+import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
@@ -90,10 +91,14 @@ class CameraFrameSplitter(Node):
         )
 
     def _frame_cb(self, msg: CameraFrame):
-        # Re-stamp with this node's frame_id and publish split components
-        msg.image.header.frame_id = self.frame_id
-        msg.info.header = msg.image.header
-        self.image_pub.publish(msg.image)
+        img = msg.image
+        img.header.frame_id = self.frame_id
+        if img.encoding == 'bgr8':
+            arr = np.frombuffer(img.data, dtype=np.uint8).reshape(img.height, img.width, 3)
+            img.data = arr[:, :, ::-1].tobytes()
+            img.encoding = 'rgb8'
+        msg.info.header = img.header
+        self.image_pub.publish(img)
         self.info_pub.publish(msg.info)
 
     def _publish_static_tf(self, parent: str, child: str, offset: dict):

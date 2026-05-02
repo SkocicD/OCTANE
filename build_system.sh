@@ -481,6 +481,16 @@ case "$1" in
         ;;
 esac
 
+# Remove nvblox_rviz_plugin glsl150 point-cloud material scripts — they reference
+# geometry shaders (box.geom) that OGRE can't compile on Jetson, causing RViz to
+# crash on startup.  The NvbloxMesh display only needs triangle rendering so these
+# are safe to drop.
+NVBLOX_SCRIPTS150="${WORKSPACE_ROOT}/install/nvblox_rviz_plugin/share/nvblox_rviz_plugin/materials/scripts150"
+if [ -d "$NVBLOX_SCRIPTS150" ]; then
+    rm -f "$NVBLOX_SCRIPTS150"/*.material
+    echo "[PATCH] nvblox_rviz_plugin: removed scripts150 point-cloud materials (box.geom crash fix)"
+fi
+
 echo ""
 echo "[OK] Build complete"
 echo "Source the workspace: source ${WORKSPACE_ROOT}/install/setup.bash"

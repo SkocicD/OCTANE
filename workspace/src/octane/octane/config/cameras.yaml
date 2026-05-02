@@ -36,7 +36,7 @@ cameras:
       # CAD: Y=+17.394" fwd, X=-1.477" left (sensor offset), Z=26.01" up
       # Facing forward, 30° down (Ry(30°)×X = [cos30,0,-sin30] → forward+down)
       pos: { x:  0.442, y:  0.038, z: 0.661 }
-      rot: { x:  0.0,   y:  30.0,  z: 0.0   }
+      rot: { x:  0.0,   y:  120.0,  z: 0.0   }
 
   near_rgb_left_side:
     serial: left_side
@@ -55,7 +55,7 @@ cameras:
       # Facing left (yaw 90°), 45° down
       # Rz(90°)×Ry(45°)×X = [0, cos45, -sin45] = [0, 0.707, -0.707] ✓
       pos: { x:  0.000, y:  0.321, z: 0.376 }
-      rot: { x:  0.0,   y:  45.0,  z: 90.0  }
+      rot: { x:  0.0,   y:  135.0,  z: 90.0  }
 
   near_rgb_left_front:
     serial: left_front
@@ -74,7 +74,7 @@ cameras:
       # 45° corner yaw + 45° down — no roll needed
       # Rz(45°)×Ry(45°)×X = [0.5, 0.5, -0.707]: exactly 45° diagonal, 45° below horizontal
       pos: { x:  0.472, y:  0.232, z: 0.376 }
-      rot: { x:  0.0,   y:  45.0,  z: 45.0  }
+      rot: { x:  0.0,   y:  135.0,  z: 45.0  }
 
   near_rgb_right_side:
     serial: right_side
@@ -92,7 +92,7 @@ cameras:
       # CAD: X=+12.626" right, Y=0, Z=14.786" up
       # Facing right (yaw -90°), 45° down
       pos: { x:  0.000, y: -0.321, z: 0.376 }
-      rot: { x:  0.0,   y:  45.0,  z: -90.0 }
+      rot: { x:  0.0,   y:  135.0,  z: -90.0 }
 
   near_rgb_right_front:
     serial: right_front
@@ -110,7 +110,7 @@ cameras:
       # CAD: Y=+18.575" fwd, X=+9.145" right, Z=14.786" up
       # Rz(-45°)×Ry(45°)×X = [0.5, -0.5, -0.707]: 45° right diagonal, 45° below horizontal
       pos: { x:  0.472, y: -0.232, z: 0.376 }
-      rot: { x:  0.0,   y:  45.0,  z: -45.0 }
+      rot: { x:  0.0,   y:  135.0,  z: -45.0 }
 
   near_rgb_back_rear:
     serial: back_rear
@@ -129,4 +129,4 @@ cameras:
       # 45° down then 180° yaw to face rear
       # Rz(180°)×Ry(45°)×X = [-cos45, 0, -sin45] = [-0.707, 0, -0.707] ✓
       pos: { x: -0.570, y:  0.000, z: 0.467 }
-      rot: { x:  0.0,   y:  45.0,  z: 180.0 }
+      rot: { x:  0.0,   y:  135.0,  z: 180.0 }
