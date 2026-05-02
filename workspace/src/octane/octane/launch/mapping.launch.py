@@ -8,57 +8,7 @@ from launch.actions import LogInfo
 from launch_ros.actions import Node
 
 
-# ── Arena zone definitions ────────────────────────────────────────────────────
-# Rectangles defined by two opposite corners (x1,y1) → (x2,y2).
-# Coordinate frame: origin at SW corner of arena, X east (away from berm),
-# Y north.  Units: meters.
-#
-# UPDATE THESE from the NASA field specification PDF before each competition.
-# These values are placeholders based on a typical Lunabotics arena layout.
-#
-#  ┌────────────────────────────────────────────┐  Y = 3.81m
-#  │  start / deposition  │     nav     │ excav │
-#  │   (includes berm)    │             │       │
-#  └────────────────────────────────────────────┘  Y = 0.00m
-#  X=0                   X=1.50       X=3.50   X=7.62
-#
-ZONES = {
-    # Robot starts here; also where it returns to dump regolith.
-    'start': {
-        'x1': 0.00, 'y1': 0.00,
-        'x2': 1.50, 'y2': 3.81,
-    },
-    # Transition corridor — robot drives through here between start and digging.
-    'nav': {
-        'x1': 1.50, 'y1': 0.00,
-        'x2': 3.50, 'y2': 3.81,
-    },
-    # Active digging area — regolith is here.
-    'excavation': {
-        'x1': 3.50, 'y1': 0.00,
-        'x2': 7.62, 'y2': 3.81,
-    },
-    # Area directly in front of the berm where the bucket is raised and dumped.
-    'deposition': {
-        'x1': 0.00, 'y1': 0.75,
-        'x2': 1.00, 'y2': 3.06,
-    },
-    # The physical berm structure itself.
-    'berm': {
-        'x1': 0.00, 'y1': 1.40,
-        'x2': 0.40, 'y2': 2.41,
-    },
-}
-
-# Center of each zone — consumed by octane_localization's zone manager to
-# determine the next nav goal coordinate.
-ZONE_CENTERS = {
-    name: {
-        'x': (z['x1'] + z['x2']) / 2.0,
-        'y': (z['y1'] + z['y2']) / 2.0,
-    }
-    for name, z in ZONES.items()
-}
+# Zone definitions live in octane/config/zones.yaml — edit there.
 
 
 def generate_launch_description():
@@ -78,10 +28,13 @@ def generate_launch_description():
     # Load camera config
     try:
         octane_share = get_package_share_directory('octane')
-        config_file = os.path.join(octane_share, 'config', 'cameras.yaml')
+        config_file  = os.path.join(octane_share, 'config', 'cameras.yaml')
+        zones_file   = os.path.join(octane_share, 'config', 'zones.yaml')
         nvblox_params = os.path.join(octane_share, 'config', 'nvblox.yaml')
         with open(config_file) as f:
             cfg = yaml.safe_load(f)
+        with open(zones_file) as f:
+            zones_cfg = yaml.safe_load(f)
     except Exception as e:
         print(f'[WARN] Could not load config: {e} — skipping mapping nodes')
         nodes.append(LogInfo(msg='Mapping subsystem skipped (config unavailable)'))

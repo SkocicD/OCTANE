@@ -1,0 +1,51 @@
+# Arena zone definitions for the OCTANE Lunabotics rover.
+#
+# Rectangles defined by two opposite corners (x1,y1) → (x2,y2).
+# Coordinate frame: origin at SW corner of arena, X east (away from berm),
+# Y north.  Units: meters.
+#
+# UPDATE THESE from the NASA field specification PDF before each competition.
+# These values are placeholders based on a typical Lunabotics arena layout.
+#
+#  ┌────────────────────────────────────────────┐  Y = 3.81m
+#  │  start / deposition  │     nav     │ excav │
+#  │   (includes berm)    │             │       │
+#  └────────────────────────────────────────────┘  Y = 0.00m
+#  X=0                   X=1.50       X=3.50   X=7.62
+
+zones:
+
+  start:
+    description: "Robot starting position; also where it returns to deposit"
+    x1: 0.00
+    y1: 0.00
+    x2: 1.50
+    y2: 3.81
+
+  nav:
+    description: "Transition corridor between start and excavation area"
+    x1: 1.50
+    y1: 0.00
+    x2: 3.50
+    y2: 3.81
+
+  excavation:
+    description: "Active digging area — regolith is here"
+    x1: 3.50
+    y1: 0.00
+    x2: 7.62
+    y2: 3.81
+
+  deposition:
+    description: "Area directly in front of the berm where bucket is dumped"
+    x1: 0.00
+    y1: 0.75
+    x2: 1.00
+    y2: 3.06
+
+  berm:
+    description: "The physical berm structure itself"
+    x1: 0.00
+    y1: 1.40
+    x2: 0.40
+    y2: 2.41
