@@ -1,0 +1,52 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
+Visualization Manager:
+  Displays:
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: left_front
+      Topic:
+        Value: /perception/camera/near/left_front/rgb/image
+      Value: true
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: left_side
+      Topic:
+        Value: /perception/camera/near/left_side/rgb/image
+      Value: true
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: right_front
+      Topic:
+        Value: /perception/camera/near/right_front/rgb/image
+      Value: true
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: right_side
+      Topic:
+        Value: /perception/camera/near/right_side/rgb/image
+      Value: true
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: back_rear
+      Topic:
+        Value: /perception/camera/near/back_rear/rgb/image
+      Value: true
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: orbbec_rgb
+      Topic:
+        Value: /camera/color/image_raw
+      Value: true
+    - Class: rviz_common/Image
+      Enabled: true
+      Name: orbbec_depth
+      Topic:
+        Value: /camera/depth/image_raw
+      Value: true
+  Global Options:
+    Fixed Frame: base_link
+  Name: root

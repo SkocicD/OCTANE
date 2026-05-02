@@ -1,21 +1,22 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, LogInfo
+from launch.actions import IncludeLaunchDescription, LogInfo, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
 
 
 # Camera scheme:
-#   1× Orbbec (depth + RGB)            → perception/camera/depth_camera/{depth,rgb}/frame
-#   5× standalone RGB cameras          → perception/camera/near/{position}/rgb/frame
+#   1× Orbbec (depth + RGB)   → perception/camera/depth_camera/{depth,rgb}/frame
+#   5× standalone RGB cameras → perception/camera/near/{position}/rgb/frame
 #
-# Device paths use /dev/v4l/by-path/ (port-based, stable while cables stay put).
-# Update these once cameras are physically assigned to rover positions.
+# With debug_images:=true each camera also publishes sensor_msgs/Image on
+#   perception/camera/near/{position}/rgb/image  (for RViz / rqt_image_view)
+#
+# Device paths are udev symlinks — see setup_cameras.sh in repo root.
 NEAR_RGB_CAMERAS = [
     # (node_name,            position,        device_path)
-    # Paths are udev symlinks defined in /etc/udev/rules.d/99-octane-cameras.rules
-    # (setup_cameras.sh in repo root).  Cables must stay in assigned USB ports.
     ('near_rgb_left_front',  'left_front',    '/dev/cam_left_front'),
     ('near_rgb_left_side',   'left_side',     '/dev/cam_left_side'),
     ('near_rgb_right_front', 'right_front',   '/dev/cam_right_front'),
@@ -25,7 +26,14 @@ NEAR_RGB_CAMERAS = [
 
 
 def generate_launch_description():
+    debug_images_arg = DeclareLaunchArgument(
+        'debug_images', default_value='false',
+        description='Publish raw sensor_msgs/Image alongside CameraFrame (for RViz/rqt)',
+    )
+    debug_images = LaunchConfiguration('debug_images')
+
     nodes = [
+        debug_images_arg,
         LogInfo(msg='Starting perception subsystem'),
     ]
 
@@ -68,8 +76,12 @@ def generate_launch_description():
                     'frame_rate': 30,
                     'width': 640,
                     'height': 480,
+                    'debug_images': debug_images,
                 }],
-                remappings=[('camera/frame', f'perception/camera/near/{position}/rgb/frame')],
+                remappings=[
+                    ('camera/frame', f'perception/camera/near/{position}/rgb/frame'),
+                    ('camera/image', f'perception/camera/near/{position}/rgb/image'),
+                ],
             )
         )
 

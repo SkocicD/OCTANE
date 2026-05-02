@@ -18,6 +18,7 @@ class RGBCameraNode(Node):
         self.declare_parameter('frame_rate', 30)
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 480)
+        self.declare_parameter('debug_images', False)
 
         # Parameter values
         device_path = self.get_parameter('device_path').value
@@ -26,9 +27,12 @@ class RGBCameraNode(Node):
         frame_rate = self.get_parameter('frame_rate').value
         width = self.get_parameter('width').value
         height = self.get_parameter('height').value
+        self.debug_images = self.get_parameter('debug_images').value
 
         # Publisher — single bundled CameraFrame topic
         self.frame_pub = self.create_publisher(CameraFrame, 'camera/frame', 10)
+        # Debug image publisher — raw sensor_msgs/Image for RViz/rqt (opt-in)
+        self.image_pub = self.create_publisher(Image, 'camera/image', 10) if self.debug_images else None
 
         # CV bridge init
         self.bridge = CvBridge()
@@ -88,6 +92,9 @@ class RGBCameraNode(Node):
         msg.info = self.camera_info
         msg.param = self.camera_param
         self.frame_pub.publish(msg)
+
+        if self.image_pub:
+            self.image_pub.publish(image_msg)
 
     @staticmethod
     def _build_camera_info(w, h, fx, fy, cx, cy):
