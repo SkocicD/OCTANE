@@ -5,7 +5,8 @@ from ament_index_python.packages import get_package_share_directory
 from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import LogInfo
-from launch_ros.actions import Node
+from launch_ros.actions import ComposableNodeContainer, Node
+from launch_ros.descriptions import ComposableNode
 
 
 # Zone definitions live in octane/config/zones.yaml — edit there.
@@ -111,6 +112,39 @@ def generate_launch_description():
     except PackageNotFoundError:
         print('[WARN] nvblox_ros not found — build isaac_ros_nvblox first')
         nodes.append(LogInfo(msg='nvblox skipped (nvblox_ros not built)'))
+
+    # ── Colored point clouds — one per near camera via depth_image_proc ──────────
+    # Each near camera has registered depth (DA3 32FC1 meters) + RGB so
+    # PointCloudXyzrgbNode produces a full-resolution colored point cloud.
+    # All 5 nodes share one component container to reduce overhead.
+    near_cam_nodes = []
+    for cam_name in cfg['cameras']:
+        if cam_name == 'orbbec_depth':
+            continue
+        near_cam_nodes.append(
+            ComposableNode(
+                package='depth_image_proc',
+                plugin='depth_image_proc::PointCloudXyzrgbNode',
+                name=f'{cam_name}_point_cloud',
+                remappings=[
+                    ('rgb/camera_info',             f'mapping/{cam_name}/rgb/camera_info'),
+                    ('rgb/image_rect_color',        f'mapping/{cam_name}/rgb/image'),
+                    ('depth_registered/image_rect', f'mapping/{cam_name}/depth/image'),
+                    ('points',                      f'mapping/{cam_name}/points'),
+                ],
+            )
+        )
+    if near_cam_nodes:
+        nodes.append(
+            ComposableNodeContainer(
+                name='point_cloud_container',
+                namespace='',
+                package='rclcpp_components',
+                executable='component_container',
+                composable_node_descriptions=near_cam_nodes,
+                output='log',
+            )
+        )
 
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)
