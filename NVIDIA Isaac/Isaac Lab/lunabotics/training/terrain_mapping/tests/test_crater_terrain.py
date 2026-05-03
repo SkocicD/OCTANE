@@ -1,5 +1,6 @@
 import numpy as np
 import sys, pathlib
+import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parents[3] / "source" / "lunabotics"))
 
 from lunabotics.terrains.crater import carve_craters, CraterCfg
@@ -32,5 +33,3 @@ def test_carve_craters_depresses_height_field():
     cx_idx = int(r["cx"] / 0.05)
     cy_idx = int(r["cy"] / 0.05)
     assert updated_hf[cx_idx, cy_idx] < -0.05
-
-import pytest
