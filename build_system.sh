@@ -122,15 +122,22 @@ else
 fi
 
 # ── 3. System apt dependencies ─────────────────────────────────────────────────
-# Detect installed CUDA version to pick the right versioned package names
-CUDA_MAJOR=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+' | head -1)
-CUDA_MINOR=$(nvcc --version 2>/dev/null | grep -oP 'release [0-9]+\.\K[0-9]+' | head -1)
-if [ -n "$CUDA_MAJOR" ] && [ -n "$CUDA_MINOR" ]; then
-    NVTX_PKG="cuda-nvtx-${CUDA_MAJOR}-${CUDA_MINOR}"
-    echo "[INFO] Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} — will install ${NVTX_PKG}"
-else
+# Detect CUDA version for versioned package names.
+# Jetson (JetPack 6.x) always ships CUDA 12.6 — use that directly.
+# On other platforms detect from nvcc, fall back to 12-6.
+if [ -f /etc/nv_tegra_release ]; then
     NVTX_PKG="cuda-nvtx-12-6"
-    echo "[WARN] Could not detect CUDA version — falling back to ${NVTX_PKG}"
+    echo "[INFO] Jetson detected — using ${NVTX_PKG}"
+else
+    CUDA_MAJOR=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+' | head -1)
+    CUDA_MINOR=$(nvcc --version 2>/dev/null | grep -oP 'release [0-9]+\.\K[0-9]+' | head -1)
+    if [ -n "$CUDA_MAJOR" ] && [ -n "$CUDA_MINOR" ]; then
+        NVTX_PKG="cuda-nvtx-${CUDA_MAJOR}-${CUDA_MINOR}"
+        echo "[INFO] Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} — will install ${NVTX_PKG}"
+    else
+        NVTX_PKG="cuda-nvtx-12-6"
+        echo "[WARN] Could not detect CUDA version — falling back to ${NVTX_PKG}"
+    fi
 fi
 
 APT_DEPS=(
