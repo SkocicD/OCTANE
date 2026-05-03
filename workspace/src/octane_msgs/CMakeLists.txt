@@ -5,6 +5,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CameraParam.msg"
@@ -12,7 +13,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CameraFrame.msg"
   "msg/DriveCommand.msg"
   "msg/ActuatorCommand.msg"
-  DEPENDENCIES sensor_msgs geometry_msgs
+  "msg/TerrainObject.msg"
+  "msg/TerrainObjects.msg"
+  "msg/WallSegment.msg"
+  "msg/WallSegments.msg"
+  DEPENDENCIES sensor_msgs geometry_msgs std_msgs
 )
 
 ament_package()
