@@ -83,7 +83,8 @@ class CameraFrameSplitter(Node):
 
         # Broadcast static TF for this camera's mounting offset
         self.tf_broadcaster = StaticTransformBroadcaster(self)
-        self._publish_static_tf(parent_frame, frame_id, cam_cfg['offset'])
+        image_roll_deg = float(cam_cfg.get('image_roll_deg', 90))
+        self._publish_static_tf(parent_frame, frame_id, cam_cfg['offset'], image_roll_deg)
 
         self.get_logger().info(
             f'Splitter started: {input_topic} → {out_ns}/{{image,camera_info}}  '
@@ -101,7 +102,7 @@ class CameraFrameSplitter(Node):
         self.image_pub.publish(img)
         self.info_pub.publish(msg.info)
 
-    def _publish_static_tf(self, parent: str, child: str, offset: dict):
+    def _publish_static_tf(self, parent: str, child: str, offset: dict, image_roll_deg: float = 90.0):
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = parent
@@ -112,15 +113,15 @@ class CameraFrameSplitter(Node):
         qx, qy, qz, qw = _euler_deg_to_quat(
             offset['rot']['x'], offset['rot']['y'], offset['rot']['z']
         )
-        # Camera modules are physically mounted rotated 90° CCW around their
-        # optical axis.  Post-multiply by Rz(+90°) in camera frame to correct
-        # image roll without affecting where the camera points.
-        s = math.sqrt(0.5)
+        # Correct image roll caused by physical mounting rotation.
+        # Per-camera value in cameras.yaml (image_roll_deg); defaults to +90°.
+        roll_rad = math.radians(image_roll_deg) * 0.5
+        cz, cw = math.sin(roll_rad), math.cos(roll_rad)
         qx, qy, qz, qw = (
-            (qx + qy) * s,
-            (qy - qx) * s,
-            (qw + qz) * s,
-            (qw - qz) * s,
+            qx * cw + qy * cz,
+            qy * cw - qx * cz,
+            qw * cz + qz * cw,
+            qw * cw - qz * cz,
         )
         t.transform.rotation.x = qx
         t.transform.rotation.y = qy

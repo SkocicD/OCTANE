@@ -121,8 +121,6 @@ def generate_launch_description():
     #   depth_registered/image_rect → remapped to depth/image
     #   points                →  resolves to mapping/<cam>/points automatically
     for cam_name in cfg['cameras']:
-        if cam_name == 'orbbec_depth':
-            continue
         nodes.append(
             ComposableNodeContainer(
                 name=f'{cam_name}_pc_container',
@@ -134,6 +132,7 @@ def generate_launch_description():
                         package='depth_image_proc',
                         plugin='depth_image_proc::PointCloudXyzrgbNode',
                         name='point_cloud',
+                        namespace=f'mapping/{cam_name}',
                         parameters=[{'exact_sync': False, 'queue_size': 10}],
                         remappings=[
                             ('rgb/image_rect_color',        'rgb/image'),

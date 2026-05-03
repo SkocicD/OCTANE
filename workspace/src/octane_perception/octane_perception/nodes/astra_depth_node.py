@@ -1,47 +1,59 @@
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
+from message_filters import ApproximateTimeSynchronizer, Subscriber
+from sensor_msgs.msg import Image, CameraInfo
 
-# Publish depth and image data from Astra Pro
+from octane_msgs.msg import CameraFrame, CameraParam, CameraOffset
+
+
 class AstraDepthNode(Node):
 
     def __init__(self):
         super().__init__('astra_depth_node')
-        self.get_logger().info('Depth Camera node started')
 
-        # Depth and Color Publishers
-        self.depth_publisher = self.create_publisher(Image, 'depth_camera/depth', 10)
-        self.color_publisher = self.create_publisher(Image, 'depth_camera/color', 10)
+        self.depth_pub = self.create_publisher(CameraFrame, 'depth_camera/depth', 10)
+        self.color_pub = self.create_publisher(CameraFrame, 'depth_camera/color', 10)
 
-        # Subscribe to Orbbec Driver Topics (raw sensor data)
-        self.depth_subscription = self.create_subscription(
-            Image,
-            '/camera/depth/image_raw',
-            self.depth_callback,
-            10
-        )
-        self.color_subscription = self.create_subscription(
-            Image,
-            '/camera/color/image_raw',
-            self.color_callback,
-            10
-        )
-        
-    # Callbacks for processing incoming messages
-    def depth_callback(self, msg):
-        # Process and republish depth images
-        self.depth_publisher.publish(msg)
-        self.get_logger().info('Published depth image', once=True)
+        depth_img_sub  = Subscriber(self, Image,      '/camera/depth/image_raw')
+        depth_info_sub = Subscriber(self, CameraInfo, '/camera/depth/camera_info')
+        color_img_sub  = Subscriber(self, Image,      '/camera/color/image_raw')
+        color_info_sub = Subscriber(self, CameraInfo, '/camera/color/camera_info')
 
-    def color_callback(self, msg):
-        # Process and republish color images
-        self.color_publisher.publish(msg)
-        self.get_logger().info('Published color image', once=True)
+        self._depth_sync = ApproximateTimeSynchronizer(
+            [depth_img_sub, depth_info_sub], queue_size=10, slop=0.1)
+        self._depth_sync.registerCallback(self._depth_cb)
+
+        self._color_sync = ApproximateTimeSynchronizer(
+            [color_img_sub, color_info_sub], queue_size=10, slop=0.1)
+        self._color_sync.registerCallback(self._color_cb)
+
+        self.get_logger().info('AstraDepthNode started', once=True)
+
+    def _build_frame(self, img: Image, info: CameraInfo) -> CameraFrame:
+        frame = CameraFrame()
+        frame.serial = 'orbbec_001'
+        frame.image  = img
+        frame.info   = info
+        frame.param.fx     = info.k[0]
+        frame.param.fy     = info.k[4]
+        frame.param.cx     = info.k[2]
+        frame.param.cy     = info.k[5]
+        frame.param.width  = info.width
+        frame.param.height = info.height
+        if len(info.d) >= 5:
+            frame.param.dist = list(info.d[:5])
+        return frame
+
+    def _depth_cb(self, img: Image, info: CameraInfo):
+        self.depth_pub.publish(self._build_frame(img, info))
+
+    def _color_cb(self, img: Image, info: CameraInfo):
+        self.color_pub.publish(self._build_frame(img, info))
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = AstraDepthNode()
-
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -26,6 +26,7 @@ cameras:
     depth_topic: perception/camera/depth_camera/depth/frame
     width:  640
     height: 480
+    image_roll_deg: 270
     intrinsics:
       fx: 570.0
       fy: 570.0

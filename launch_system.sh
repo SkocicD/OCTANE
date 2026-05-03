@@ -77,10 +77,51 @@ kill_port() {
     fi
 }
 
+kill_cameras() {
+    echo "[CLEANUP] Releasing cameras and killing stale ROS nodes..."
+
+    # Kill any running octane / camera ROS nodes so devices aren't held across launches
+    for pattern in astra_camera_node rgb_camera_node camera_frame_splitter \
+                   astra_depth_node depth_estimation_node nvblox_node \
+                   pc_container point_cloud_xyzrgb; do
+        pkill -f "$pattern" 2>/dev/null || true
+    done
+    sleep 1
+
+    # Force-release any process still holding /dev/video* (UVC colour cameras)
+    for dev in /dev/video*; do
+        [ -e "$dev" ] || continue
+        fuser -k "$dev" 2>/dev/null || true
+    done
+
+    # USB reset for the Orbbec — OpenNI2 can leave the device locked after a crash
+    ORBBEC_USB=$(lsusb | grep -i "2bc5:0403" | grep -oP 'Bus \K[0-9]+' | head -1)
+    ORBBEC_DEV=$(lsusb | grep -i "2bc5:0403" | grep -oP 'Device \K[0-9]+' | head -1)
+    if [ -n "$ORBBEC_USB" ] && [ -n "$ORBBEC_DEV" ]; then
+        USBDEV=$(printf "/dev/bus/usb/%03d/%03d" "$ORBBEC_USB" "$ORBBEC_DEV")
+        if [ -e "$USBDEV" ]; then
+            python3 - "$USBDEV" <<'EOF' 2>/dev/null && echo "[CLEANUP] Orbbec USB reset OK" || true
+import sys, fcntl
+with open(sys.argv[1], 'wb') as f:
+    fcntl.ioctl(f, 0x5514, 0)
+EOF
+        fi
+    fi
+
+    sleep 1
+    echo "[CLEANUP] Camera cleanup done"
+}
+
 case "$SUBSYSTEM" in
     supervisor)  run_launch supervisor ;;
-    perception)  run_launch perception ;;
-    mapping)     run_launch mapping ;;
+    perception)
+        kill_cameras
+        run_launch perception
+        ;;
+    mapping)
+        kill_cameras
+        run_launch mapping
+        ;;
     network)
         kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting network (TCP :${OCTANE_TCP_PORT}, UDP :${OCTANE_UDP_PORT})..."
@@ -88,6 +129,7 @@ case "$SUBSYSTEM" in
             tcp_port:="${OCTANE_TCP_PORT}"
         ;;
     all)
+        kill_cameras
         kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting all OCTANE subsystems..."
         PIDS=()

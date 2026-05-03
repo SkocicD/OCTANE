@@ -47,8 +47,8 @@ def generate_launch_description():
                     os.path.join(astra_camera_dir, 'launch', 'astra_pro.launch.xml')
                 ),
                 launch_arguments={
-                    'enable_colored_point_cloud': 'true',
-                    'depth_registration': 'true',
+                    'enable_ir':            'false',
+                    'enable_point_cloud':   'false',
                 }.items(),
             )
         )
