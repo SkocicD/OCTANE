@@ -6,3 +6,11 @@ network_comm_node:
     port: 5000
     telemetry_rate: 10.0  # Hz (telemetry updates)
     timeout_seconds: 2.0  # Connection timeout
+
+video_stream_node:
+  ros__parameters:
+    udp_port:           5002   # UDP port rover → GUI for video frames
+    default_scale:      50     # % of native resolution when GUI sends scale=0
+    jpeg_quality:       70     # JPEG encode quality (1-100); lower = smaller, faster
+    depth_max_m:        8.0    # DA3 depth clip distance (meters)
+    orbbec_depth_max_m: 5.0    # Orbbec depth clip distance (meters)

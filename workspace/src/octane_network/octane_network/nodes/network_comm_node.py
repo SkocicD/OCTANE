@@ -18,7 +18,8 @@ from typing import Optional, List
 
 from octane_network.classes.protocol import (
     encode_command, encode_telemetry, encode_ack, encode_fault, encode_heartbeat,
-    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT, TYPE_MANIPULATOR
+    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT,
+    TYPE_MANIPULATOR, TYPE_VIDEO_REQUEST,
 )
 
 
@@ -51,10 +52,12 @@ class NetworkCommNode(Node):
         )
 
         # ROS2 publishers
-        self.mode_command_pub  = self.create_publisher(String, '/supervisor/mode_command', qos)
-        self.fault_reset_pub   = self.create_publisher(Empty,  '/supervisor/fault_reset',  qos)
-        self.key_state_pub     = self.create_publisher(UInt8,  '/manual_ctrl/key_state',   qos)
-        self._hb_status_pub    = self.create_publisher(String, '/network/heartbeat_tx',    qos)
+        self.mode_command_pub    = self.create_publisher(String, '/supervisor/mode_command',  qos)
+        self.fault_reset_pub     = self.create_publisher(Empty,  '/supervisor/fault_reset',   qos)
+        self.key_state_pub       = self.create_publisher(UInt8,  '/manual_ctrl/key_state',    qos)
+        self._hb_status_pub      = self.create_publisher(String, '/network/heartbeat_tx',     qos)
+        self._client_ip_pub      = self.create_publisher(String, '/network/client_ip',        qos)
+        self._stream_request_pub = self.create_publisher(String, '/network/stream_request',   qos)
 
         # State
         self.current_state = 'STANDBY'
@@ -106,6 +109,11 @@ class NetworkCommNode(Node):
                 self.client_socket = client
                 self.connected = True
 
+                # Tell video_stream_node where to send UDP frames
+                ip_msg = String()
+                ip_msg.data = addr[0]
+                self._client_ip_pub.publish(ip_msg)
+
                 # Start receive thread
                 self.recv_thread = threading.Thread(target=self.recv_loop, daemon=True)
                 self.recv_thread.start()
@@ -148,6 +156,14 @@ class NetworkCommNode(Node):
             if self.client_socket:
                 self.client_socket.close()
             self.client_socket = None
+            # Stop any active video stream
+            stop_msg = String()
+            stop_msg.data = '255,R,0,10'
+            self._stream_request_pub.publish(stop_msg)
+            # Clear GUI IP so video_stream_node stops sending
+            ip_msg = String()
+            ip_msg.data = ''
+            self._client_ip_pub.publish(ip_msg)
 
     def process_buffer(self):
         """Process complete frames from binary buffer."""
@@ -206,6 +222,18 @@ class NetworkCommNode(Node):
                     self.client_socket.sendall(ack_frame)
                 except Exception as e:
                     self.get_logger().error(f'ACK send failed: {e}')
+
+        elif msg_type == 'video_request':
+            source_id = msg.get('source_id', 0xFF)
+            variant   = msg.get('variant', 'R')
+            scale     = msg.get('scale', 0)
+            fps       = msg.get('fps', 10)
+            req_msg = String()
+            req_msg.data = f'{source_id},{variant},{scale},{fps}'
+            self._stream_request_pub.publish(req_msg)
+            self.get_logger().info(
+                f'Video request: src={source_id} variant={variant} scale={scale}% fps={fps}'
+            )
 
         else:
             self.get_logger().warn(f'Unknown message type: {msg_type}')

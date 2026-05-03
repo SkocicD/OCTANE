@@ -2,7 +2,8 @@
 """Launch file for OCTANE network communication.
 
 Launches:
-  - network_comm_node: TCP server (mode commands, telemetry, heartbeat)
+  - network_comm_node:  TCP server (mode commands, telemetry, heartbeat)
+  - video_stream_node:  UDP video/depth/map streamer (on-demand, GUI-controlled)
   - network_monitor_node: blue xterm live view of commands + heartbeat status
 """
 
@@ -30,6 +31,18 @@ def generate_launch_description():
         'heartbeat_rate', default_value='0.33',
         description='Heartbeat rate in Hz (0.33 = once every ~3 s)'
     )
+    udp_port_arg = DeclareLaunchArgument(
+        'udp_port', default_value='5002',
+        description='UDP port for video frames (rover → GUI)'
+    )
+    default_scale_arg = DeclareLaunchArgument(
+        'default_scale', default_value='50',
+        description='Default video scale %% when GUI sends scale=0'
+    )
+    jpeg_quality_arg = DeclareLaunchArgument(
+        'jpeg_quality', default_value='70',
+        description='JPEG quality for video frames (1-100)'
+    )
 
     comm_node = Node(
         package='octane_network',
@@ -41,6 +54,18 @@ def generate_launch_description():
             'port':           LaunchConfiguration('tcp_port'),
             'telemetry_rate': LaunchConfiguration('telemetry_rate'),
             'heartbeat_rate': LaunchConfiguration('heartbeat_rate'),
+        }],
+    )
+
+    video_node = Node(
+        package='octane_network',
+        executable='video_stream_node',
+        name='video_stream_node',
+        output='log',
+        parameters=[{
+            'udp_port':     LaunchConfiguration('udp_port'),
+            'default_scale': LaunchConfiguration('default_scale'),
+            'jpeg_quality': LaunchConfiguration('jpeg_quality'),
         }],
     )
 
@@ -59,6 +84,10 @@ def generate_launch_description():
         tcp_port_arg,
         telemetry_rate_arg,
         heartbeat_rate_arg,
-        network_monitor_terminal,
+        udp_port_arg,
+        default_scale_arg,
+        jpeg_quality_arg,
         comm_node,
+        video_node,
+        network_monitor_terminal,
     ])

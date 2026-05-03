@@ -31,6 +31,7 @@ Every message on the wire has this structure:
 - `C` (0x43) = **Command** - Ground sends mode change to rover
 - `A` (0x41) = **ACK** - Rover confirms command received
 - `F` (0x46) = **Fault Alert** - Rover immediately reports critical fault
+- `V` (0x56) = **Video Request** - Ground requests camera/map stream (see `video_streaming.md`)
 
 ---
 
