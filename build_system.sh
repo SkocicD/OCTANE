@@ -289,79 +289,84 @@ else
     echo "[OK]    nvblox kMaxNumCameras already patched"
 fi
 
-# ── 5. PyTorch for Jetson ─────────────────────────────────────────────────────
-# Wheels are Jetson-specific (JetPack 6.x / L4T R36, cp310, aarch64).
-# If the CDN wheel can't be found, the build stops — install manually and re-run.
-TORCH_WHEEL_CACHE="${SSD_CACHE}/pip/torch-jetson"
-mkdir -p "${TORCH_WHEEL_CACHE}"
-
-# Check against our own site-packages directly — pip3 show can miss PYTHONUSERBASE installs
+# ── 5. PyTorch + torchvision ──────────────────────────────────────────────────
 TORCH_DIST_INFO=$(find "${SSD_PYTHON}/lib" -maxdepth 4 -name "torch-*.dist-info" -type d 2>/dev/null | head -1)
-if [ -z "$TORCH_DIST_INFO" ] || [ ! -f "${TORCH_DIST_INFO}/METADATA" ]; then
-    echo "[SETUP] Installing PyTorch for Jetson (JetPack 6.2 / L4T R36)..."
-    # Check if we have a cached wheel already
-    CACHED_WHEEL=$(find "${TORCH_WHEEL_CACHE}" -name "torch-*cp310*aarch64*.whl" | sort -V | tail -1)
-    if [ -n "$CACHED_WHEEL" ]; then
-        echo "[CACHE] Using cached wheel: $(basename "$CACHED_WHEEL")"
-        pip3 install "$CACHED_WHEEL"
-    else
-        # JetPack 6.2 CDN path is empty — wheels ship under v61 (L4T R36, same ABI)
-        for JP_VER in v62 v61 v60; do
-            TORCH_BASE="https://developer.download.nvidia.com/compute/redist/jp/${JP_VER}/pytorch"
-            TORCH_WHEEL=$(curl -s "${TORCH_BASE}/" 2>/dev/null \
-                | grep -o 'torch[^"<> ]*cp310[^"<> ]*aarch64\.whl' | sort -V | tail -1)
-            [ -n "$TORCH_WHEEL" ] && break
-        done
-        if [ -z "$TORCH_WHEEL" ]; then
-            echo "[ERROR] PyTorch wheel not discoverable from NVIDIA CDN."
-            echo "        Install manually then re-run: https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048"
-            exit 1
+
+if [ -f /etc/nv_tegra_release ]; then
+    # ── Jetson: JetPack-specific aarch64 wheel from NVIDIA CDN ────────────────
+    TORCH_WHEEL_CACHE="${SSD_CACHE}/pip/torch-jetson"
+    mkdir -p "${TORCH_WHEEL_CACHE}"
+
+    if [ -z "$TORCH_DIST_INFO" ] || [ ! -f "${TORCH_DIST_INFO}/METADATA" ]; then
+        echo "[SETUP] Installing PyTorch for Jetson (JetPack 6.x / L4T R36)..."
+        CACHED_WHEEL=$(find "${TORCH_WHEEL_CACHE}" -name "torch-*cp310*aarch64*.whl" | sort -V | tail -1)
+        if [ -n "$CACHED_WHEEL" ]; then
+            echo "[CACHE] Using cached wheel: $(basename "$CACHED_WHEEL")"
+            pip3 install "$CACHED_WHEEL"
+        else
+            for JP_VER in v62 v61 v60; do
+                TORCH_BASE="https://developer.download.nvidia.com/compute/redist/jp/${JP_VER}/pytorch"
+                TORCH_WHEEL=$(curl -s "${TORCH_BASE}/" 2>/dev/null \
+                    | grep -o 'torch[^"<> ]*cp310[^"<> ]*aarch64\.whl' | sort -V | tail -1)
+                [ -n "$TORCH_WHEEL" ] && break
+            done
+            if [ -z "$TORCH_WHEEL" ]; then
+                echo "[ERROR] PyTorch wheel not discoverable from NVIDIA CDN."
+                echo "        Install manually then re-run: https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048"
+                exit 1
+            fi
+            echo "[DOWNLOAD] Fetching ${TORCH_WHEEL}..."
+            curl -L "${TORCH_BASE}/${TORCH_WHEEL}" -o "${TORCH_WHEEL_CACHE}/${TORCH_WHEEL}"
+            pip3 install "${TORCH_WHEEL_CACHE}/${TORCH_WHEEL}"
         fi
-        echo "[DOWNLOAD] Fetching ${TORCH_WHEEL}..."
-        curl -L "${TORCH_BASE}/${TORCH_WHEEL}" -o "${TORCH_WHEEL_CACHE}/${TORCH_WHEEL}"
-        pip3 install "${TORCH_WHEEL_CACHE}/${TORCH_WHEEL}"
-    fi
-    echo "[OK] PyTorch installed"
-else
-    echo "[OK] PyTorch already installed"
-fi
-
-# ── 5b. libcusparseLt ─────────────────────────────────────────────────────────
-# JetPack's CUDA 12.x ships libcusparse but not libcusparseLt — PyTorch links
-# against it. Install the real library from the CUDA apt repo.
-if ! dpkg -s libcusparselt0 &>/dev/null 2>&1; then
-    echo "[SETUP] Installing libcusparseLt for PyTorch CUDA support..."
-    sudo apt-get install -y libcusparselt0 libcusparselt-dev
-    echo "[OK] libcusparseLt installed"
-else
-    echo "[OK] libcusparseLt already installed"
-fi
-
-# ── 5c. torchvision for Jetson ────────────────────────────────────────────────
-# No pre-built aarch64 wheel is ABI-compatible with the JetPack torch — must build
-# from source against it. Wheel is cached so subsequent runs skip the 30-min build.
-TV_WHEEL_CACHE="${SSD_CACHE}/pip/torchvision-jetson"
-mkdir -p "${TV_WHEEL_CACHE}"
-if ! python3 -c "import torchvision; import torch; torchvision.ops.nms" &>/dev/null 2>&1; then
-    CACHED_TV=$(find "${TV_WHEEL_CACHE}" -name "torchvision-*.whl" | sort -V | tail -1)
-    if [ -n "$CACHED_TV" ]; then
-        echo "[CACHE] Using cached torchvision wheel: $(basename "$CACHED_TV")"
-        pip3 install "$CACHED_TV" --no-deps
+        echo "[OK] PyTorch installed (Jetson)"
     else
-        echo "[SETUP] Building torchvision 0.20.0 from source (SM87, ~30 min)..."
-        TV_BUILD="/tmp/torchvision_build"
-        rm -rf "$TV_BUILD"
-        git clone --depth 1 --branch v0.20.0 https://github.com/pytorch/vision "$TV_BUILD"
-        cd "$TV_BUILD"
-        FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="8.7" python3 setup.py bdist_wheel
-        TV_WHL=$(find "$TV_BUILD/dist" -name "torchvision-*.whl" | head -1)
-        cp "$TV_WHL" "${TV_WHEEL_CACHE}/"
-        pip3 install "$TV_WHL" --no-deps
-        cd "${WORKSPACE_ROOT}"
-        echo "[OK] torchvision built and installed"
+        echo "[OK] PyTorch already installed (Jetson)"
     fi
+
+    # libcusparseLt — not in JetPack, needed by PyTorch CUDA ops
+    if ! dpkg -s libcusparselt0 &>/dev/null 2>&1; then
+        echo "[SETUP] Installing libcusparseLt..."
+        sudo apt-get install -y libcusparselt0 libcusparselt-dev
+        echo "[OK] libcusparseLt installed"
+    else
+        echo "[OK] libcusparseLt already installed"
+    fi
+
+    # torchvision — no compatible aarch64 wheel, must build from source
+    TV_WHEEL_CACHE="${SSD_CACHE}/pip/torchvision-jetson"
+    mkdir -p "${TV_WHEEL_CACHE}"
+    if ! python3 -c "import torchvision; import torch; torchvision.ops.nms" &>/dev/null 2>&1; then
+        CACHED_TV=$(find "${TV_WHEEL_CACHE}" -name "torchvision-*.whl" | sort -V | tail -1)
+        if [ -n "$CACHED_TV" ]; then
+            echo "[CACHE] Using cached torchvision wheel: $(basename "$CACHED_TV")"
+            pip3 install "$CACHED_TV" --no-deps
+        else
+            echo "[SETUP] Building torchvision 0.20.0 from source (SM87, ~30 min)..."
+            TV_BUILD="/tmp/torchvision_build"
+            rm -rf "$TV_BUILD"
+            git clone --depth 1 --branch v0.20.0 https://github.com/pytorch/vision "$TV_BUILD"
+            cd "$TV_BUILD"
+            FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="8.7" python3 setup.py bdist_wheel
+            TV_WHL=$(find "$TV_BUILD/dist" -name "torchvision-*.whl" | head -1)
+            cp "$TV_WHL" "${TV_WHEEL_CACHE}/"
+            pip3 install "$TV_WHL" --no-deps
+            cd "${WORKSPACE_ROOT}"
+            echo "[OK] torchvision built and installed (Jetson)"
+        fi
+    else
+        echo "[OK] torchvision already installed (Jetson)"
+    fi
+
 else
-    echo "[OK] torchvision already installed"
+    # ── x86 / WSL: standard PyPI wheels ───────────────────────────────────────
+    if [ -z "$TORCH_DIST_INFO" ] || [ ! -f "${TORCH_DIST_INFO}/METADATA" ]; then
+        echo "[SETUP] Installing PyTorch + torchvision from PyPI (x86/WSL)..."
+        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+        echo "[OK] PyTorch + torchvision installed (x86/WSL)"
+    else
+        echo "[OK] PyTorch already installed (x86/WSL)"
+    fi
 fi
 
 # ── 6. Depth Anything 3 Python package ────────────────────────────────────────
