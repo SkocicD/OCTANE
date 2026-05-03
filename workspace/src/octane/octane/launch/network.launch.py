@@ -76,4 +76,14 @@ def generate_launch_description():
         output='log',
     )
 
-    return LaunchDescription([*args, comm_node, video_node, network_monitor_terminal])
+    video_monitor_terminal = ExecuteProcess(
+        cmd=[
+            'xterm', '-title', 'OCTANE | Video Stream Monitor',
+            '-fa', 'Monospace', '-fs', '10',
+            '-bg', '#0d1117', '-fg', '#ff8c00', '-hold',
+            '-e', 'ros2', 'run', 'octane_network', 'video_monitor_node',
+        ],
+        output='log',
+    )
+
+    return LaunchDescription([*args, comm_node, video_node, network_monitor_terminal, video_monitor_terminal])

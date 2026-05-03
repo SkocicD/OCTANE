@@ -24,6 +24,7 @@ setup(
             'heartbeat_sender   = octane_network.nodes.heartbeat_sender:main',
             'network_monitor_node = octane_network.nodes.network_monitor_node:main',
             'video_stream_node  = octane_network.nodes.video_stream_node:main',
+            'video_monitor_node = octane_network.nodes.video_monitor_node:main',
         ],
     },
 )
