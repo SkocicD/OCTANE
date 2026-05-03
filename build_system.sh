@@ -108,7 +108,40 @@ fi
 source "$ROS_SETUP"
 echo "[OK] Sourced ROS 2 ${ROS_DISTRO}"
 
-# ── 2. System apt dependencies ─────────────────────────────────────────────────
+# ── 2. CUDA apt repo (needed for cuda-nvtx and libcusparseLt) ─────────────────
+# WSL and bare-metal use different repo URLs; Jetson ships the repo via JetPack.
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    # WSL2 — x86_64 WSL-specific CUDA repo
+    if [ ! -f /etc/apt/sources.list.d/cuda-wsl-ubuntu.list ] && \
+       ! apt-cache show cuda-nvtx-12-6 &>/dev/null 2>&1; then
+        echo "[SETUP] WSL detected — adding CUDA apt repository..."
+        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
+        wget -q "https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/${CUDA_KEYRING_DEB}" \
+            -O "/tmp/${CUDA_KEYRING_DEB}"
+        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
+        sudo apt-get update -qq
+        echo "[OK] CUDA apt repository added (WSL)"
+    else
+        echo "[OK] CUDA apt repository already configured (WSL)"
+    fi
+elif [ ! -f /etc/nv_tegra_release ]; then
+    # Bare-metal x86 — standard Ubuntu CUDA repo
+    if ! apt-cache show cuda-nvtx-12-6 &>/dev/null 2>&1; then
+        echo "[SETUP] Adding CUDA apt repository (x86)..."
+        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
+        wget -q "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/${CUDA_KEYRING_DEB}" \
+            -O "/tmp/${CUDA_KEYRING_DEB}"
+        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
+        sudo apt-get update -qq
+        echo "[OK] CUDA apt repository added (x86)"
+    else
+        echo "[OK] CUDA apt repository already configured (x86)"
+    fi
+else
+    echo "[OK] Jetson — CUDA repo provided by JetPack"
+fi
+
+# ── 3. System apt dependencies ─────────────────────────────────────────────────
 APT_DEPS=(
     python3-colcon-common-extensions
     python3-rosdep
@@ -298,14 +331,6 @@ fi
 # against it. Install the real library from the CUDA apt repo.
 if ! dpkg -s libcusparselt0 &>/dev/null 2>&1; then
     echo "[SETUP] Installing libcusparseLt for PyTorch CUDA support..."
-    # Add CUDA apt keyring + repo for aarch64 if not already present
-    if [ ! -f /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list ]; then
-        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
-        CUDA_KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/${CUDA_KEYRING_DEB}"
-        wget -q "$CUDA_KEYRING_URL" -O "/tmp/${CUDA_KEYRING_DEB}"
-        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
-        sudo apt-get update -qq
-    fi
     sudo apt-get install -y libcusparselt0 libcusparselt-dev
     echo "[OK] libcusparseLt installed"
 else
