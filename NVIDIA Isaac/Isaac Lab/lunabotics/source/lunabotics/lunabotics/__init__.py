@@ -1,3 +1,6 @@
 """CSU Lunabotics Isaac Lab extension — registers Gym environments and UI extensions."""
 
-from .tasks import *
+try:
+    from .tasks import *
+except ModuleNotFoundError:
+    pass  # Isaac Lab not available (e.g. standalone unit tests)
