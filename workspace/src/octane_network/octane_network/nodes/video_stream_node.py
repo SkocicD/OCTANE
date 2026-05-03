@@ -2,9 +2,9 @@
 """Video stream node — compresses camera frames and sends them to the GUI over UDP.
 
 Stream requests arrive on /network/stream_request (std_msgs/String):
-    "<source_id>,<variant>,<scale>,<fps>"
-    e.g.  "2,R,50,10"   → camera 2, RGB, 50% scale, 10 fps
-    e.g.  "6,D,25,5"    → mosaic, depth heatmap, 25% scale, 5 fps
+    "<source_id>,<variant>,<quality>,<fps>"
+    e.g.  "2,R,70,10"   → camera 2, RGB, quality 70, 10 fps
+    e.g.  "6,D,40,5"    → mosaic, depth heatmap, quality 40, 5 fps
     e.g.  "255,R,0,10"  → stop all streams
 
 source_id values:
@@ -18,9 +18,12 @@ source_id values:
     7 = nvblox ESDF map slice
     255 = stop all
 
-variant: R = RGB,  D = depth heatmap (COLORMAP_INFERNO)
+variant:  R = RGB,  D = depth heatmap (COLORMAP_INFERNO)
+quality:  1–100 JPEG encode quality.  0 = use node's default_quality parameter.
+          Higher = better image, larger frames.  Lower = more compression, smaller frames.
 
-scale: 1–100 (% of native resolution).  0 = use node's default_scale parameter.
+Spatial resolution is fixed server-side via the stream_scale parameter (default 100%).
+Set stream_scale in network_params.yaml to reduce resolution for all streams.
 
 UDP frame format (rover → GUI, port udp_port):
     [0x4F][0x56][source_id][variant][seq_hi][seq_lo][chunk_idx][chunk_total][...JPEG...]
@@ -73,18 +76,18 @@ class VideoStreamNode(Node):
         super().__init__('video_stream_node')
 
         self.declare_parameter('udp_port',            5002)
-        self.declare_parameter('default_scale',       50)
-        self.declare_parameter('jpeg_quality',        70)
+        self.declare_parameter('default_quality',     70)
+        self.declare_parameter('stream_scale',        100)
         self.declare_parameter('depth_max_m',         8.0)
         self.declare_parameter('orbbec_depth_max_m',  5.0)
         self.declare_parameter('config_file',         '')
 
-        self._udp_port      = self.get_parameter('udp_port').value
-        self._default_scale = self.get_parameter('default_scale').value
-        self._jpeg_quality  = self.get_parameter('jpeg_quality').value
-        self._depth_max_m   = self.get_parameter('depth_max_m').value
-        self._orbbec_max_m  = self.get_parameter('orbbec_depth_max_m').value
-        config_file         = self.get_parameter('config_file').value
+        self._udp_port       = self.get_parameter('udp_port').value
+        self._default_quality = self.get_parameter('default_quality').value
+        self._stream_scale   = max(1, min(100, self.get_parameter('stream_scale').value))
+        self._depth_max_m    = self.get_parameter('depth_max_m').value
+        self._orbbec_max_m   = self.get_parameter('orbbec_depth_max_m').value
+        config_file          = self.get_parameter('config_file').value
 
         if not config_file:
             config_file = os.path.join(
@@ -98,12 +101,12 @@ class VideoStreamNode(Node):
         self._lock  = threading.Lock()
 
         # Stream state
-        self._gui_ip:        Optional[str] = None
-        self._active_source: Optional[int] = None
-        self._active_variant: int = VARIANT_RGB
-        self._active_scale:   int = self._default_scale
-        self._stream_timer        = None
-        self._seq:            int = 0
+        self._gui_ip:          Optional[str] = None
+        self._active_source:   Optional[int] = None
+        self._active_variant:  int = VARIANT_RGB
+        self._active_quality:  int = self._default_quality
+        self._stream_timer         = None
+        self._seq:             int = 0
 
         # Single-camera
         self._active_sub          = None
@@ -120,7 +123,7 @@ class VideoStreamNode(Node):
 
         self.get_logger().info(
             f'Video stream node ready  UDP :{self._udp_port}  '
-            f'default_scale={self._default_scale}%  quality={self._jpeg_quality}'
+            f'default_quality={self._default_quality}  stream_scale={self._stream_scale}%'
         )
 
     # ── Connection ─────────────────────────────────────────────────────────────
@@ -141,7 +144,7 @@ class VideoStreamNode(Node):
             parts     = msg.data.strip().split(',')
             source_id = int(parts[0])
             variant   = ord(parts[1].upper()) if len(parts) > 1 else VARIANT_RGB
-            scale     = int(parts[2])         if len(parts) > 2 else 0
+            quality   = int(parts[2])         if len(parts) > 2 else 0
             fps       = int(parts[3])         if len(parts) > 3 else 10
         except (ValueError, IndexError) as e:
             self.get_logger().error(f'Bad stream request "{msg.data}": {e}')
@@ -151,16 +154,16 @@ class VideoStreamNode(Node):
             self._stop_stream()
             return
 
-        scale = scale if 1 <= scale <= 100 else self._default_scale
-        fps   = max(1, min(fps, 30))
-        self._start_stream(source_id, variant, scale, fps)
+        quality = quality if 1 <= quality <= 100 else self._default_quality
+        fps     = max(1, min(fps, 30))
+        self._start_stream(source_id, variant, quality, fps)
 
-    def _start_stream(self, source_id: int, variant: int, scale: int, fps: int):
+    def _start_stream(self, source_id: int, variant: int, quality: int, fps: int):
         self._stop_stream()
 
         self._active_source  = source_id
         self._active_variant = variant
-        self._active_scale   = scale
+        self._active_quality = quality
 
         if source_id == SOURCE_MAP:
             self._subscribe_map()
@@ -173,7 +176,10 @@ class VideoStreamNode(Node):
 
         name  = self._source_map.get(source_id, {}).get('name', f'src_{source_id}')
         vname = 'RGB' if variant == VARIANT_RGB else 'depth'
-        self.get_logger().info(f'Streaming {name} {vname} @ {scale}% {fps}fps')
+        self.get_logger().info(
+            f'Streaming {name} {vname}  quality={quality}  '
+            f'scale={self._stream_scale}%  {fps}fps'
+        )
 
     def _stop_stream(self):
         if self._stream_timer:
@@ -242,7 +248,7 @@ class VideoStreamNode(Node):
 
         source_id = self._active_source
         variant   = self._active_variant
-        scale     = self._active_scale
+        quality   = self._active_quality
 
         if source_id == SOURCE_MOSAIC:
             bgr = self._build_mosaic(variant)
@@ -258,12 +264,13 @@ class VideoStreamNode(Node):
         if bgr is None:
             return
 
-        if scale != 100:
-            w = max(1, int(bgr.shape[1] * scale / 100))
-            h = max(1, int(bgr.shape[0] * scale / 100))
+        # Apply server-side spatial scale (set once in yaml, not GUI-controlled)
+        if self._stream_scale != 100:
+            w = max(1, int(bgr.shape[1] * self._stream_scale / 100))
+            h = max(1, int(bgr.shape[0] * self._stream_scale / 100))
             bgr = cv2.resize(bgr, (w, h), interpolation=cv2.INTER_AREA)
 
-        self._send_udp(bgr, source_id, variant)
+        self._send_udp(bgr, source_id, variant, quality)
 
     # ── Image processing ───────────────────────────────────────────────────────
 
@@ -327,8 +334,8 @@ class VideoStreamNode(Node):
 
     # ── UDP ────────────────────────────────────────────────────────────────────
 
-    def _send_udp(self, bgr: np.ndarray, source_id: int, variant: int):
-        _, jpeg = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
+    def _send_udp(self, bgr: np.ndarray, source_id: int, variant: int, quality: int):
+        _, jpeg = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
         data   = jpeg.tobytes()
         chunks = [data[i:i + _CHUNK_SIZE] for i in range(0, len(data), _CHUNK_SIZE)]
         total  = len(chunks)

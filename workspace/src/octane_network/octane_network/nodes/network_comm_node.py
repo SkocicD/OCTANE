@@ -226,13 +226,13 @@ class NetworkCommNode(Node):
         elif msg_type == 'video_request':
             source_id = msg.get('source_id', 0xFF)
             variant   = msg.get('variant', 'R')
-            scale     = msg.get('scale', 0)
+            quality   = msg.get('quality', 0)
             fps       = msg.get('fps', 10)
             req_msg = String()
-            req_msg.data = f'{source_id},{variant},{scale},{fps}'
+            req_msg.data = f'{source_id},{variant},{quality},{fps}'
             self._stream_request_pub.publish(req_msg)
             self.get_logger().info(
-                f'Video request: src={source_id} variant={variant} scale={scale}% fps={fps}'
+                f'Video request: src={source_id} variant={variant} quality={quality} fps={fps}'
             )
 
         else:

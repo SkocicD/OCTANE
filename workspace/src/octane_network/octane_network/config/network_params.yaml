@@ -10,7 +10,8 @@ network_comm_node:
 video_stream_node:
   ros__parameters:
     udp_port:           5002   # UDP port rover → GUI for video frames
-    default_scale:      50     # % of native resolution when GUI sends scale=0
-    jpeg_quality:       70     # JPEG encode quality (1-100); lower = smaller, faster
+    default_quality:    70     # JPEG quality used when GUI sends quality=0 (1-100)
+    stream_scale:       100    # Server-side spatial scale % applied to all streams (1-100)
+                               # Reduce to 50 to halve resolution and cut bandwidth ~4x
     depth_max_m:        8.0    # DA3 depth clip distance (meters)
     orbbec_depth_max_m: 5.0    # Orbbec depth clip distance (meters)

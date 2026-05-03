@@ -192,22 +192,22 @@ def encode_heartbeat(state: str, seq: int) -> bytes:
     return frame + bytes([crc8(frame)])
 
 
-def encode_video_request(source_id: int, variant: str, scale: int, fps: int) -> bytes:
+def encode_video_request(source_id: int, variant: str, quality: int, fps: int) -> bytes:
     """Encode a video stream request.
 
-    Wire format: [O][V][4][source_id][variant][scale][fps][CRC]  — 8 bytes total.
+    Wire format: [O][V][4][source_id][variant][quality][fps][CRC]  — 8 bytes total.
 
     source_id: 0-5 = individual camera (cameras.yaml order), 6 = mosaic,
                7 = map, 0xFF = stop all streams
     variant:   'R' = RGB, 'D' = depth heatmap
-    scale:     1-100 (percent of native resolution); 0 = use server default
+    quality:   1-100 (JPEG encode quality); 0 = use server default
     fps:       1-30 (target frame rate)
     """
     variant_byte = ord(variant.upper()[0]) if variant else VIDEO_VARIANT_RGB
     payload = bytes([
         source_id & 0xFF,
         variant_byte,
-        max(0, min(100, scale)),
+        max(0, min(100, quality)),
         max(1, min(30, fps)),
     ])
     header = struct.pack('!BBB', MAGIC, TYPE_VIDEO_REQUEST, len(payload))
@@ -289,14 +289,14 @@ def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
         if len(payload) >= 4:
             source_id    = payload[0]
             variant_byte = payload[1]
-            scale        = payload[2]  # 0 = use server default
+            quality      = payload[2]  # 1-100 JPEG quality; 0 = use server default
             fps          = payload[3]
             variant      = 'R' if variant_byte == VIDEO_VARIANT_RGB else 'D'
             return {
                 'type':      'video_request',
                 'source_id': source_id,
                 'variant':   variant,
-                'scale':     scale,
+                'quality':   quality,
                 'fps':       fps,
             }
 

@@ -32,12 +32,10 @@ def generate_launch_description():
                               description='TCP bind address'),
         DeclareLaunchArgument('tcp_port',      default_value='5000',
                               description='TCP port for control traffic'),
-        DeclareLaunchArgument('udp_port',      default_value='5002',
+        DeclareLaunchArgument('udp_port',        default_value='5002',
                               description='UDP port for video frames (rover → GUI)'),
-        DeclareLaunchArgument('default_scale', default_value='50',
-                              description='Fallback video scale %% (1-100) when GUI sends 0'),
-        DeclareLaunchArgument('jpeg_quality',  default_value='70',
-                              description='JPEG encode quality for video frames (1-100)'),
+        DeclareLaunchArgument('default_quality', default_value='70',
+                              description='Fallback JPEG quality (1-100) when GUI sends 0'),
     ]
 
     comm_node = Node(
@@ -62,9 +60,8 @@ def generate_launch_description():
         parameters=[
             params_file,
             {
-                'udp_port':      LaunchConfiguration('udp_port'),
-                'default_scale': LaunchConfiguration('default_scale'),
-                'jpeg_quality':  LaunchConfiguration('jpeg_quality'),
+                'udp_port':       LaunchConfiguration('udp_port'),
+                'default_quality': LaunchConfiguration('default_quality'),
             },
         ],
     )
