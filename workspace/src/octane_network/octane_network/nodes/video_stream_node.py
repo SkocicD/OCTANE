@@ -43,6 +43,7 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from std_msgs.msg import String
 
 from octane_msgs.msg import CameraFrame
@@ -118,8 +119,13 @@ class VideoStreamNode(Node):
 
         self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        self.create_subscription(String, '/network/client_ip',      self._on_client_ip, 10)
-        self.create_subscription(String, '/network/stream_request',  self._on_request,   10)
+        latched_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(String, '/network/client_ip',     self._on_client_ip, latched_qos)
+        self.create_subscription(String, '/network/stream_request', self._on_request,   10)
 
         self.get_logger().info(
             f'Video stream node ready  UDP :{self._udp_port}  '

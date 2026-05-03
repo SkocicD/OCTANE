@@ -10,7 +10,7 @@ Implementation: workspace/src/octane_network/octane_network/protocol.py
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from std_msgs.msg import String, Empty, UInt8
 import socket
 import threading
@@ -40,8 +40,15 @@ class NetworkCommNode(Node):
         self.telemetry_rate = self.get_parameter('telemetry_rate').value
         self.heartbeat_rate = self.get_parameter('heartbeat_rate').value
 
-        # QoS
+        # QoS — standard reliable for most topics
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        # Latched QoS for client_ip: late-joining subscribers (video_stream_node)
+        # get the cached value even if they start after the GUI connects.
+        latched_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
 
         # ROS2 subscribers
         self.supervisor_state_sub = self.create_subscription(
@@ -56,7 +63,7 @@ class NetworkCommNode(Node):
         self.fault_reset_pub     = self.create_publisher(Empty,  '/supervisor/fault_reset',   qos)
         self.key_state_pub       = self.create_publisher(UInt8,  '/manual_ctrl/key_state',    qos)
         self._hb_status_pub      = self.create_publisher(String, '/network/heartbeat_tx',     qos)
-        self._client_ip_pub      = self.create_publisher(String, '/network/client_ip',        qos)
+        self._client_ip_pub      = self.create_publisher(String, '/network/client_ip',        latched_qos)
         self._stream_request_pub = self.create_publisher(String, '/network/stream_request',   qos)
 
         # State
