@@ -80,7 +80,7 @@ def generate_launch_description():
         cmd=[
             'xterm', '-title', 'OCTANE | Video Stream Monitor',
             '-fa', 'Monospace', '-fs', '10',
-            '-bg', '#0d1117', '-fg', '#ff8c00', '-hold',
+            '-bg', '#0a0f1e', '-fg', '#1a6ecc', '-hold',
             '-e', 'ros2', 'run', 'octane_network', 'video_monitor_node',
         ],
         output='log',
