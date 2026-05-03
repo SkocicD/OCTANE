@@ -370,18 +370,27 @@ else
 fi
 
 # ── 6. Depth Anything 3 Python package ────────────────────────────────────────
-# pycolmap/trimesh/gsplat have no aarch64 wheel — export/__init__.py guards their
-# imports so inference works without them (only SfM/3DGS export paths are affected).
 if ! pip3 show depth-anything-3 &>/dev/null; then
     echo "[SETUP] Installing depth_anything_3..."
-    pip3 install -e "${EXT_PKGS}/depth-anything-3" --no-deps
-    # Install inference-only deps — timm/torchvision installed with --no-deps to
-    # prevent pulling in standard PyPI torch over the JetPack-specific wheel.
-    pip3 install "numpy<2" pillow imageio safetensors einops omegaconf opencv-python-headless huggingface-hub addict "moviepy==1.0.3" evo e3nn pypose numba pandas prettytable
-    pip3 install timm --no-deps
+    if [ -f /etc/nv_tegra_release ]; then
+        # Jetson: pycolmap/trimesh/open3d/xformers have no aarch64 wheels — skip them.
+        # timm installed --no-deps to avoid pulling PyPI torch over the JetPack wheel.
+        pip3 install -e "${EXT_PKGS}/depth-anything-3" --no-deps
+        pip3 install "numpy<2" pillow imageio safetensors einops omegaconf \
+            opencv-python-headless huggingface-hub addict "moviepy==1.0.3" \
+            evo e3nn pypose numba pandas prettytable fastapi uvicorn plyfile
+        pip3 install timm --no-deps
+    else
+        # x86/WSL: install all inference deps normally; skip xformers (optional, huge)
+        # and pycolmap/open3d/trimesh (3D export paths not used at runtime).
+        pip3 install -e "${EXT_PKGS}/depth-anything-3" --no-deps
+        pip3 install "numpy<2" pillow imageio safetensors einops omegaconf \
+            opencv-python huggingface-hub addict "moviepy==1.0.3" \
+            evo e3nn pypose numba pandas prettytable timm \
+            fastapi uvicorn plyfile open3d trimesh
+    fi
     echo "[OK] depth_anything_3 installed"
 else
-    # Ensure deps added after initial install are present
     pip3 install addict "moviepy==1.0.3" evo e3nn pypose numba pandas prettytable --quiet
     echo "[OK] depth_anything_3 already installed"
 fi
@@ -426,7 +435,19 @@ OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octa
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)
-EXT_COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DUSE_NVTX=OFF -DCMAKE_CUDA_ARCHITECTURES=87)
+# Pass CUDA toolkit root explicitly — WSL and some bare-metal setups need this hint.
+# SM87 = Jetson AGX Orin; x86/WSL builds will override via CUDA auto-detect if needed.
+if [ -f /etc/nv_tegra_release ]; then
+    EXT_COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args \
+        -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+        -DUSE_NVTX=OFF -DCMAKE_CUDA_ARCHITECTURES=87 \
+        -DCUDA_TOOLKIT_ROOT_DIR="${CUDA_HOME}")
+else
+    EXT_COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args \
+        -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+        -DUSE_NVTX=OFF \
+        -DCUDA_TOOLKIT_ROOT_DIR="${CUDA_HOME}")
+fi
 
 # ── External packages: build once, skip if already installed ──────────────────
 build_external() {
