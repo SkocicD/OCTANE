@@ -122,6 +122,17 @@ else
 fi
 
 # ── 3. System apt dependencies ─────────────────────────────────────────────────
+# Detect installed CUDA version to pick the right versioned package names
+CUDA_MAJOR=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+' | head -1)
+CUDA_MINOR=$(nvcc --version 2>/dev/null | grep -oP 'release [0-9]+\.\K[0-9]+' | head -1)
+if [ -n "$CUDA_MAJOR" ] && [ -n "$CUDA_MINOR" ]; then
+    NVTX_PKG="cuda-nvtx-${CUDA_MAJOR}-${CUDA_MINOR}"
+    echo "[INFO] Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} — will install ${NVTX_PKG}"
+else
+    NVTX_PKG="cuda-nvtx-12-6"
+    echo "[WARN] Could not detect CUDA version — falling back to ${NVTX_PKG}"
+fi
+
 APT_DEPS=(
     python3-colcon-common-extensions
     python3-rosdep
@@ -132,7 +143,7 @@ APT_DEPS=(
     libgoogle-glog-dev
     nlohmann-json3-dev
     libeigen3-dev
-    cuda-nvtx-12-6
+    "${NVTX_PKG}"
     ros-${ROS_DISTRO}-camera-info-manager
     ros-${ROS_DISTRO}-image-transport
     ros-${ROS_DISTRO}-image-transport-plugins
