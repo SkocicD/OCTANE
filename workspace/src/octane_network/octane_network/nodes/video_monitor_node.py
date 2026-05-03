@@ -31,7 +31,7 @@ SOURCE_NAMES = {
 
 class VideoMonitorNode(Node):
 
-    ORG   = '\033[38;5;33m'    # dark saturated blue
+    ORG   = '\033[38;5;208m'   # true orange
     BOLD  = '\033[1m'
     DIM   = '\033[2m'
     GREEN = '\033[92m'
@@ -92,7 +92,7 @@ class VideoMonitorNode(Node):
 
         name     = SOURCE_NAMES.get(source_id, f'src_{source_id}')
         vname    = 'RGB' if variant == 'R' else 'DEPTH'
-        v_color  = self.ORG if variant == 'R' else '\033[38;5;117m'  # lighter blue for depth
+        v_color  = self.ORG if variant == 'R' else '\033[38;5;87m'   # cyan for depth
 
         self._active_source  = source_id
         self._active_variant = variant
@@ -127,7 +127,7 @@ class VideoMonitorNode(Node):
         if self._active_source is not None:
             name    = SOURCE_NAMES.get(self._active_source, f'src_{self._active_source}')
             vname   = 'RGB' if self._active_variant == 'R' else 'DEPTH'
-            v_color = self.ORG if self._active_variant == 'R' else '\033[38;5;51m'
+            v_color = self.ORG if self._active_variant == 'R' else '\033[38;5;87m'
             age     = time.time() - self._last_switch
             src_str = (
                 f'{self.BOLD}{name}{self.RESET}  '

@@ -21,6 +21,7 @@ from octane_network.classes.protocol import (
     decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT,
     TYPE_MANIPULATOR, TYPE_VIDEO_REQUEST,
 )
+from octane_network.classes.network_guard import NetworkGuard
 
 
 class NetworkCommNode(Node):
@@ -77,6 +78,10 @@ class NetworkCommNode(Node):
         # Binary buffer for partial frames
         self.buffer: bytes = b''
         self.buffer_lock = threading.Lock()
+
+        # Connection watchdog — fires handlers after 3 consecutive HB failures
+        self._guard = NetworkGuard(fail_threshold=3)
+        self._guard.register(self._kill_video_feed)
 
         # Server
         self.server_socket = None
@@ -289,13 +294,24 @@ class NetworkCommNode(Node):
         try:
             frame = encode_heartbeat(self.current_state, self._hb_seq)
             self.client_socket.sendall(frame)
+            self._guard.heartbeat_ok()
             status = f'OK  seq={self._hb_seq}  state={self.current_state}'
             self._hb_seq = (self._hb_seq + 1) % 65536
         except Exception as e:
+            self._guard.heartbeat_fail()
             status = f'ERR {e}'
         pub_msg = String()
         pub_msg.data = status
         self._hb_status_pub.publish(pub_msg)
+
+    def _kill_video_feed(self):
+        stop_msg = String()
+        stop_msg.data = '255,R,0,10'
+        self._stream_request_pub.publish(stop_msg)
+        ip_msg = String()
+        ip_msg.data = ''
+        self._client_ip_pub.publish(ip_msg)
+        self.get_logger().warn('NetworkGuard: heartbeat lost — video feed killed')
 
     def send_telemetry(self):
         """Send periodic telemetry to GUI using binary protocol."""

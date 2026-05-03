@@ -77,6 +77,7 @@ class RGBCameraNode(Node):
             self.get_logger().warn('Failed to capture frame')
             return
 
+        frame = cv2.rotate(frame, cv2.ROTATE_180)
         stamp = self.get_clock().now().to_msg()
 
         image_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
