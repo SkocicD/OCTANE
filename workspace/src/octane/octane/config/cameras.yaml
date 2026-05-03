@@ -17,6 +17,9 @@
 # Positions derived from CAD (CAD X=right→ROS Y negated, CAD Y=forward→ROS X,
 # CAD Z=up→ROS Z), inches × 0.0254 → meters.
 # Intrinsics are placeholder; replace with calibration values.
+#
+# Near RGB cameras stream at 480×360 to stay within USB 2.0 bandwidth across
+# 5 simultaneous cameras (MJPEG).  Orbbec streams at its native 640×480.
 
 cameras:
 
@@ -41,15 +44,17 @@ cameras:
 
   near_rgb_left_side:
     serial: left_side
+    device_path: /dev/cam_left_side
+    frame_rate: 30
     rgb_topic:   perception/camera/near/left_side/rgb/frame
     depth_topic: perception/camera/near/left_side/depth/frame
-    width:  640
-    height: 480
+    width:  480
+    height: 360
     intrinsics:
-      fx: 615.0
-      fy: 615.0
-      cx: 320.0
-      cy: 240.0
+      fx: 461.0
+      fy: 461.0
+      cx: 240.0
+      cy: 180.0
       dist: [0.0, 0.0, 0.0, 0.0, 0.0]
     offset:
       # CAD: X=-12.626" left, Y=0, Z=14.786" up
@@ -60,15 +65,17 @@ cameras:
 
   near_rgb_left_front:
     serial: left_front
+    device_path: /dev/cam_left_front
+    frame_rate: 30
     rgb_topic:   perception/camera/near/left_front/rgb/frame
     depth_topic: perception/camera/near/left_front/depth/frame
-    width:  640
-    height: 480
+    width:  480
+    height: 360
     intrinsics:
-      fx: 615.0
-      fy: 615.0
-      cx: 320.0
-      cy: 240.0
+      fx: 461.0
+      fy: 461.0
+      cx: 240.0
+      cy: 180.0
       dist: [0.0, 0.0, 0.0, 0.0, 0.0]
     offset:
       # CAD: Y=+18.575" fwd, X=-9.145" left, Z=14.786" up
@@ -79,15 +86,17 @@ cameras:
 
   near_rgb_right_side:
     serial: right_side
+    device_path: /dev/cam_right_side
+    frame_rate: 30
     rgb_topic:   perception/camera/near/right_side/rgb/frame
     depth_topic: perception/camera/near/right_side/depth/frame
-    width:  640
-    height: 480
+    width:  480
+    height: 360
     intrinsics:
-      fx: 615.0
-      fy: 615.0
-      cx: 320.0
-      cy: 240.0
+      fx: 461.0
+      fy: 461.0
+      cx: 240.0
+      cy: 180.0
       dist: [0.0, 0.0, 0.0, 0.0, 0.0]
     offset:
       # CAD: X=+12.626" right, Y=0, Z=14.786" up
@@ -97,15 +106,17 @@ cameras:
 
   near_rgb_right_front:
     serial: right_front
+    device_path: /dev/cam_right_front
+    frame_rate: 30
     rgb_topic:   perception/camera/near/right_front/rgb/frame
     depth_topic: perception/camera/near/right_front/depth/frame
-    width:  640
-    height: 480
+    width:  480
+    height: 360
     intrinsics:
-      fx: 615.0
-      fy: 615.0
-      cx: 320.0
-      cy: 240.0
+      fx: 461.0
+      fy: 461.0
+      cx: 240.0
+      cy: 180.0
       dist: [0.0, 0.0, 0.0, 0.0, 0.0]
     offset:
       # CAD: Y=+18.575" fwd, X=+9.145" right, Z=14.786" up
@@ -115,15 +126,17 @@ cameras:
 
   near_rgb_back_rear:
     serial: back_rear
+    device_path: /dev/cam_back_rear
+    frame_rate: 30
     rgb_topic:   perception/camera/near/back_rear/rgb/frame
     depth_topic: perception/camera/near/back_rear/depth/frame
-    width:  640
-    height: 480
+    width:  480
+    height: 360
     intrinsics:
-      fx: 615.0
-      fy: 615.0
-      cx: 320.0
-      cy: 240.0
+      fx: 461.0
+      fy: 461.0
+      cx: 240.0
+      cy: 180.0
       dist: [0.0, 0.0, 0.0, 0.0, 0.0]
     offset:
       # CAD: Y=-22.44" back, X=0, Z=18.404" up

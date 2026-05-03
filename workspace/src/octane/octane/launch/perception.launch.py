@@ -1,32 +1,31 @@
+import os
+
+import yaml
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, LogInfo, DeclareLaunchArgument
-from launch.launch_description_sources import PythonLaunchDescriptionSource, AnyLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
+from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from ament_index_python.packages import get_package_share_directory
-import os
 
-
-# Camera scheme:
+# Camera scheme (driven by octane/config/cameras.yaml):
 #   1× Orbbec (depth + RGB)   → perception/camera/depth_camera/{depth,rgb}/frame
-#   5× standalone RGB cameras → perception/camera/near/{position}/rgb/frame
+#   5× standalone RGB cameras → perception/camera/near/<position>/rgb/frame
+#   DA3 depth estimation      → perception/camera/near/<position>/depth/frame
 #
 # With debug_images:=true each camera also publishes sensor_msgs/Image on
-#   perception/camera/near/{position}/rgb/image  (for RViz / rqt_image_view)
+#   perception/camera/near/<position>/rgb/image  (for RViz / rqt_image_view)
 #
 # Device paths are udev symlinks — see setup_cameras.sh in repo root.
-NEAR_RGB_CAMERAS = [
-    # (node_name,            position,        device_path)
-    ('near_rgb_left_front',  'left_front',    '/dev/cam_left_front'),
-    ('near_rgb_left_side',   'left_side',     '/dev/cam_left_side'),
-    ('near_rgb_right_front', 'right_front',   '/dev/cam_right_front'),
-    ('near_rgb_right_side',  'right_side',    '/dev/cam_right_side'),
-    ('near_rgb_back_rear',   'back_rear',     '/dev/cam_back_rear'),
-]
 
 
 def generate_launch_description():
+    octane_share = get_package_share_directory('octane')
+    config_file = os.path.join(octane_share, 'config', 'cameras.yaml')
+    with open(config_file) as f:
+        cfg = yaml.safe_load(f)
+
     debug_images_arg = DeclareLaunchArgument(
         'debug_images', default_value='true',
         description='Publish raw sensor_msgs/Image alongside CameraFrame (for RViz/rqt)',
@@ -39,6 +38,7 @@ def generate_launch_description():
     ]
 
     # ── Orbbec depth camera ──────────────────────────────────────────────────
+    orbbec_cfg = cfg['cameras']['orbbec_depth']
     try:
         astra_camera_dir = get_package_share_directory('astra_camera')
         nodes.append(
@@ -47,8 +47,8 @@ def generate_launch_description():
                     os.path.join(astra_camera_dir, 'launch', 'astra_pro.launch.xml')
                 ),
                 launch_arguments={
-                    'enable_ir':            'false',
-                    'enable_point_cloud':   'false',
+                    'enable_ir':          'false',
+                    'enable_point_cloud': 'false',
                 }.items(),
             )
         )
@@ -61,40 +61,41 @@ def generate_launch_description():
             name='astra_depth_node',
             output='log',
             remappings=[
-                ('depth_camera/depth', 'perception/camera/depth_camera/depth/frame'),
-                ('depth_camera/color', 'perception/camera/depth_camera/rgb/frame'),
+                ('depth_camera/depth', orbbec_cfg['depth_topic']),
+                ('depth_camera/color', orbbec_cfg['rgb_topic']),
             ],
         )
     )
 
-    # ── 5× near RGB cameras ──────────────────────────────────────────────────
-    for node_name, position, device_path in NEAR_RGB_CAMERAS:
+    # ── 5× near RGB cameras (any camera entry with a device_path) ────────────
+    near_rgb_topics = []
+    for cam_name, cam_cfg in cfg['cameras'].items():
+        if 'device_path' not in cam_cfg:
+            continue
+        rgb_topic = cam_cfg['rgb_topic']
+        near_rgb_topics.append(rgb_topic)
         nodes.append(
             Node(
                 package='octane_perception',
                 executable='rgb_camera_node',
-                name=node_name,
+                name=cam_name,
                 output='log',
                 parameters=[{
-                    'device_path': device_path,
-                    'serial': position,
-                    'frame_rate': 30,
-                    'width': 480,
-                    'height': 360,
+                    'device_path': cam_cfg['device_path'],
+                    'serial':      cam_cfg['serial'],
+                    'frame_rate':  cam_cfg.get('frame_rate', 30),
+                    'width':       cam_cfg['width'],
+                    'height':      cam_cfg['height'],
                     'debug_images': ParameterValue(debug_images, value_type=bool),
                 }],
                 remappings=[
-                    ('camera/frame', f'perception/camera/near/{position}/rgb/frame'),
-                    ('camera/image', f'perception/camera/near/{position}/rgb/image'),
+                    ('camera/frame', rgb_topic),
+                    ('camera/image', rgb_topic.replace('/frame', '/image')),
                 ],
             )
         )
 
-    # ── DA3 depth estimation — runs on all 5 near RGB cameras ────────────────
-    near_rgb_topics = [
-        f'perception/camera/near/{position}/rgb/frame'
-        for _, position, _ in NEAR_RGB_CAMERAS
-    ]
+    # ── DA3 depth estimation — runs on all near RGB cameras ──────────────────
     nodes.append(
         Node(
             package='octane_perception',
@@ -102,11 +103,11 @@ def generate_launch_description():
             name='depth_estimation_node',
             output='log',
             parameters=[{
-                'model_name': 'depth-anything/DA3METRIC-LARGE',
-                'input_topics': near_rgb_topics,
+                'model_name':    'depth-anything/DA3METRIC-LARGE',
+                'input_topics':  near_rgb_topics,
                 'inference_rate': 10.0,
-                'process_res': 392,
-                'debug_images': ParameterValue(debug_images, value_type=bool),
+                'process_res':   392,
+                'debug_images':  ParameterValue(debug_images, value_type=bool),
             }],
         )
     )
