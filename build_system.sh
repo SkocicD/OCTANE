@@ -473,6 +473,14 @@ build_external() {
 }
 
 check_and_build_external() {
+    # isaac_ros / nvblox require CUDA nvcc to compile — not available on WSL without
+    # a full CUDA toolkit install.  Skip external builds on WSL; the octane Python
+    # packages build fine without them.
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "[SKIP] WSL detected — skipping external (CUDA) package builds"
+        return 0
+    fi
+
     local missing=false
     for pkg in isaac_ros_common nvblox_msgs astra_camera; do
         ext_installed "$pkg" || { missing=true; break; }
