@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'camera_frame_splitter = octane_mapping.nodes.camera_frame_splitter:main',
+            'point_cloud_mux_node  = octane_mapping.nodes.point_cloud_mux_node:main',
         ],
     },
 )

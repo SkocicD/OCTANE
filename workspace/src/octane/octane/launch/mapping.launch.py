@@ -144,5 +144,16 @@ def generate_launch_description():
             )
         )
 
+    # ── Combined point cloud (all 6 cameras merged into base_link frame) ─────
+    nodes.append(
+        Node(
+            package='octane_mapping',
+            executable='point_cloud_mux_node',
+            name='point_cloud_mux_node',
+            output='log',
+            parameters=[{'config_file': config_file, 'publish_rate': 5.0}],
+        )
+    )
+
     nodes.append(LogInfo(msg='Mapping subsystem online'))
     return LaunchDescription(nodes)
