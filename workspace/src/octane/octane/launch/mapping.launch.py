@@ -4,7 +4,8 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
-from launch.actions import LogInfo
+from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
 
@@ -13,7 +14,13 @@ from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
+    engine_path_arg = DeclareLaunchArgument(
+        'terrain_engine_path',
+        default_value='',
+        description='Path to TRT engine for terrain inference (leave empty for PyTorch fallback)',
+    )
     nodes = [
+        engine_path_arg,
         LogInfo(msg='Starting mapping subsystem'),
         # Stub identity odom→base_link until octane_localization is ready
         # (April tags + IMU fusion).  Replace this node with the real source then.
@@ -143,6 +150,22 @@ def generate_launch_description():
             name='point_cloud_mux_node',
             output='log',
             parameters=[{'config_file': config_file, 'publish_rate': 5.0}],
+        )
+    )
+
+    # ── Terrain inference ────────────────────────────────────────────────
+    nodes.append(
+        Node(
+            package='octane_mapping',
+            executable='terrain_inference_node',
+            name='terrain_inference_node',
+            output='log',
+            parameters=[{
+                'engine_path':          LaunchConfiguration('terrain_engine_path'),
+                'confidence_threshold': 0.5,
+                'grid_size':            200,
+                'cell_size':            0.05,
+            }],
         )
     )
 
