@@ -78,40 +78,31 @@ def generate_launch_description():
             )
         )
 
-    # ── nvblox — live 3D view around the robot ────────────────────────────────
-    # Integrates depth from all 6 cameras into a rolling TSDF/ESDF.
-    # TSDF decay + 4 m radius clearing keeps it a live view, not a persistent
-    # global map.  Camera poses come from the TF tree above.
-    nvblox_remappings = []
-    for i, cam_name in enumerate(cfg['cameras'].keys()):
-        nvblox_remappings.extend([
-            (f'camera_{i}/depth/image',       f'mapping/{cam_name}/depth/image'),
-            (f'camera_{i}/depth/camera_info', f'mapping/{cam_name}/depth/camera_info'),
-            (f'camera_{i}/color/image',       f'mapping/{cam_name}/rgb/image'),
-            (f'camera_{i}/color/camera_info', f'mapping/{cam_name}/rgb/camera_info'),
-        ])
-
-    try:
-        get_package_share_directory('nvblox_ros')
-        nodes.append(
-            Node(
-                package='nvblox_ros',
-                executable='nvblox_node',
-                name='nvblox_node',
-                output='log',
-                parameters=[
-                    nvblox_params,
-                    {
-                        'global_frame': 'odom',
-                        'pose_frame':   'base_link',
-                    },
-                ],
-                remappings=nvblox_remappings,
-            )
-        )
-    except PackageNotFoundError:
-        print('[WARN] nvblox_ros not found — build isaac_ros_nvblox first')
-        nodes.append(LogInfo(msg='nvblox skipped (nvblox_ros not built)'))
+    # ── nvblox — disabled (point_cloud_mux_node is the 3D data source) ──────────
+    # Uncomment to re-enable GPU TSDF/ESDF fusion if needed in future.
+    #
+    # nvblox_remappings = []
+    # for i, cam_name in enumerate(cfg['cameras'].keys()):
+    #     nvblox_remappings.extend([
+    #         (f'camera_{i}/depth/image',       f'mapping/{cam_name}/depth/image'),
+    #         (f'camera_{i}/depth/camera_info', f'mapping/{cam_name}/depth/camera_info'),
+    #         (f'camera_{i}/color/image',       f'mapping/{cam_name}/rgb/image'),
+    #         (f'camera_{i}/color/camera_info', f'mapping/{cam_name}/rgb/camera_info'),
+    #     ])
+    # try:
+    #     get_package_share_directory('nvblox_ros')
+    #     nodes.append(
+    #         Node(
+    #             package='nvblox_ros',
+    #             executable='nvblox_node',
+    #             name='nvblox_node',
+    #             output='log',
+    #             parameters=[nvblox_params, {'global_frame': 'odom', 'pose_frame': 'base_link'}],
+    #             remappings=nvblox_remappings,
+    #         )
+    #     )
+    # except PackageNotFoundError:
+    #     nodes.append(LogInfo(msg='nvblox skipped (nvblox_ros not built)'))
 
     # ── Colored point clouds — one per near camera via depth_image_proc ──────────
     # Each camera gets its own container + namespace so topic routing never
