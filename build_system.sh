@@ -108,38 +108,7 @@ fi
 source "$ROS_SETUP"
 echo "[OK] Sourced ROS 2 ${ROS_DISTRO}"
 
-# ── 2. CUDA apt repo (required before installing cuda-nvtx and libcusparseLt) ──
-if [ ! -f /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list ]; then
-    echo "[SETUP] Adding CUDA apt repository..."
-    CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
-    CUDA_KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/${CUDA_KEYRING_DEB}"
-    wget -q "$CUDA_KEYRING_URL" -O "/tmp/${CUDA_KEYRING_DEB}"
-    sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
-    sudo apt-get update -qq
-    echo "[OK] CUDA apt repository added"
-else
-    echo "[OK] CUDA apt repository already configured"
-fi
-
-# ── 3. System apt dependencies ─────────────────────────────────────────────────
-# Detect CUDA version for versioned package names.
-# Jetson (JetPack 6.x) always ships CUDA 12.6 — use that directly.
-# On other platforms detect from nvcc, fall back to 12-6.
-if [ -f /etc/nv_tegra_release ]; then
-    NVTX_PKG="cuda-nvtx-12-6"
-    echo "[INFO] Jetson detected — using ${NVTX_PKG}"
-else
-    CUDA_MAJOR=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+' | head -1)
-    CUDA_MINOR=$(nvcc --version 2>/dev/null | grep -oP 'release [0-9]+\.\K[0-9]+' | head -1)
-    if [ -n "$CUDA_MAJOR" ] && [ -n "$CUDA_MINOR" ]; then
-        NVTX_PKG="cuda-nvtx-${CUDA_MAJOR}-${CUDA_MINOR}"
-        echo "[INFO] Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} — will install ${NVTX_PKG}"
-    else
-        NVTX_PKG="cuda-nvtx-12-6"
-        echo "[WARN] Could not detect CUDA version — falling back to ${NVTX_PKG}"
-    fi
-fi
-
+# ── 2. System apt dependencies ─────────────────────────────────────────────────
 APT_DEPS=(
     python3-colcon-common-extensions
     python3-rosdep
@@ -150,7 +119,7 @@ APT_DEPS=(
     libgoogle-glog-dev
     nlohmann-json3-dev
     libeigen3-dev
-    "${NVTX_PKG}"
+    cuda-nvtx-12-6
     ros-${ROS_DISTRO}-camera-info-manager
     ros-${ROS_DISTRO}-image-transport
     ros-${ROS_DISTRO}-image-transport-plugins
@@ -172,14 +141,14 @@ else
     echo "[OK] apt dependencies satisfied"
 fi
 
-# ── 4. rosdep (optional) ──────────────────────────────────────────────────────
+# ── 3. rosdep (optional) ──────────────────────────────────────────────────────
 [ -f /etc/ros/rosdep/sources.list.d/20-default.list ] || \
     sudo rosdep init 2>/dev/null || true
 rosdep update --rosdistro "${ROS_DISTRO}" -q 2>/dev/null && \
     echo "[OK] rosdep updated" || \
     echo "[WARN] rosdep update failed (network?) — skipping"
 
-# ── 5. External repos (clone before pip installs that depend on them) ─────────
+# ── 4. External repos (clone before pip installs that depend on them) ─────────
 echo "[CHECK] Verifying external repos..."
 
 clone_if_missing() {
@@ -287,7 +256,7 @@ else
     echo "[OK]    nvblox kMaxNumCameras already patched"
 fi
 
-# ── 6. PyTorch for Jetson ─────────────────────────────────────────────────────
+# ── 5. PyTorch for Jetson ─────────────────────────────────────────────────────
 # Wheels are Jetson-specific (JetPack 6.x / L4T R36, cp310, aarch64).
 # If the CDN wheel can't be found, the build stops — install manually and re-run.
 TORCH_WHEEL_CACHE="${SSD_CACHE}/pip/torch-jetson"
@@ -324,18 +293,26 @@ else
     echo "[OK] PyTorch already installed"
 fi
 
-# ── 6b. libcusparseLt ─────────────────────────────────────────────────────────
+# ── 5b. libcusparseLt ─────────────────────────────────────────────────────────
 # JetPack's CUDA 12.x ships libcusparse but not libcusparseLt — PyTorch links
 # against it. Install the real library from the CUDA apt repo.
 if ! dpkg -s libcusparselt0 &>/dev/null 2>&1; then
     echo "[SETUP] Installing libcusparseLt for PyTorch CUDA support..."
+    # Add CUDA apt keyring + repo for aarch64 if not already present
+    if [ ! -f /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list ]; then
+        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
+        CUDA_KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/${CUDA_KEYRING_DEB}"
+        wget -q "$CUDA_KEYRING_URL" -O "/tmp/${CUDA_KEYRING_DEB}"
+        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
+        sudo apt-get update -qq
+    fi
     sudo apt-get install -y libcusparselt0 libcusparselt-dev
     echo "[OK] libcusparseLt installed"
 else
     echo "[OK] libcusparseLt already installed"
 fi
 
-# ── 6c. torchvision for Jetson ────────────────────────────────────────────────
+# ── 5c. torchvision for Jetson ────────────────────────────────────────────────
 # No pre-built aarch64 wheel is ABI-compatible with the JetPack torch — must build
 # from source against it. Wheel is cached so subsequent runs skip the 30-min build.
 TV_WHEEL_CACHE="${SSD_CACHE}/pip/torchvision-jetson"
@@ -362,7 +339,7 @@ else
     echo "[OK] torchvision already installed"
 fi
 
-# ── 7. Depth Anything 3 Python package ────────────────────────────────────────
+# ── 6. Depth Anything 3 Python package ────────────────────────────────────────
 # pycolmap/trimesh/gsplat have no aarch64 wheel — export/__init__.py guards their
 # imports so inference works without them (only SfM/3DGS export paths are affected).
 if ! pip3 show depth-anything-3 &>/dev/null; then
@@ -379,7 +356,7 @@ else
     echo "[OK] depth_anything_3 already installed"
 fi
 
-# ── 8. gs-usb (CAN adapter Python library) ────────────────────────────────────
+# ── 7. gs-usb (CAN adapter Python library) ────────────────────────────────────
 if ! python3 -c "import gs_usb" &>/dev/null; then
     echo "[SETUP] Installing gs-usb..."
     pip3 install gs-usb
@@ -388,7 +365,7 @@ else
     echo "[OK] gs-usb already installed"
 fi
 
-# ── 9. rosdep install for external packages ───────────────────────────────────
+# ── 8. rosdep install for external packages ───────────────────────────────────
 echo "[SETUP] Installing ROS deps for external packages via rosdep..."
 # Skip JetPack-native packages that rosdep can't resolve — they ship with JetPack
 ROSDEP_SKIP_KEYS=(
@@ -404,7 +381,7 @@ rosdep install --from-paths "${EXT_PKGS}" --ignore-src -r -y \
     --skip-keys="${ROSDEP_SKIP_KEYS[*]}" 2>&1 | grep -v "^#" || true
 echo "[OK] rosdep install done"
 
-# ── 10. Stale cache check ─────────────────────────────────────────────────────
+# ── 9. Stale cache check ───────────────────────────────────────────────────────
 if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; then
     echo "[WARN] Stale build cache — wiping octane build artifacts..."
     for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network; do
@@ -412,7 +389,7 @@ if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; t
     done
 fi
 
-# ── 11. Build ─────────────────────────────────────────────────────────────────
+# ── 10. Build ──────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
 OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane"
