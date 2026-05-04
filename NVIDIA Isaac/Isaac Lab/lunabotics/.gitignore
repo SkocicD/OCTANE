@@ -29,8 +29,8 @@ outputs/
 # Exported policy files from play.py (large, regenerated on demand)
 logs/**/exported/*.onnx
 
-# Generated regolith PBR textures (cached at runtime, regenerated if deleted)
-**/regolith_textures/
+# Generated / downloaded PBR textures (cached at runtime, regenerated if deleted)
+**/terrain_mapping/assets/
 
 # Isaac Sim / packman cache (generated next to the repo on some setups)
 _isaac_sim/
