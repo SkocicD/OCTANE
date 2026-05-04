@@ -1075,6 +1075,10 @@ class TerrainCollectionEnv(DirectRLEnv):
                         90.0 + wobble)
 
         # ── update episode-shared materials once before the obstacle loops ─────
+        # Ground material must be set first so _current_ground_avg_rgb is current
+        if cfg.randomize_materials:
+            self._randomize_ground_material()
+
         from pxr import Vt, UsdShade
         if cfg.randomize_materials and hasattr(self, "_ep_rock_shader"):
             ground_rgb = getattr(self, "_current_ground_avg_rgb", None)
@@ -1143,9 +1147,6 @@ class TerrainCollectionEnv(DirectRLEnv):
             else:
                 t_op.Set(PARK)
                 ft_op.Set(PARK)
-
-        if cfg.randomize_materials:
-            self._randomize_ground_material()
 
         crater_params = getattr(self, "_episode_craters_per_env", [[]])[0]
         robot_lx = robot_wx - env_ox
