@@ -93,6 +93,8 @@ class TerrainDataCollectorNode(Node):
             semantic_gt=gt["semantic_gt"],
             objects_gt=gt["objects_gt"],
             walls_gt=gt["walls_gt"],
+            robot_pos=gt["robot_pos"],
+            robot_yaw=gt["robot_yaw"],
         )
 
         self._processed.add(ep_id)
@@ -105,10 +107,12 @@ class TerrainDataCollectorNode(Node):
     def _load_gt(self, path: pathlib.Path) -> dict:
         raw = np.load(str(path), allow_pickle=True)
         return {
-            "height_gt":  raw["height_gt"],
+            "height_gt":   raw["height_gt"],
             "semantic_gt": raw["semantic_gt"],
             "objects_gt":  raw["objects_gt"],
             "walls_gt":    raw["walls_gt"],
+            "robot_pos":   raw["robot_pos"],
+            "robot_yaw":   raw["robot_yaw"],
         }
 
 
