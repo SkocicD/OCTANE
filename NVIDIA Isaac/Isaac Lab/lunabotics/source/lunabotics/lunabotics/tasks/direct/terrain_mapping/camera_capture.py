@@ -84,11 +84,34 @@ class CameraCapture:
             print("[CameraCapture] WARNING: no camera prims found in stage — "
                   "run scripts/find_camera_prims.py in the Script Editor to inspect paths")
 
+        try:
+            import omni.usd
+            from pxr import UsdGeom, Gf
+            _stage = omni.usd.get_context().get_stage()
+        except Exception:
+            _stage = None
+
         for key, (serial, cam_type, w, h) in _CAM_MAP.items():
             prim = cam_prims.get(key)
             if prim is None:
                 print(f"[CameraCapture] SKIP {key}: not in stage")
                 continue
+
+            # Ensure clipping range is sane — black images are usually a near-clip problem
+            if _stage is not None:
+                try:
+                    cam_prim = UsdGeom.Camera(_stage.GetPrimAtPath(prim))
+                    clip_attr = cam_prim.GetClippingRangeAttr()
+                    existing  = clip_attr.Get() if clip_attr else None
+                    near = float(existing[0]) if existing else None
+                    far  = float(existing[1]) if existing else None
+                    if near is None or near > 0.05 or (far is not None and far < 20.0):
+                        clip_attr.Set(Gf.Vec2f(0.01, 150.0))
+                        print(f"[CameraCapture]   {key}: clipping fixed {existing} → (0.01, 150)")
+                    else:
+                        print(f"[CameraCapture]   {key}: clipping OK near={near:.4f} far={far:.1f}")
+                except Exception as ce:
+                    print(f"[CameraCapture]   {key}: could not inspect clipping — {ce}")
 
             try:
                 rp    = rep.create.render_product(prim, resolution=(w, h))
