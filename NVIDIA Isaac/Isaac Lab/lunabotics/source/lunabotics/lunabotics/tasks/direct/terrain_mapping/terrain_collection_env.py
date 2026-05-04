@@ -692,6 +692,7 @@ class TerrainCollectionEnv(DirectRLEnv):
         if not getattr(self, "_ground_tex_sets", None) or self._ground_omni_shader is None:
             return
         import os
+        from PIL import Image
         from pxr import Sdf
 
         tex_dir  = self._ground_tex_sets[int(self._rng.integers(len(self._ground_tex_sets)))]
@@ -705,6 +706,16 @@ class TerrainCollectionEnv(DirectRLEnv):
         sh.CreateInput("normalmap_texture",           Sdf.ValueTypeNames.Asset).Set(_asset("normal.png"))
         sh.CreateInput("reflectionroughness_texture", Sdf.ValueTypeNames.Asset).Set(_asset("rough.png"))
         sh.CreateInput("texture_scale",               Sdf.ValueTypeNames.Float2).Set((uv_scale, uv_scale))
+
+        # Sample a 32×32 centre crop of the albedo for rock colour-matching
+        try:
+            img  = Image.open(os.path.join(tex_dir, "albedo.png")).convert("RGB")
+            w, h = img.size
+            crop = img.crop((w // 2 - 16, h // 2 - 16, w // 2 + 16, h // 2 + 16))
+            avg  = np.asarray(crop, dtype=np.float32).mean(axis=(0, 1)) / 255.0
+            self._current_ground_avg_rgb = tuple(float(c) for c in avg)
+        except Exception:
+            self._current_ground_avg_rgb = None
 
     def _generate_biome_textures(self) -> list[str]:
         """Generate procedurally distinct ground biome textures with Gaussian splotches."""
@@ -1067,7 +1078,15 @@ class TerrainCollectionEnv(DirectRLEnv):
         # ── update episode-shared materials once before the obstacle loops ─────
         from pxr import Vt, UsdShade
         if cfg.randomize_materials and hasattr(self, "_ep_rock_shader"):
-            d, r, m = _sample_rock_mat(rng)
+            ground_rgb = getattr(self, "_current_ground_avg_rgb", None)
+            if ground_rgb is not None and float(rng.random()) < 0.66:
+                # Match the ground colour, darkened slightly so rocks read as distinct objects
+                darken = float(rng.uniform(0.62, 0.78))
+                d = tuple(float(np.clip(c * darken, 0.0, 1.0)) for c in ground_rgb)
+                r = float(rng.uniform(0.72, 0.96))
+                m = 0.0
+            else:
+                d, r, m = _sample_rock_mat(rng)
             self._ep_rock_shader.GetInput("diffuseColor").Set(d)
             self._ep_rock_shader.GetInput("roughness").Set(r)
             self._ep_rock_shader.GetInput("metallic").Set(m)
