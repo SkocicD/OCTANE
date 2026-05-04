@@ -79,12 +79,6 @@ def main():
 
         frames = getattr(env.unwrapped, "_last_frames", {})
 
-        # Warn about black frames but save anyway — one bad camera shouldn't lose the episode
-        black = [s for s, arr in frames.items()
-                 if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
-        if black:
-            print(f"[TerrainCollect] WARNING ep {ep}: black cameras {black}")
-
         save_kwargs = dict(
             height_gt   = gt["height_gt"],
             semantic_gt = gt["semantic_gt"],
