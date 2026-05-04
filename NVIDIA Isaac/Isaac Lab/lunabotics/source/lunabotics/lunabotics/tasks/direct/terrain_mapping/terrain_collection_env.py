@@ -519,6 +519,8 @@ class TerrainCollectionEnv(DirectRLEnv):
             # Gaussian smooth to remove grid staircase aliasing on crater rims.
             heights = _gaussian_smooth_hf(heights, sigma=1.5)
 
+            heights_m = (heights * v_scale).astype(np.float32)  # store in metres for GT
+
             z = heights.flatten() * v_scale
             verts = np.empty((len(xy_base), 3), dtype=np.float32)
             verts[:, :2] = xy_base
@@ -532,14 +534,19 @@ class TerrainCollectionEnv(DirectRLEnv):
             inv_L = (1.0 / np.sqrt(dzdx ** 2 + dzdy ** 2 + 1.0)).astype(np.float32)
             normals = np.stack([-dzdx * inv_L, -dzdy * inv_L, inv_L], axis=-1)
 
-            return verts, normals
+            return verts, normals, heights_m
 
         workers = min(self.num_envs, (os.cpu_count() or 4) * 2)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             all_verts = list(pool.map(_gen_verts, range(self.num_envs)))
 
+        # Store height fields in metres for BEV GT computation at episode time.
+        self._episode_hf_m = [hm for _, _, hm in all_verts]
+        self._terrain_half_x = half_x
+        self._terrain_half_y = half_y
+
         with Sdf.ChangeBlock():
-            for env_id, (verts, normals) in enumerate(all_verts):
+            for env_id, (verts, normals, _) in enumerate(all_verts):
                 mesh_prim = stage.GetPrimAtPath(f"/World/envs/env_{env_id}/Ground/mesh")
                 if mesh_prim.IsValid():
                     geom = UsdGeom.Mesh(mesh_prim)
@@ -845,6 +852,116 @@ class TerrainCollectionEnv(DirectRLEnv):
 
         print(f"[TerrainCollectionEnv] Ground texture pool: {len(self._ground_tex_sets)} variants")
 
+    def _compute_bev_gt(
+        self,
+        hf_m: np.ndarray,
+        robot_lx: float, robot_ly: float, robot_yaw: float,
+        rocks: list,    # [[lx, ly, wz, radius], ...]  terrain-centered
+        craters: list,  # [(lx, ly, diameter, depth), ...]  terrain-centered
+        walls: list,    # [[x1, y1, x2, y2, height], ...]  terrain-centered
+    ) -> dict:
+        """Compute robot-centric BEV ground truth arrays from terrain data."""
+        from scipy.ndimage import map_coordinates
+
+        BEV_N    = 200
+        CELL     = 0.05        # m per BEV cell
+        BEV_HALF = BEV_N * CELL / 2.0   # 5.0 m
+        h_scale  = self.cfg.regolith_horizontal_scale
+
+        # ── height_gt: bilinear-sampled, yaw-rotated BEV window ──────────
+        rx_c = (robot_lx + self._terrain_half_x) / h_scale  # terrain cell coords
+        ry_c = (robot_ly + self._terrain_half_y) / h_scale
+
+        offsets = np.arange(-BEV_N // 2, BEV_N // 2, dtype=np.float32)
+        ii, jj = np.meshgrid(offsets, offsets, indexing="ij")  # (200, 200)
+
+        cos_y, sin_y = float(np.cos(robot_yaw)), float(np.sin(robot_yaw))
+        tx = cos_y * ii - sin_y * jj + rx_c
+        ty = sin_y * ii + cos_y * jj + ry_c
+
+        height_gt = map_coordinates(hf_m, [tx, ty], order=1, mode="nearest").astype(np.float32)
+
+        # ── coordinate helpers ────────────────────────────────────────────
+        cos_ny, sin_ny = np.cos(-robot_yaw), np.sin(-robot_yaw)
+
+        def to_robot(wx, wy):
+            dx, dy = wx - robot_lx, wy - robot_ly
+            return float(cos_ny * dx - sin_ny * dy), float(sin_ny * dx + cos_ny * dy)
+
+        def in_bev(rx, ry):
+            return abs(rx) < BEV_HALF and abs(ry) < BEV_HALF
+
+        def to_cell(v):
+            return int((v + BEV_HALF) / CELL)
+
+        def draw_disk(grid, cx, cy, r_cells, label):
+            x0, x1 = max(0, cx - r_cells), min(BEV_N, cx + r_cells + 1)
+            y0, y1 = max(0, cy - r_cells), min(BEV_N, cy + r_cells + 1)
+            if x0 >= x1 or y0 >= y1:
+                return
+            xs = np.arange(x0, x1) - cx
+            ys = np.arange(y0, y1) - cy
+            grid[x0:x1, y0:y1][xs[:, None] ** 2 + ys[None, :] ** 2 <= r_cells ** 2] = label
+
+        # ── semantic_gt ───────────────────────────────────────────────────
+        semantic = np.zeros((BEV_N, BEV_N), dtype=np.uint8)
+
+        for x1w, y1w, x2w, y2w, _ in walls:
+            seg = float(np.hypot(x2w - x1w, y2w - y1w))
+            for t in np.linspace(0.0, 1.0, max(2, int(seg / CELL * 2))):
+                rx, ry = to_robot(x1w + t * (x2w - x1w), y1w + t * (y2w - y1w))
+                if in_bev(rx, ry):
+                    cx, cy = to_cell(rx), to_cell(ry)
+                    for di in range(-1, 2):
+                        for dj in range(-1, 2):
+                            xi, yj = cx + di, cy + dj
+                            if 0 <= xi < BEV_N and 0 <= yj < BEV_N:
+                                semantic[xi, yj] = 3
+
+        for lx, ly, diameter, *_ in craters:
+            rx, ry = to_robot(lx, ly)
+            if in_bev(rx, ry):
+                draw_disk(semantic, to_cell(rx), to_cell(ry),
+                          max(1, int(diameter / 2.0 / CELL)), 2)
+
+        for lx, ly, _wz, radius in rocks:
+            rx, ry = to_robot(lx, ly)
+            if in_bev(rx, ry):
+                draw_disk(semantic, to_cell(rx), to_cell(ry),
+                          max(1, int(radius / CELL)), 1)
+
+        # ── objects_gt ────────────────────────────────────────────────────
+        obj_list = []
+        for lx, ly, _wz, radius in rocks:
+            rx, ry = to_robot(lx, ly)
+            if in_bev(rx, ry):
+                obj_list.append((rx * rx + ry * ry, rx, ry, radius * 2.0, 0.0))
+        for lx, ly, diameter, *_ in craters:
+            rx, ry = to_robot(lx, ly)
+            if in_bev(rx, ry):
+                obj_list.append((rx * rx + ry * ry, rx, ry, diameter, 1.0))
+        obj_list.sort(key=lambda o: o[0])
+        objects_gt = (np.array([[o[1], o[2], o[3], o[4]] for o in obj_list], dtype=np.float32)
+                      if obj_list else np.zeros((0, 4), dtype=np.float32))
+
+        # ── walls_gt ──────────────────────────────────────────────────────
+        wall_list = []
+        for x1w, y1w, x2w, y2w, _ in walls:
+            rx1, ry1 = to_robot(x1w, y1w)
+            rx2, ry2 = to_robot(x2w, y2w)
+            wall_list.append([rx1, ry1, rx2, ry2])
+        walls_gt = (np.array(wall_list, dtype=np.float32)
+                    if wall_list else np.zeros((0, 4), dtype=np.float32))
+
+        return {
+            "height_gt":   height_gt,
+            "semantic_gt": semantic,
+            "objects_gt":  objects_gt,
+            "walls_gt":    walls_gt,
+            "robot_pos":   np.array([robot_lx, robot_ly, 0.0], dtype=np.float32),
+            "robot_yaw":   np.float32(robot_yaw),
+        }
+
     def _randomize_obstacles(self, env_ox: float, env_oy: float,
                               robot_wx: float, robot_wy: float, robot_yaw: float):
         """Teleport pooled obstacle prims to new random positions."""
@@ -959,17 +1076,17 @@ class TerrainCollectionEnv(DirectRLEnv):
             self._randomize_ground_material()
 
         crater_params = getattr(self, "_episode_craters_per_env", [[]])[0]
-        craters_gt = np.array(
-            [[lx, ly, d] for lx, ly, d, _ in crater_params], dtype=np.float32
-        ) if crater_params else np.zeros((0, 3), dtype=np.float32)
-
-        self._current_gt = {
-            "rocks":     np.array(rocks, dtype=np.float32) if rocks else np.zeros((0, 4), dtype=np.float32),
-            "craters":   craters_gt,
-            "walls":     np.array(walls, dtype=np.float32) if walls else np.zeros((0, 5), dtype=np.float32),
-            "robot_pos": np.array([robot_wx - env_ox, robot_wy - env_oy, 0.0], dtype=np.float32),
-            "robot_yaw": np.float32(robot_yaw),
-        }
+        robot_lx = robot_wx - env_ox
+        robot_ly = robot_wy - env_oy
+        self._current_gt = self._compute_bev_gt(
+            hf_m=self._episode_hf_m[0],
+            robot_lx=robot_lx,
+            robot_ly=robot_ly,
+            robot_yaw=robot_yaw,
+            rocks=rocks,
+            craters=crater_params,
+            walls=walls,
+        )
         print(f"[TerrainCollectionEnv] Episode obstacles: {n_rocks} rocks, {n_walls} walls")
 
     # ── scene setup ───────────────────────────────────────────────────────────

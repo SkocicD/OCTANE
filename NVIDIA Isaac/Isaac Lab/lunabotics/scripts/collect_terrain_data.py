@@ -55,9 +55,10 @@ def main():
             continue
         np.savez_compressed(
             gt_dir / f"{ep_id}_gt.npz",
-            rocks=gt["rocks"],
-            craters=gt["craters"],
-            walls=gt["walls"],
+            height_gt=gt["height_gt"],
+            semantic_gt=gt["semantic_gt"],
+            objects_gt=gt["objects_gt"],
+            walls_gt=gt["walls_gt"],
             robot_pos=gt["robot_pos"],
             robot_yaw=np.array([gt["robot_yaw"]]),
         )
