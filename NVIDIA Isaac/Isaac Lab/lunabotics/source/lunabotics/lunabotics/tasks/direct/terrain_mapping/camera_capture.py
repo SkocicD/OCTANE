@@ -110,6 +110,15 @@ class CameraCapture:
                         print(f"[CameraCapture]   {key}: clipping fixed {existing} → (0.01, 150)")
                     else:
                         print(f"[CameraCapture]   {key}: clipping OK near={near:.4f} far={far:.1f}")
+
+                    # Print world-space forward direction so bad orientations are obvious
+                    xf   = UsdGeom.Xformable(_stage.GetPrimAtPath(prim))
+                    mat  = xf.ComputeLocalToWorldTransform(0)
+                    # USD cameras look down -Z in local space
+                    fwd  = mat.TransformDir(Gf.Vec3d(0, 0, -1))
+                    fwd  = fwd.GetNormalized()
+                    print(f"[CameraCapture]   {key}: world forward ({fwd[0]:+.2f}, {fwd[1]:+.2f}, {fwd[2]:+.2f})"
+                          f"  {'*** pointing UP — check USD orientation ***' if fwd[2] > 0.7 else ''}")
                 except Exception as ce:
                     print(f"[CameraCapture]   {key}: could not inspect clipping — {ce}")
 
