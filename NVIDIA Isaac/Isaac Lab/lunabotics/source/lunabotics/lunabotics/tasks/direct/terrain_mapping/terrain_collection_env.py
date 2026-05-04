@@ -1125,9 +1125,9 @@ class TerrainCollectionEnv(DirectRLEnv):
         dome_cfg = sim_utils.DomeLightCfg(intensity=1500.0, color=(0.85, 0.88, 1.00))
         dome_cfg.func("/World/Light", dome_cfg)
 
-        from .camera_ros_publisher import CameraRosPublisher
-        self._cam_publisher = CameraRosPublisher()
-        self._cam_publisher.setup()
+        from .camera_capture import CameraCapture
+        self._cam_capture = CameraCapture()
+        self._cam_capture.setup()
 
         disk_cfg = sim_utils.DiskLightCfg(intensity=45_000.0, radius=1.5, color=(1.00, 0.95, 0.88))
         disk_cfg.func("/World/envs/env_.*/SpotA", disk_cfg, translation=(-7.0,  5.0, 12.0))
@@ -1161,7 +1161,7 @@ class TerrainCollectionEnv(DirectRLEnv):
         self._robot.set_joint_velocity_target(self._wheel_vel_targets, joint_ids=self._wheel_ids)
 
     def _get_observations(self) -> dict:
-        self._cam_publisher.publish()
+        self._last_frames = self._cam_capture.capture()
         return {"policy": self._robot.data.root_state_w[:, :7]}
 
     def _get_rewards(self) -> torch.Tensor:

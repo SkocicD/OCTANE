@@ -1,6 +1,8 @@
-"""Script to collect terrain data using the TerrainCollectionEnv."""
+"""Collect terrain data using the TerrainCollectionEnv.
 
-"""Launch Isaac Sim Simulator first."""
+Saves per-episode NPZ files containing ground-truth terrain maps AND all 7
+camera frames (5 RGB + Orbbec RGB + Orbbec depth).  No ROS or DDS required.
+"""
 
 import argparse
 
@@ -16,8 +18,6 @@ args_cli = parser.parse_args()
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
-
-"""Rest everything follows."""
 
 import pathlib
 import numpy as np
@@ -40,32 +40,42 @@ def main():
 
     env = gym.make(args_cli.task, cfg=env_cfg)
 
+    zero_actions = torch.zeros(args_cli.num_envs, 2)
+
     for ep in range(args_cli.episodes):
         obs, _ = env.reset()
 
-        # Step sim — cameras stabilise and publish frames via OmniGraphs
-        zero_actions = torch.zeros(args_cli.num_envs, 2)
+        # Warm up — let physics and cameras settle
         for _ in range(30):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
 
         ep_id = f"ep_{ep:06d}"
+
         gt = env.unwrapped._current_gt
         if gt is None:
             print(f"[TerrainCollect] WARNING: no GT for episode {ep}, skipping")
             continue
-        np.savez_compressed(
-            gt_dir / f"{ep_id}_gt.npz",
-            height_gt=gt["height_gt"],
-            semantic_gt=gt["semantic_gt"],
-            objects_gt=gt["objects_gt"],
-            walls_gt=gt["walls_gt"],
-            robot_pos=gt["robot_pos"],
-            robot_yaw=np.array([gt["robot_yaw"]]),
+
+        frames = getattr(env.unwrapped, "_last_frames", {})
+
+        save_kwargs = dict(
+            height_gt   = gt["height_gt"],
+            semantic_gt = gt["semantic_gt"],
+            objects_gt  = gt["objects_gt"],
+            walls_gt    = gt["walls_gt"],
+            robot_pos   = gt["robot_pos"],
+            robot_yaw   = np.array([gt["robot_yaw"]]),
         )
+        # Camera frames — present only if cameras were successfully attached
+        for serial, arr in frames.items():
+            save_kwargs[f"cam_{serial}"] = arr
+
+        np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
         (gt_dir / f"{ep_id}.ready").touch()
 
         if ep % 10 == 0:
-            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}")
+            cam_count = len(frames)
+            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={cam_count}")
 
     print("[TerrainCollect] Done.")
     env.close()
