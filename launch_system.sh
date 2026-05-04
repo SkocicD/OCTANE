@@ -4,11 +4,13 @@
 # Sources ROS 2 and the workspace, then launches the requested subsystem.
 #
 # Usage:
-#   ./launch_system.sh                  - Launch all subsystems
-#   ./launch_system.sh supervisor       - Launch supervisor only
-#   ./launch_system.sh perception       - Launch perception only
-#   ./launch_system.sh mapping          - Launch mapping only
-#   ./launch_system.sh network          - Launch network only
+#   ./launch_system.sh                          - Launch all subsystems
+#   ./launch_system.sh supervisor               - Launch supervisor only
+#   ./launch_system.sh perception               - Launch perception only
+#   ./launch_system.sh mapping                  - Launch mapping only
+#   ./launch_system.sh network                  - Launch network only
+#   ./launch_system.sh mapping --collect        - Launch mapping + data collection
+#   ./launch_system.sh all --collect            - Launch everything + data collection
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$SCRIPT_DIR/workspace"
@@ -54,6 +56,10 @@ fi
 
 # Determine which launch file to run
 SUBSYSTEM="${1:-all}"
+COLLECT=false
+for arg in "$@"; do
+    [ "$arg" = "--collect" ] && COLLECT=true
+done
 
 run_launch() {
     local name="$1"
@@ -153,7 +159,15 @@ case "$SUBSYSTEM" in
         ;;
     *)
         echo "Unknown subsystem: $SUBSYSTEM"
-        echo "Usage: $0 [supervisor|perception|mapping|network|all]"
+        echo "Usage: $0 [supervisor|perception|mapping|network|all] [--collect]"
         exit 1
         ;;
 esac
+
+if [ "$COLLECT" = true ]; then
+    echo "[LAUNCH] Starting data_collection..."
+    ros2 launch "$LAUNCH_PKG" data_collection.launch.py &
+    COLLECT_PID=$!
+    trap 'kill "$COLLECT_PID" 2>/dev/null' EXIT
+    wait "$COLLECT_PID"
+fi
