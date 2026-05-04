@@ -84,8 +84,9 @@ def main():
             semantic_gt = gt["semantic_gt"],
             objects_gt  = gt["objects_gt"],
             walls_gt    = gt["walls_gt"],
-            robot_pos   = gt["robot_pos"],
             robot_yaw   = np.array([gt["robot_yaw"]]),
+            robot_pitch = np.array([gt.get("robot_pitch", 0.0)]),
+            robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
         # Camera frames — present only if cameras were successfully attached
         for serial, arr in frames.items():

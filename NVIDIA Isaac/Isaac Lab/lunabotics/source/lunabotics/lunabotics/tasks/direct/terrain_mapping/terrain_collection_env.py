@@ -1023,7 +1023,6 @@ class TerrainCollectionEnv(DirectRLEnv):
             "semantic_gt": semantic,
             "objects_gt":  objects_gt,
             "walls_gt":    walls_gt,
-            "robot_pos":   np.array([robot_lx, robot_ly, 0.0], dtype=np.float32),
             "robot_yaw":   np.float32(robot_yaw),
         }
 
@@ -1275,6 +1274,7 @@ class TerrainCollectionEnv(DirectRLEnv):
             self._randomize_per_env_terrain()
             env_o = self._env_origins[env_ids[0]]
             quat  = default_root_state[0, 3:7]
+            w, x, y, z = (float(quat[i]) for i in range(4))
             _ryaw = float(torch.atan2(
                 2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
                 1.0 - 2.0 * (quat[2] ** 2 + quat[3] ** 2)
@@ -1284,6 +1284,12 @@ class TerrainCollectionEnv(DirectRLEnv):
                 float(default_root_state[0, 0]), float(default_root_state[0, 1]),
                 _ryaw,
             )
+            # Append roll/pitch to GT after _randomize_obstacles populates _current_gt
+            if self._current_gt is not None:
+                _roll  = float(np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y)))
+                _pitch = float(np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0)))
+                self._current_gt["robot_roll"]  = np.float32(_roll)
+                self._current_gt["robot_pitch"] = np.float32(_pitch)
 
         self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
