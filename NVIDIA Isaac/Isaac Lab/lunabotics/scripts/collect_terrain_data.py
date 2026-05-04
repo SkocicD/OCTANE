@@ -63,12 +63,31 @@ def main():
     if start_ep > 0:
         print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
 
+    n_cameras = len(getattr(env.unwrapped, "_cam_capture", None)._cameras
+                     if getattr(env.unwrapped, "_cam_capture", None) else [])
+
     for ep in range(start_ep, start_ep + args_cli.episodes):
         obs, _ = env.reset()
 
-        # Warm up — let physics and cameras settle
-        for _ in range(30):
+        # Warm up — minimum 30 steps, then keep stepping until every camera
+        # has a non-black frame (or give up after 90 total steps).
+        for step in range(90):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
+            if step < 29:
+                continue
+            frames = getattr(env.unwrapped, "_last_frames", {})
+            if len(frames) < n_cameras:
+                continue
+            black = [s for s, arr in frames.items()
+                     if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
+            if not black:
+                break
+        else:
+            # Still black after 90 steps — log and skip
+            black = [s for s, arr in frames.items()
+                     if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
+            print(f"[TerrainCollect] WARNING ep {ep}: cameras still black after 90 steps {black}, skipping")
+            continue
 
         ep_id = f"ep_{ep:06d}"
 
