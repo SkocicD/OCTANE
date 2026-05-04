@@ -55,10 +55,14 @@ if ! systemctl is-active --quiet avahi-daemon 2>/dev/null; then
 fi
 
 # Determine which launch file to run
-SUBSYSTEM="${1:-all}"
 COLLECT=false
+SUBSYSTEM="all"
 for arg in "$@"; do
-    [ "$arg" = "--collect" ] && COLLECT=true
+    if [ "$arg" = "--collect" ]; then
+        COLLECT=true
+    else
+        SUBSYSTEM="$arg"
+    fi
 done
 
 run_launch() {
