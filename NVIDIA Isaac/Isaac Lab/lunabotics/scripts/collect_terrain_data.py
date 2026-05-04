@@ -66,8 +66,10 @@ def main():
     for ep in range(start_ep, start_ep + args_cli.episodes):
         obs, _ = env.reset()
 
-        # Warm up — let physics and cameras settle
-        for _ in range(30):
+        # Warm up — let physics and cameras settle.
+        # 60 steps gives the GPU render pipeline enough frames to initialise
+        # all RGB annotators (they lag behind physics by several frames).
+        for _ in range(60):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
 
         ep_id = f"ep_{ep:06d}"
