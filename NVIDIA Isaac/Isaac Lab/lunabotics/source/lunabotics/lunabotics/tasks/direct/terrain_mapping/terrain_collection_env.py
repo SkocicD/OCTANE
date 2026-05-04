@@ -707,10 +707,38 @@ class TerrainCollectionEnv(DirectRLEnv):
         sh.CreateInput("texture_scale",               Sdf.ValueTypeNames.Float2).Set((uv_scale, uv_scale))
 
     def _generate_biome_textures(self) -> list[str]:
-        """Generate 8 procedurally distinct ground biome textures. Returns list of dirs."""
+        """Generate procedurally distinct ground biome textures with Gaussian splotches."""
         import os
         import numpy as np
         from PIL import Image
+
+        # (folder, primary_rgb, secondary_rgb, bright_lo, bright_hi, detail_mul, n_splotches, splotch_px)
+        # primary/secondary: two colors that blend across the texture via Gaussian splotches
+        # detail_mul: scales grain noise frequency (higher = rougher grain)
+        # n_splotches: number of large colour-blend blobs
+        # splotch_px: (min, max) Gaussian sigma in pixels for colour blobs
+        BIOMES = [
+            ("lunar_regolith",    (0.72, 0.68, 0.60), (0.52, 0.50, 0.44), 0.38, 0.80, 1.2, 28, (35, 170)),
+            ("fine_sand",         (0.90, 0.80, 0.56), (0.76, 0.66, 0.42), 0.52, 0.90, 0.6, 14, (70, 240)),
+            ("coarse_sand",       (0.80, 0.63, 0.42), (0.60, 0.46, 0.28), 0.36, 0.74, 1.0, 22, (30, 140)),
+            ("rocky_gravel",      (0.40, 0.41, 0.42), (0.24, 0.25, 0.26), 0.18, 0.72, 2.0, 45, (18, 90)),
+            ("red_soil",          (0.66, 0.37, 0.24), (0.46, 0.22, 0.12), 0.28, 0.72, 1.3, 32, (35, 160)),
+            ("dark_basalt",       (0.14, 0.14, 0.15), (0.06, 0.06, 0.07), 0.05, 0.32, 2.2, 55, (12, 70)),
+            ("tan_mud",           (0.60, 0.52, 0.38), (0.42, 0.35, 0.24), 0.28, 0.74, 1.0, 26, (50, 210)),
+            ("chalk",             (0.90, 0.88, 0.84), (0.76, 0.74, 0.68), 0.52, 0.92, 0.7, 18, (65, 260)),
+            ("white_salt_flat",   (0.93, 0.91, 0.87), (0.72, 0.70, 0.68), 0.62, 0.97, 0.4, 16, (90, 320)),
+            ("orange_dust",       (0.84, 0.54, 0.28), (0.65, 0.36, 0.14), 0.35, 0.78, 1.1, 30, (40, 180)),
+            ("gray_clay",         (0.52, 0.50, 0.47), (0.36, 0.34, 0.32), 0.30, 0.72, 0.9, 24, (55, 210)),
+            ("iron_oxide",        (0.57, 0.28, 0.14), (0.40, 0.16, 0.06), 0.24, 0.68, 1.4, 36, (28, 140)),
+            ("volcanic_ash",      (0.20, 0.20, 0.21), (0.10, 0.10, 0.11), 0.05, 0.40, 2.4, 55, (12, 65)),
+            ("pale_limestone",    (0.84, 0.80, 0.68), (0.68, 0.64, 0.52), 0.44, 0.86, 0.8, 22, (60, 250)),
+            ("dark_red_volcanic", (0.46, 0.18, 0.10), (0.28, 0.08, 0.03), 0.14, 0.60, 1.6, 42, (22, 110)),
+            ("mixed_gravel",      (0.50, 0.46, 0.40), (0.30, 0.28, 0.24), 0.20, 0.75, 1.8, 48, (18, 85)),
+            ("rust_sand",         (0.74, 0.48, 0.26), (0.52, 0.30, 0.12), 0.32, 0.76, 1.1, 28, (40, 160)),
+            ("pale_clay",         (0.76, 0.70, 0.60), (0.58, 0.52, 0.44), 0.40, 0.80, 0.8, 20, (60, 230)),
+            ("dark_gravel",       (0.28, 0.27, 0.26), (0.18, 0.17, 0.16), 0.14, 0.55, 1.9, 42, (16, 80)),
+            ("red_clay",          (0.62, 0.34, 0.22), (0.44, 0.20, 0.10), 0.26, 0.66, 1.0, 30, (45, 180)),
+        ]
 
         assets_dir = os.path.join(os.path.dirname(__file__), "assets")
         biomes_dir = os.path.join(assets_dir, "biome_textures")
@@ -720,56 +748,78 @@ class TerrainCollectionEnv(DirectRLEnv):
                 os.path.join(biomes_dir, d)
                 for d in os.listdir(biomes_dir)
                 if os.path.isdir(os.path.join(biomes_dir, d))
+                and not d.endswith("_variants")
             )
-            if dirs:
+            if len(dirs) == len(BIOMES):
                 return dirs
 
-        # Each entry: (folder, base_rgb, bright_lo, bright_hi, noise_mul)
-        # base_rgb is the tint color; bright range controls luminance spread.
-        BIOMES = [
-            ("lunar_regolith",  (0.72, 0.68, 0.60), 0.45, 0.75, 1.0),
-            ("fine_sand",       (0.88, 0.78, 0.54), 0.55, 0.82, 0.5),
-            ("coarse_sand",     (0.78, 0.62, 0.40), 0.42, 0.72, 0.7),
-            ("rocky_gravel",    (0.42, 0.43, 0.44), 0.28, 0.65, 1.5),
-            ("red_soil",        (0.64, 0.38, 0.26), 0.36, 0.68, 1.1),
-            ("dark_basalt",     (0.15, 0.15, 0.16), 0.08, 0.28, 1.8),
-            ("tan_mud",         (0.58, 0.50, 0.38), 0.36, 0.70, 0.8),
-            ("chalk",           (0.88, 0.87, 0.82), 0.58, 0.86, 0.6),
-        ]
-
         S = 1024
+        yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
+
+        def _fft_noise(rng: np.random.Generator, sigma_px: float) -> np.ndarray:
+            raw = rng.standard_normal((S, S)).astype(np.float32)
+            fx  = np.fft.fftfreq(S).reshape(1, S).astype(np.float32)
+            fy  = np.fft.fftfreq(S).reshape(S, 1).astype(np.float32)
+            k   = np.exp(-2.0 * np.pi ** 2 * sigma_px ** 2 * (fx ** 2 + fy ** 2))
+            out = np.real(np.fft.ifft2(np.fft.fft2(raw) * k)).astype(np.float32)
+            return out
+
+        def _splotch_blend(rng: np.random.Generator, n: int, size_range: tuple) -> np.ndarray:
+            """Build a [0,1] blend map from overlapping Gaussian blobs."""
+            blend = np.zeros((S, S), dtype=np.float32)
+            for _ in range(n):
+                cx = rng.uniform(0, S)
+                cy = rng.uniform(0, S)
+                sig = rng.uniform(*size_range)
+                strength = rng.uniform(0.3, 1.0)
+                blob = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2.0 * sig ** 2))
+                blend += strength * blob
+            # Normalise to [0, 1]
+            lo, hi = blend.min(), blend.max()
+            if hi > lo:
+                blend = (blend - lo) / (hi - lo)
+            return blend
+
         dirs = []
-        for folder, base_rgb, bright_lo, bright_hi, noise_mul in BIOMES:
+        for (folder, pri, sec, bright_lo, bright_hi, detail_mul, n_spl, spl_px) in BIOMES:
             bdir = os.path.join(biomes_dir, folder)
             os.makedirs(bdir, exist_ok=True)
 
-            # Fixed per-biome seed so textures regenerate identically if cache is cleared.
             rng = np.random.default_rng(abs(hash(folder)) % (2 ** 32))
 
-            def _noise(sigma_px: float) -> np.ndarray:
-                raw = rng.standard_normal((S, S)).astype(np.float32)
-                fx  = np.fft.fftfreq(S).reshape(1, S).astype(np.float32)
-                fy  = np.fft.fftfreq(S).reshape(S, 1).astype(np.float32)
-                k   = np.exp(-2.0 * np.pi ** 2 * sigma_px ** 2 * (fx ** 2 + fy ** 2))
-                return np.real(np.fft.ifft2(np.fft.fft2(raw) * k)).astype(np.float32)
-
-            h = sum(
-                w * _noise(s * noise_mul)
-                for s, w in ((300, 0.40), (80, 0.30), (25, 0.20), (8, 0.10))
+            # ── brightness noise: mid + fine grain, no dominant low-freq wash ──
+            h = (
+                0.30 * _fft_noise(rng, 80 * detail_mul)
+              + 0.35 * _fft_noise(rng, 30 * detail_mul)
+              + 0.25 * _fft_noise(rng, 10 * detail_mul)
+              + 0.10 * _fft_noise(rng,  4 * detail_mul)
             )
-            h -= h.min()
-            h /= h.max()
+            h -= h.min(); h /= h.max()
 
-            v = h * (bright_hi - bright_lo) + bright_lo
+            # ── colour blend map: Gaussian splotches drive primary→secondary ──
+            blend = _splotch_blend(rng, n_spl, spl_px)
+
+            # ── brightness splotches: local darkening / lightening patches ───
+            bright_mod = _splotch_blend(rng, n_spl // 2, (spl_px[0] * 0.6, spl_px[1] * 0.8))
+            bright_mod = (bright_mod - 0.5) * 0.30   # ±0.15 additive
+
+            v = np.clip(h * (bright_hi - bright_lo) + bright_lo + bright_mod, 0.0, 1.0)
+
+            # ── per-pixel colour: lerp primary ↔ secondary via blend map ─────
+            def _ch(p_val: float, s_val: float) -> np.ndarray:
+                return np.clip(v * (p_val * (1.0 - blend) + s_val * blend), 0.0, 1.0)
+
             albedo = np.stack([
-                (np.clip(v * base_rgb[0], 0.0, 1.0) * 255).astype(np.uint8),
-                (np.clip(v * base_rgb[1], 0.0, 1.0) * 255).astype(np.uint8),
-                (np.clip(v * base_rgb[2], 0.0, 1.0) * 255).astype(np.uint8),
+                (_ch(pri[0], sec[0]) * 255).astype(np.uint8),
+                (_ch(pri[1], sec[1]) * 255).astype(np.uint8),
+                (_ch(pri[2], sec[2]) * 255).astype(np.uint8),
             ], axis=-1)
             Image.fromarray(albedo).save(os.path.join(bdir, "albedo.png"))
 
-            dx = np.gradient(h, axis=1) * 8.0
-            dy = np.gradient(h, axis=0) * 8.0
+            # ── normal map from combined height ──────────────────────────────
+            bump = h + blend * 0.25   # blend seams add slight bump
+            dx = np.gradient(bump, axis=1) * 12.0
+            dy = np.gradient(bump, axis=0) * 12.0
             nz = np.ones_like(dx)
             L  = np.sqrt(dx ** 2 + dy ** 2 + nz ** 2)
             normal = np.stack([
@@ -779,11 +829,15 @@ class TerrainCollectionEnv(DirectRLEnv):
             ], axis=-1).clip(0, 255).astype(np.uint8)
             Image.fromarray(normal).save(os.path.join(bdir, "normal.png"))
 
-            rough_base = max(0.0, 0.88 - (bright_hi - 0.75) * 0.25)
-            rough = ((h * 0.08 + rough_base) * 255).clip(0, 255).astype(np.uint8)
-            Image.fromarray(rough).save(os.path.join(bdir, "rough.png"))
+            # ── roughness: fine grain drives roughness variation ──────────────
+            rough_base = 0.55 + (1.0 - bright_hi) * 0.30
+            rough = np.clip(h * 0.20 + rough_base, 0.0, 1.0)
+            Image.fromarray((rough * 255).astype(np.uint8), mode="L").save(
+                os.path.join(bdir, "rough.png")
+            )
 
             dirs.append(bdir)
+            print(f"[TerrainCollectionEnv]   biome: {folder}")
 
         print(f"[TerrainCollectionEnv] Generated {len(dirs)} biome textures → {biomes_dir}")
         return dirs

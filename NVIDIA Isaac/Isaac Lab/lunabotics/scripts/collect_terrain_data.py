@@ -22,6 +22,7 @@ simulation_app = app_launcher.app
 import pathlib
 import numpy as np
 import gymnasium as gym
+from PIL import Image
 
 import lunabotics.tasks  # noqa: F401 — registers all envs, also sets up CUDA DLL paths
 import torch             # import torch AFTER isaaclab/lunabotics so CUDA paths are ready
@@ -29,8 +30,23 @@ import torch             # import torch AFTER isaaclab/lunabotics so CUDA paths 
 from lunabotics.tasks.direct.terrain_mapping.terrain_collection_env_cfg import TerrainCollectionEnvCfg
 
 
+def _save_images(frames: dict, img_root: pathlib.Path, ep_id: str) -> None:
+    for serial, arr in frames.items():
+        folder = img_root / serial
+        folder.mkdir(parents=True, exist_ok=True)
+        if arr.ndim == 2:
+            # Depth — clip sky/infinity, invert so near=bright, save as PNG
+            depth = np.where(np.isfinite(arr), arr, 0.0)
+            depth = np.clip(depth, 0.0, 10.0)   # 10 m max range
+            vis = (255 - (depth / 10.0 * 255)).astype(np.uint8)  # near=white, far=black
+            Image.fromarray(vis, mode="L").save(folder / f"{ep_id}.png")
+        else:
+            Image.fromarray(arr, mode="RGB").save(folder / f"{ep_id}.jpg", quality=85)
+
+
 def main():
-    gt_dir = pathlib.Path(args_cli.gt_dir)
+    gt_dir  = pathlib.Path(args_cli.gt_dir)
+    img_dir = gt_dir.parent / "images"
     gt_dir.mkdir(parents=True, exist_ok=True)
 
     env_cfg = TerrainCollectionEnvCfg()
@@ -42,7 +58,12 @@ def main():
 
     zero_actions = torch.zeros(args_cli.num_envs, 2)
 
-    for ep in range(args_cli.episodes):
+    existing = sorted(gt_dir.glob("ep_*_gt.npz"))
+    start_ep = int(existing[-1].name[3:9]) + 1 if existing else 0
+    if start_ep > 0:
+        print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
+
+    for ep in range(start_ep, start_ep + args_cli.episodes):
         obs, _ = env.reset()
 
         # Warm up — let physics and cameras settle
@@ -71,11 +92,11 @@ def main():
             save_kwargs[f"cam_{serial}"] = arr
 
         np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
+        _save_images(frames, img_dir, ep_id)
         (gt_dir / f"{ep_id}.ready").touch()
 
         if ep % 10 == 0:
-            cam_count = len(frames)
-            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={cam_count}")
+            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={len(frames)}")
 
     print("[TerrainCollect] Done.")
     env.close()
