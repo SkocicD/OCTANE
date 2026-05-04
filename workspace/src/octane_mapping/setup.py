@@ -27,7 +27,8 @@ setup(
             'camera_frame_splitter = octane_mapping.nodes.camera_frame_splitter:main',
             'point_cloud_mux_node      = octane_mapping.nodes.point_cloud_mux_node:main',
             'terrain_inference_node     = octane_mapping.nodes.terrain_inference_node:main',
-            'terrain_data_collector_node = octane_mapping.nodes.terrain_data_collector_node:main',
+            'terrain_data_collector_node  = octane_mapping.nodes.terrain_data_collector_node:main',
+            'isaac_sim_camera_bridge_node = octane_mapping.nodes.isaac_sim_camera_bridge_node:main',
         ],
     },
 )

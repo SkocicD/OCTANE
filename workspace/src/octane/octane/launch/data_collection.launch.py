@@ -40,6 +40,15 @@ def generate_launch_description():
             output="screen",
         ),
 
+        # Isaac Sim bridge — republishes sim Image+CameraInfo as CameraFrame.
+        # Purely passive: sits idle if Isaac Sim is not publishing.
+        Node(
+            package="octane_mapping",
+            executable="isaac_sim_camera_bridge_node",
+            name="isaac_sim_camera_bridge_node",
+            output="screen",
+        ),
+
         # Data collector — pairs point clouds with Isaac Sim ground truth
         Node(
             package="octane_mapping",
