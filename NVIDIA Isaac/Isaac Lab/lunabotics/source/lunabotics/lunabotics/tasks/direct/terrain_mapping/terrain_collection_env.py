@@ -1079,7 +1079,7 @@ class TerrainCollectionEnv(DirectRLEnv):
         from pxr import Vt, UsdShade
         if cfg.randomize_materials and hasattr(self, "_ep_rock_shader"):
             ground_rgb = getattr(self, "_current_ground_avg_rgb", None)
-            if ground_rgb is not None and float(rng.random()) < 0.90:
+            if ground_rgb is not None and float(rng.random()) < 0.85:
                 # Match the ground colour, darkened slightly so rocks read as distinct objects
                 darken = float(rng.uniform(0.62, 0.78))
                 d = tuple(float(np.clip(c * darken, 0.0, 1.0)) for c in ground_rgb)
