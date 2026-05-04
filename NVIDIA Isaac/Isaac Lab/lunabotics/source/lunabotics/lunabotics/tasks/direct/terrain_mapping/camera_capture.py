@@ -140,6 +140,20 @@ class CameraCapture:
         self._ready = bool(self._cameras)
         print(f"[CameraCapture] {len(self._cameras)}/{len(_CAM_MAP)} cameras ready")
 
+        # Force render frames so all RGB annotators have data before first capture.
+        # Without this there is a race: annotators attached but renderer hasn't
+        # produced a frame yet, so get_data() returns zeros for random cameras.
+        if self._ready:
+            try:
+                import omni.kit.app
+                app = omni.kit.app.get_app()
+                print("[CameraCapture] Flushing render pipeline...")
+                for _ in range(12):
+                    app.update()
+                print("[CameraCapture] Render pipeline ready.")
+            except Exception as e:
+                print(f"[CameraCapture] WARNING: could not flush render pipeline: {e}")
+
     # ──────────────────────────────────────────────────────────────────────
     def capture(self) -> dict[str, np.ndarray]:
         """Read latest rendered frames.  Returns {serial: ndarray}, skips empty."""
