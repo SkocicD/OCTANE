@@ -764,7 +764,7 @@ class TerrainCollectionEnv(DirectRLEnv):
             if len(dirs) == len(BIOMES):
                 return dirs
 
-        S = 1024
+        S = 512
         yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
 
         def _fft_noise(rng: np.random.Generator, sigma_px: float) -> np.ndarray:

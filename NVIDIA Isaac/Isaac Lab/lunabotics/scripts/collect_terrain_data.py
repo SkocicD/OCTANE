@@ -19,6 +19,7 @@ args_cli = parser.parse_args()
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+import gc
 import pathlib
 import numpy as np
 import gymnasium as gym
@@ -98,8 +99,10 @@ def main():
         _save_images(frames, img_dir, ep_id)
         (gt_dir / f"{ep_id}.ready").touch()
 
+        del frames, save_kwargs
         if ep % 10 == 0:
-            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={len(frames)}")
+            gc.collect()
+            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={len(getattr(env.unwrapped, '_last_frames', {}))}")
 
     print("[TerrainCollect] Done.")
     env.close()
