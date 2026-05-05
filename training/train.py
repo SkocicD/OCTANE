@@ -45,12 +45,18 @@ def create_splits(data_root: str, splits_file: str,
     return train_ids, val_ids
 
 
-def compute_loss(preds: dict, targets: dict) -> torch.Tensor:
+def compute_loss(preds: dict, targets: dict):
     height_loss  = F.l1_loss(preds['height'],  targets['height'])
     rocks_loss   = F.mse_loss(preds['rocks'],   targets['rocks'])
     craters_loss = F.mse_loss(preds['craters'], targets['craters'])
     walls_loss   = F.binary_cross_entropy(preds['walls'], targets['walls'])
-    return height_loss + rocks_loss + craters_loss + walls_loss
+    total = height_loss + rocks_loss + craters_loss + walls_loss
+    return total, {
+        'height':  height_loss.item(),
+        'rocks':   rocks_loss.item(),
+        'craters': craters_loss.item(),
+        'walls':   walls_loss.item(),
+    }
 
 
 def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> int:
@@ -105,16 +111,20 @@ def _to_device(obj, device):
 def train_epoch(model, loader, optimizer, device, writer: SummaryWriter,
                 global_step: int, grad_clip: float = 0.0, log_every: int = 10):
     model.train()
-    total = 0.0
+    total      = 0.0
+    head_sums  = {'height': 0.0, 'rocks': 0.0, 'craters': 0.0, 'walls': 0.0}
     running_sum, running_n = 0.0, 0
 
-    for images, rotation, gt in tqdm(loader, desc='train', leave=False):
+    bar = tqdm(loader, desc='train', leave=False,
+               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, loss={postfix}]')
+
+    for images, rotation, gt in bar:
         images   = _to_device(images, device)
         rotation = _to_device(rotation, device)
         gt       = _to_device(gt, device)
 
-        preds = model(images, rotation)
-        loss  = compute_loss(preds, gt)
+        preds             = model(images, rotation)
+        loss, head_losses = compute_loss(preds, gt)
         optimizer.zero_grad()
         loss.backward()
         if grad_clip > 0:
@@ -127,24 +137,35 @@ def train_epoch(model, loader, optimizer, device, writer: SummaryWriter,
         running_n   += 1
         global_step += 1
 
+        for k, v in head_losses.items():
+            head_sums[k] += v
+
+        bar.set_postfix_str(f"{loss_val:.4f}")
+
         if global_step % log_every == 0:
             writer.add_scalar('Loss/train_running', running_sum / running_n, global_step)
             running_sum, running_n = 0.0, 0
 
-    return total / len(loader), global_step
+    n = len(loader)
+    return total / n, {k: v / n for k, v in head_sums.items()}, global_step
 
 
 def val_epoch(model, loader, device):
     model.eval()
-    total = 0.0
+    total     = 0.0
+    head_sums = {'height': 0.0, 'rocks': 0.0, 'craters': 0.0, 'walls': 0.0}
     with torch.no_grad():
-        for images, rotation, gt in tqdm(loader, desc='val', leave=False):
+        for images, rotation, gt in tqdm(loader, desc='val  ', leave=False):
             images   = _to_device(images, device)
             rotation = _to_device(rotation, device)
             gt       = _to_device(gt, device)
-            preds = model(images, rotation)
-            total += compute_loss(preds, gt).item()
-    return total / len(loader)
+            preds             = model(images, rotation)
+            loss, head_losses = compute_loss(preds, gt)
+            total            += loss.item()
+            for k, v in head_losses.items():
+                head_sums[k] += v
+    n = len(loader)
+    return total / n, {k: v / n for k, v in head_sums.items()}
 
 
 def main():
@@ -247,37 +268,55 @@ def main():
     epochs_no_improve = 0
     global_step       = 0
 
+    import time
     for epoch in range(1, max_epochs + 1):
-        train_loss, global_step = train_epoch(
+        t0 = time.time()
+        train_loss, train_heads, global_step = train_epoch(
             model, train_loader, optimizer, device,
             writer, global_step, grad_clip,
         )
-        val_loss = val_epoch(model, val_loader, device)
+        val_loss, val_heads = val_epoch(model, val_loader, device)
         scheduler.step()
+        elapsed = time.time() - t0
+
+        lr_now = optimizer.param_groups[0]['lr']
+        mem_gb = torch.cuda.memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
 
         writer.add_scalar('Loss/train_epoch', train_loss, epoch)
         writer.add_scalar('Loss/val',         val_loss,   epoch)
-        writer.add_scalar('LR',               optimizer.param_groups[0]['lr'], epoch)
+        writer.add_scalar('LR',               lr_now,     epoch)
+        for k in train_heads:
+            writer.add_scalar(f'Heads/train_{k}', train_heads[k], epoch)
+            writer.add_scalar(f'Heads/val_{k}',   val_heads[k],   epoch)
         writer.flush()
 
-        lr_now = optimizer.param_groups[0]['lr']
-        print(f"[epoch {epoch:03d}/{max_epochs}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
+        flag = ' *' if val_loss < best_val else ''
+        print(
+            f"\n[epoch {epoch:03d}/{max_epochs}]  {elapsed/60:.1f}min  "
+            f"gpu={mem_gb:.1f}GB  lr={lr_now:.2e}"
+            f"\n  train  total={train_loss:.4f}  "
+            f"height={train_heads['height']:.4f}  rocks={train_heads['rocks']:.4f}  "
+            f"craters={train_heads['craters']:.4f}  walls={train_heads['walls']:.4f}"
+            f"\n  val    total={val_loss:.4f}  "
+            f"height={val_heads['height']:.4f}  rocks={val_heads['rocks']:.4f}  "
+            f"craters={val_heads['craters']:.4f}  walls={val_heads['walls']:.4f}"
+            f"{flag}"
+        )
 
         if val_loss < best_val:
             best_val = val_loss
             epochs_no_improve = 0
             torch.save({'epoch': epoch, 'model': model.state_dict(), 'val_loss': val_loss},
                        os.path.join(ckpt_dir, 'best.pt'))
-            print(f"  -> best checkpoint (val={val_loss:.4f})")
+            print(f"  -> saved best.pt (val={val_loss:.4f})")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= patience:
                 print(f"[train] Early stopping — no improvement for {patience} epochs")
                 break
 
-        if epoch % save_every == 0:
-            torch.save({'epoch': epoch, 'model': model.state_dict()},
-                       os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+        torch.save({'epoch': epoch, 'model': model.state_dict()},
+                   os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
 
     writer.close()
     print("[train] Done.")
