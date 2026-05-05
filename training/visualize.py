@@ -95,12 +95,29 @@ def _load_gt(data_root: str, episode_id: str) -> dict:
 
 # ── plotting ──────────────────────────────────────────────────────────────────
 
-GRID = 200
-CELL = 0.05
-HALF = GRID * CELL / 2  # 5.0 m
+GRID      = 200
+CELL      = 0.05
+HALF      = GRID * CELL / 2  # 5.0 m  — BEV coverage
+FLOOR_EXT = 15.0              # flat floor extends ±15 m around robot
 
 _xs = np.array([i * CELL - HALF for i in range(GRID)])
 _ys = np.array([i * CELL - HALF for i in range(GRID)])
+
+
+def _floor_plane(floor_z: float):
+    """Flat luna-gray plane from ±FLOOR_EXT so perimeter walls have ground to stand on."""
+    import plotly.graph_objects as go
+    e = FLOOR_EXT
+    xs = np.array([-e, e])
+    ys = np.array([-e, e])
+    zs = np.full((2, 2), floor_z)
+    return go.Surface(
+        x=xs, y=ys, z=zs,
+        colorscale=[[0, '#2a2d38'], [1, '#2a2d38']],
+        showscale=False, opacity=0.55,
+        name='floor', showlegend=False,
+        hoverinfo='skip',
+    )
 
 
 def _surface(height: np.ndarray, title: str, colorscale='RdYlGn'):
@@ -162,17 +179,18 @@ def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
     return traces
 
 
-def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray):
+def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray, floor_z: float):
     import plotly.graph_objects as go
     traces = []
     for i, wall in enumerate(walls_gt):
         rx1, ry1, rx2, ry2 = wall
-        n   = 20
+        n   = 40
         rxs = np.linspace(rx1, rx2, n)
         rys = np.linspace(ry1, ry2, n)
+        inside = (rxs >= -HALF) & (rxs <= HALF) & (rys >= -HALF) & (rys <= HALF)
         cxs = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
         cys = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
-        zs  = height_map[cxs, cys] + 0.20
+        zs  = np.where(inside, height_map[cxs, cys], floor_z) + 0.20
         traces.append(go.Scatter3d(
             x=rxs, y=rys, z=zs, mode='lines',
             line=dict(color='#ff9800', width=6),
@@ -214,12 +232,14 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
     walls   = gt.get('walls_gt',   np.zeros((0, 4), dtype=np.float32))
 
     def _add_scene(height, col):
+        floor_z = float(height.mean())
+        fig.add_trace(_floor_plane(floor_z), row=1, col=col)
         fig.add_trace(_surface(height, ''), row=1, col=col)
         for t in _rock_circles(objects, height):
             fig.add_trace(t, row=1, col=col)
         for t in _crater_circles(objects, height):
             fig.add_trace(t, row=1, col=col)
-        for w in _wall_lines(walls, height):
+        for w in _wall_lines(walls, height, floor_z):
             fig.add_trace(w, row=1, col=col)
 
     def _add_conf(rocks, craters, col):
@@ -237,9 +257,9 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
         xaxis_title='rx (fwd m)',
         yaxis_title='ry (lat m)',
         zaxis_title='height m',
-        camera=dict(eye=dict(x=1.4, y=1.4, z=1.0)),
+        camera=dict(eye=dict(x=1.6, y=1.6, z=1.0)),
         aspectmode='manual',
-        aspectratio=dict(x=1, y=1, z=0.15),
+        aspectratio=dict(x=1, y=1, z=0.10),
         bgcolor='rgba(0,0,0,0)',
     )
     layout_kw = dict(
