@@ -1,0 +1,21 @@
+data:
+  root: "E:/terrain_data"
+  splits_file: "training/splits.json"
+  depth_stats_file: "training/depth_stats.json"
+
+training:
+  batch_size: 16
+  epochs: 100
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-4
+  val_ratio: 0.2
+  seed: 42
+
+checkpoints:
+  dir: "training/checkpoints"
+  save_every: 10
+
+model:
+  feat_proj_dim: 128
+  pose_embed_dim: 32
+  fusion_dim: 512
