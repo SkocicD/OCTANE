@@ -91,9 +91,37 @@ def val_epoch(model, loader, device):
     return total / len(loader)
 
 
+def _init_plot():
+    import matplotlib.pyplot as plt
+    plt.ion()
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+    ax.set_title('Terrain Model Training')
+    train_line, = ax.plot([], [], label='train', color='steelblue')
+    val_line,   = ax.plot([], [], label='val',   color='darkorange')
+    ax.legend()
+    fig.tight_layout()
+    plt.show(block=False)
+    return fig, ax, train_line, val_line
+
+
+def _update_plot(fig, ax, train_line, val_line, train_hist, val_hist):
+    import matplotlib.pyplot as plt
+    epochs = list(range(1, len(train_hist) + 1))
+    train_line.set_data(epochs, train_hist)
+    val_line.set_data(epochs, val_hist)
+    ax.relim()
+    ax.autoscale_view()
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default='training/config.yaml')
+    parser.add_argument('--view', action='store_true',
+                        help='Show live loss plot during training')
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -163,16 +191,25 @@ def main():
     save_every = cfg['checkpoints']['save_every']
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    best_val        = float('inf')
+    best_val          = float('inf')
     epochs_no_improve = 0
+    train_hist, val_hist = [], []
+
+    plot_handles = _init_plot() if args.view else None
 
     for epoch in range(1, max_epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, device, grad_clip)
         val_loss   = val_epoch(model, val_loader, device)
         scheduler.step()
 
+        train_hist.append(train_loss)
+        val_hist.append(val_loss)
+
         lr_now = optimizer.param_groups[0]['lr']
         print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
+
+        if plot_handles:
+            _update_plot(*plot_handles, train_hist, val_hist)
 
         if val_loss < best_val:
             best_val = val_loss
@@ -190,6 +227,11 @@ def main():
         if epoch % save_every == 0:
             torch.save({'epoch': epoch, 'model': model.state_dict()},
                        os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+
+    if plot_handles:
+        import matplotlib.pyplot as plt
+        plt.ioff()
+        plt.show()
 
 
 if __name__ == '__main__':
