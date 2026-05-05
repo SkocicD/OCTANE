@@ -81,8 +81,8 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
                 'craters': torch.rand(bs, 200, 200, device=device),
                 'walls':   (torch.rand(bs, 200, 200, device=device) > 0.8).float(),
             }
-            preds = model(dummy_img, dummy_rot)
-            loss  = compute_loss(preds, dummy_gt)
+            preds      = model(dummy_img, dummy_rot)
+            loss, _    = compute_loss(preds, dummy_gt)
             loss.backward()
 
             used = torch.cuda.memory_allocated(device)
