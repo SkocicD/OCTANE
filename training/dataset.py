@@ -67,13 +67,21 @@ def build_wall_mask(walls_gt: np.ndarray,
 
 def compute_depth_stats(data_root: str, episode_ids: list,
                          max_episodes: int = 500) -> dict:
-    """Sample up to max_episodes to compute per-channel mean/std for depth images."""
-    serials = ['left_front', 'left_side', 'right_front', 'right_side', 'back_rear']
+    """Sample up to max_episodes to compute per-channel mean/std for depth images.
+    Covers all 6 depth input slots: depth/{serial}/ (slots 6-10) + images/depth_cam_d/ (slot 11)."""
+    _DEPTH_SOURCES = [
+        ('depth', 'left_front'),
+        ('depth', 'left_side'),
+        ('depth', 'right_front'),
+        ('depth', 'right_side'),
+        ('depth', 'back_rear'),
+        ('images', 'depth_cam_d'),
+    ]
     sample_ids = episode_ids[:max_episodes]
     pixels = []
     for ep_id in sample_ids:
-        for serial in serials:
-            path = os.path.join(data_root, 'depth', serial, f'{ep_id}.png')
+        for subdir, serial in _DEPTH_SOURCES:
+            path = os.path.join(data_root, subdir, serial, f'{ep_id}.png')
             if not os.path.exists(path):
                 continue
             img = np.array(Image.open(path).convert('RGB').resize((224, 224))) / 255.0
@@ -134,9 +142,10 @@ class TerrainDataset(Dataset):
 
     def __getitem__(self, idx):
         ep_id = self.episode_ids[idx]
+        npz = np.load(os.path.join(self.root, 'gt', f'{ep_id}_gt.npz'))
         images   = self._load_images(ep_id)
-        rotation = self._load_rotation(ep_id)
-        gt       = self._load_gt(ep_id)
+        rotation = self._load_rotation(npz)
+        gt       = self._load_gt(npz)
 
         if self.augment and torch.rand(1).item() < 0.5:
             images, gt = self._hflip(images, gt)
@@ -152,8 +161,7 @@ class TerrainDataset(Dataset):
             tensors.append(t)
         return torch.stack(tensors, dim=0)  # (12, 3, 224, 224)
 
-    def _load_rotation(self, ep_id: str) -> torch.Tensor:
-        npz = np.load(os.path.join(self.root, 'gt', f'{ep_id}_gt.npz'))
+    def _load_rotation(self, npz) -> torch.Tensor:
         roll  = float(npz.get('robot_roll',  np.float32(0.0)))
         pitch = float(npz.get('robot_pitch', np.float32(0.0)))
         yaw   = float(npz['robot_yaw'])
@@ -163,8 +171,7 @@ class TerrainDataset(Dataset):
             math.sin(yaw),   math.cos(yaw),
         ], dtype=torch.float32)
 
-    def _load_gt(self, ep_id: str) -> dict:
-        npz = np.load(os.path.join(self.root, 'gt', f'{ep_id}_gt.npz'))
+    def _load_gt(self, npz) -> dict:
         height  = torch.from_numpy(npz['height_gt'])
         objects = npz['objects_gt']
         walls   = npz['walls_gt']
