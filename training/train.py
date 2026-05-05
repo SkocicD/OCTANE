@@ -60,7 +60,7 @@ def _to_device(obj, device):
     return obj
 
 
-def train_epoch(model, loader, optimizer, device):
+def train_epoch(model, loader, optimizer, device, grad_clip: float = 0.0):
     model.train()
     total = 0.0
     for images, rotation, gt in tqdm(loader, desc='train', leave=False):
@@ -71,6 +71,8 @@ def train_epoch(model, loader, optimizer, device):
         loss  = compute_loss(preds, gt)
         optimizer.zero_grad()
         loss.backward()
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         total += loss.item()
     return total / len(loader)
@@ -135,33 +137,55 @@ def main():
                               num_workers=4, pin_memory=True)
 
     model = TerrainModel().to(device)
+    warmup_epochs   = cfg['training'].get('warmup_epochs', 5)
+    grad_clip       = cfg['training'].get('grad_clip', 1.0)
+    patience        = cfg['training'].get('early_stop_patience', 15)
+    max_epochs      = cfg['training']['epochs']
+
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg['training']['learning_rate'],
         weight_decay=cfg['training']['weight_decay'],
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cfg['training']['epochs']
+
+    # Linear warmup for warmup_epochs, then cosine anneal for the remainder
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_epochs
+    )
+    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=max(1, max_epochs - warmup_epochs)
+    )
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer, schedulers=[warmup, cosine], milestones=[warmup_epochs]
     )
 
     ckpt_dir   = cfg['checkpoints']['dir']
     save_every = cfg['checkpoints']['save_every']
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    best_val = float('inf')
-    for epoch in range(1, cfg['training']['epochs'] + 1):
-        train_loss = train_epoch(model, train_loader, optimizer, device)
+    best_val        = float('inf')
+    epochs_no_improve = 0
+
+    for epoch in range(1, max_epochs + 1):
+        train_loss = train_epoch(model, train_loader, optimizer, device, grad_clip)
         val_loss   = val_epoch(model, val_loader, device)
         scheduler.step()
 
-        print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}")
+        lr_now = optimizer.param_groups[0]['lr']
+        print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
 
         if val_loss < best_val:
             best_val = val_loss
+            epochs_no_improve = 0
             torch.save({'epoch': epoch, 'model': model.state_dict(),
                         'val_loss': val_loss},
                        os.path.join(ckpt_dir, 'best.pt'))
             print(f"  -> best checkpoint saved (val={val_loss:.4f})")
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"[train] Early stopping at epoch {epoch} — no improvement for {patience} epochs")
+                break
 
         if epoch % save_every == 0:
             torch.save({'epoch': epoch, 'model': model.state_dict()},
