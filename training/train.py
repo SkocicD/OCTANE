@@ -3,12 +3,12 @@ import json
 import random
 import argparse
 import subprocess
-import csv
 import yaml
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import sys
@@ -18,11 +18,8 @@ from training.dataset import TerrainDataset, compute_depth_stats
 
 
 def create_splits(data_root: str, splits_file: str,
-                  val_ratio: float = 0.2, seed: int = 42,
-                  max_episodes: int = 0):
-    """Load splits from file, or create and save them if missing.
-    max_episodes: cap total episodes used (0 = use all)."""
-    if os.path.exists(splits_file) and max_episodes == 0:
+                  val_ratio: float = 0.2, seed: int = 42):
+    if os.path.exists(splits_file):
         with open(splits_file) as f:
             splits = json.load(f)
         return splits['train'], splits['val']
@@ -35,22 +32,15 @@ def create_splits(data_root: str, splits_file: str,
     )
     rng = random.Random(seed)
     rng.shuffle(ep_ids)
-
-    if max_episodes > 0:
-        ep_ids = ep_ids[:max_episodes]
-        print(f"[train] Using {len(ep_ids)} episodes (--episodes {max_episodes})")
-
-    n_val = max(1, int(len(ep_ids) * val_ratio))
+    n_val     = max(1, int(len(ep_ids) * val_ratio))
     val_ids   = ep_ids[:n_val]
     train_ids = ep_ids[n_val:]
 
-    if max_episodes == 0:
-        splits_dir = os.path.dirname(splits_file)
-        if splits_dir:
-            os.makedirs(splits_dir, exist_ok=True)
-        with open(splits_file, 'w') as f:
-            json.dump({'train': train_ids, 'val': val_ids}, f, indent=2)
-
+    splits_dir = os.path.dirname(splits_file)
+    if splits_dir:
+        os.makedirs(splits_dir, exist_ok=True)
+    with open(splits_file, 'w') as f:
+        json.dump({'train': train_ids, 'val': val_ids}, f, indent=2)
     print(f"[train] Splits: {len(train_ids)} train / {len(val_ids)} val")
     return train_ids, val_ids
 
@@ -64,15 +54,14 @@ def compute_loss(preds: dict, targets: dict) -> torch.Tensor:
 
 
 def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> int:
-    """Find largest batch size that leaves gpu_margin fraction of VRAM free."""
     if not torch.cuda.is_available():
         return start_bs
 
-    total_mem = torch.cuda.get_device_properties(device).total_memory
+    total_mem  = torch.cuda.get_device_properties(device).total_memory
     target_max = total_mem * (1.0 - gpu_margin)
-    bs = start_bs
+    bs         = start_bs
 
-    print(f"[train] Auto batch size — GPU: {total_mem/1e9:.1f}GB total, target ≤{(1-gpu_margin)*100:.0f}% usage")
+    print(f"[train] Auto batch size — GPU: {total_mem/1e9:.1f}GB, target ≤{(1-gpu_margin)*100:.0f}% usage")
 
     while bs >= 1:
         try:
@@ -91,20 +80,17 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
             loss.backward()
 
             used = torch.cuda.memory_allocated(device)
-            pct  = used / total_mem * 100
             if used <= target_max:
-                print(f"[train] Batch size {bs} — {used/1e9:.1f}GB / {total_mem/1e9:.1f}GB ({pct:.0f}%)")
+                print(f"[train] Batch size {bs} — {used/1e9:.1f}GB / {total_mem/1e9:.1f}GB ({used/total_mem*100:.0f}%)")
                 model.zero_grad()
                 torch.cuda.empty_cache()
                 return bs
-
             bs //= 2
 
         except torch.cuda.OutOfMemoryError:
             bs //= 2
             torch.cuda.empty_cache()
 
-    print("[train] Warning: could not fit even batch size 1 — using 1 anyway")
     return 1
 
 
@@ -116,19 +102,17 @@ def _to_device(obj, device):
     return obj
 
 
-def train_epoch(model, loader, optimizer, device, grad_clip: float = 0.0,
-                log_path: str = None, episodes_offset: int = 0,
-                batch_size: int = 1, log_every: int = 20):
+def train_epoch(model, loader, optimizer, device, writer: SummaryWriter,
+                global_step: int, grad_clip: float = 0.0, log_every: int = 10):
     model.train()
-    total        = 0.0
-    running_sum  = 0.0
-    running_n    = 0
-    episodes_seen = episodes_offset
+    total = 0.0
+    running_sum, running_n = 0.0, 0
 
-    for batch_idx, (images, rotation, gt) in enumerate(tqdm(loader, desc='train', leave=False)):
+    for images, rotation, gt in tqdm(loader, desc='train', leave=False):
         images   = _to_device(images, device)
         rotation = _to_device(rotation, device)
         gt       = _to_device(gt, device)
+
         preds = model(images, rotation)
         loss  = compute_loss(preds, gt)
         optimizer.zero_grad()
@@ -137,22 +121,17 @@ def train_epoch(model, loader, optimizer, device, grad_clip: float = 0.0,
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
-        loss_val      = loss.item()
-        total        += loss_val
-        running_sum  += loss_val
-        running_n    += 1
-        episodes_seen += images.shape[0]
+        loss_val     = loss.item()
+        total       += loss_val
+        running_sum += loss_val
+        running_n   += 1
+        global_step += 1
 
-        if log_path and (batch_idx + 1) % log_every == 0:
-            _append_loss_log(log_path, episodes_seen, running_sum / running_n)
-            running_sum = 0.0
-            running_n   = 0
+        if global_step % log_every == 0:
+            writer.add_scalar('Loss/train_running', running_sum / running_n, global_step)
+            running_sum, running_n = 0.0, 0
 
-    # Flush any remaining batches
-    if log_path and running_n > 0:
-        _append_loss_log(log_path, episodes_seen, running_sum / running_n)
-
-    return total / len(loader), episodes_seen
+    return total / len(loader), global_step
 
 
 def val_epoch(model, loader, device):
@@ -168,32 +147,14 @@ def val_epoch(model, loader, device):
     return total / len(loader)
 
 
-def _append_loss_log(log_path: str, episodes_seen: int, mean_loss: float, val_loss=None):
-    write_header = not os.path.exists(log_path)
-    with open(log_path, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['episodes', 'train', 'val'])
-        if write_header:
-            writer.writeheader()
-        writer.writerow({
-            'episodes': episodes_seen,
-            'train':    round(mean_loss, 6),
-            'val':      round(val_loss, 6) if val_loss is not None else '',
-        })
-
-
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',   default='training/config.yaml')
-    parser.add_argument('--view',     action='store_true',
-                        help='Open live loss plot window during training')
-    parser.add_argument('--episodes', type=int, default=None,
-                        help='Max episodes to use (default: prompt). Pass 0 for all.')
+    parser.add_argument('--config', default='training/config.yaml')
+    parser.add_argument('--epochs', type=int, default=None,
+                        help='Override number of epochs from config')
+    parser.add_argument('--view',   action='store_true',
+                        help='Auto-launch TensorBoard in browser')
     args = parser.parse_args()
-
-    # Interactive prompt if --episodes not passed on command line
-    if args.episodes is None:
-        raw = input("Episodes to use (press Enter for all): ").strip()
-        args.episodes = int(raw) if raw else 0
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
@@ -202,22 +163,21 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[train] Device: {device}")
 
+    # Interactive epoch prompt if not passed as argument
+    max_epochs = args.epochs
+    if max_epochs is None:
+        default_epochs = cfg['training']['epochs']
+        raw = input(f"Epochs to train (press Enter for {default_epochs}): ").strip()
+        max_epochs = int(raw) if raw else default_epochs
+
     data_root   = cfg['data']['root']
     splits_file = cfg['data']['splits_file']
     stats_file  = cfg['data']['depth_stats_file']
-    log_path    = os.path.abspath('training/loss_log.csv')
-    status_path = os.path.abspath('training/train_status.json')
-
-    # Clear previous log so the plot starts fresh
-    for p in (log_path, status_path):
-        if os.path.exists(p):
-            os.remove(p)
 
     train_ids, val_ids = create_splits(
         data_root, splits_file,
         val_ratio=cfg['training']['val_ratio'],
         seed=cfg['training']['seed'],
-        max_episodes=args.episodes,
     )
 
     if os.path.exists(stats_file):
@@ -240,7 +200,6 @@ def main():
     warmup_epochs = cfg['training'].get('warmup_epochs', 5)
     grad_clip     = cfg['training'].get('grad_clip', 1.0)
     patience      = cfg['training'].get('early_stop_patience', 15)
-    max_epochs    = cfg['training']['epochs']
     gpu_margin    = cfg['training'].get('gpu_memory_margin', 0.20)
 
     model = TerrainModel().to(device)
@@ -274,57 +233,54 @@ def main():
     save_every = cfg['checkpoints']['save_every']
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    # Launch plot viewer as a completely separate process (no torch, stays responsive)
-    viewer_proc = None
+    runs_dir = os.path.abspath('training/runs')
+    writer   = SummaryWriter(log_dir=runs_dir)
+
     if args.view:
-        viewer_script = os.path.join(os.path.dirname(__file__), 'plot_viewer.py')
-        viewer_proc = subprocess.Popen([sys.executable, viewer_script, log_path])
-        print(f"[train] Plot viewer launched (reading {log_path})")
+        subprocess.Popen(
+            [sys.executable, '-m', 'tensorboard', '--logdir', runs_dir, '--bind_all'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        print(f"[train] TensorBoard running — open http://localhost:6006")
 
     best_val          = float('inf')
     epochs_no_improve = 0
-    episodes_seen     = 0
+    global_step       = 0
 
     for epoch in range(1, max_epochs + 1):
-        with open(status_path, 'w') as f:
-            json.dump({'epoch': epoch, 'total': max_epochs, 'status': 'training'}, f)
-
-        train_loss, episodes_seen = train_epoch(
-            model, train_loader, optimizer, device, grad_clip,
-            log_path=log_path, episodes_offset=episodes_seen, batch_size=bs,
+        train_loss, global_step = train_epoch(
+            model, train_loader, optimizer, device,
+            writer, global_step, grad_clip,
         )
         val_loss = val_epoch(model, val_loader, device)
         scheduler.step()
 
-        # Write val loss point at this episode count
-        _append_loss_log(log_path, episodes_seen, train_loss, val_loss=val_loss)
+        writer.add_scalar('Loss/train_epoch', train_loss, epoch)
+        writer.add_scalar('Loss/val',         val_loss,   epoch)
+        writer.add_scalar('LR',               optimizer.param_groups[0]['lr'], epoch)
+        writer.flush()
 
         lr_now = optimizer.param_groups[0]['lr']
-        print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
+        print(f"[epoch {epoch:03d}/{max_epochs}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
 
         if val_loss < best_val:
             best_val = val_loss
             epochs_no_improve = 0
-            torch.save({'epoch': epoch, 'model': model.state_dict(),
-                        'val_loss': val_loss},
+            torch.save({'epoch': epoch, 'model': model.state_dict(), 'val_loss': val_loss},
                        os.path.join(ckpt_dir, 'best.pt'))
-            print(f"  -> best checkpoint saved (val={val_loss:.4f})")
+            print(f"  -> best checkpoint (val={val_loss:.4f})")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= patience:
-                print(f"[train] Early stopping at epoch {epoch} — no improvement for {patience} epochs")
+                print(f"[train] Early stopping — no improvement for {patience} epochs")
                 break
 
         if epoch % save_every == 0:
             torch.save({'epoch': epoch, 'model': model.state_dict()},
                        os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
 
-    with open(status_path, 'w') as f:
-        json.dump({'epoch': max_epochs, 'total': max_epochs, 'status': 'done'}, f)
-
-    if viewer_proc is not None:
-        print("[train] Training done — close the plot window to exit.")
-        viewer_proc.wait()
+    writer.close()
+    print("[train] Done.")
 
 
 if __name__ == '__main__':
