@@ -38,7 +38,7 @@ All paths are WSL-mounted.  The Windows paths `E:\terrain_data\...` mount as
     ├── back_rear/             ← same, 480×360
     ├── depth_cam_rgb/         ← uint8 RGB JPEG, 640×480  (Orbbec RGB)
     └── depth_cam_d/
-        ├── ep_000000.png      ← uint16 PNG in MILLIMETRES, 640×480  (Orbbec native depth)
+        ├── ep_000000.npy      ← float32 numpy array, metres, 640×480  (Orbbec native depth)
         └── ...
 ```
 
@@ -152,9 +152,10 @@ image_replay_node          (NEW)
 
 Check `cameras.yaml` to confirm exact topic names — that file is the source of truth.
 
-The Orbbec depth image (`depth_cam_d`) is stored as uint16 PNG in millimetres.
-Publish it as `16UC1`.  The existing pipeline will handle the mm→m conversion
-(or verify that it does — check how `point_cloud_mux_node` expects Orbbec depth).
+The Orbbec depth image (`depth_cam_d`) is stored as a raw float32 `.npy` file
+in metres.  Load with `np.load("ep_XXXXXX.npy")`, multiply by 1000, clip to
+uint16, then publish as `16UC1` — or publish as `32FC1` metres directly if the
+point cloud mux accepts that encoding (check `point_cloud_mux_node`).
 
 ---
 
