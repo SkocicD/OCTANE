@@ -47,3 +47,19 @@ def test_orbbec_slots():
     assert INPUT_SLOTS[11][0] == 'orbbec_depth'
     assert INPUT_SLOTS[5][1] == 'rgb'
     assert INPUT_SLOTS[11][1] == 'depth'
+
+
+def test_left_front_rgb_angles():
+    # near_rgb_left_front: pitch=135 deg, yaw=45 deg
+    assert POSE_TENSOR[0, 3] == pytest.approx(math.sin(math.radians(135.0)), abs=1e-5)
+    assert POSE_TENSOR[0, 4] == pytest.approx(math.cos(math.radians(135.0)), abs=1e-5)
+    assert POSE_TENSOR[0, 5] == pytest.approx(math.sin(math.radians(45.0)),  abs=1e-5)
+    assert POSE_TENSOR[0, 6] == pytest.approx(math.cos(math.radians(45.0)),  abs=1e-5)
+
+
+def test_orbbec_angles():
+    # orbbec_depth: pitch=120 deg, yaw=0 deg (different pitch from near cameras)
+    assert POSE_TENSOR[5, 3] == pytest.approx(math.sin(math.radians(120.0)), abs=1e-5)
+    assert POSE_TENSOR[5, 4] == pytest.approx(math.cos(math.radians(120.0)), abs=1e-5)
+    assert POSE_TENSOR[5, 5] == pytest.approx(math.sin(math.radians(0.0)),   abs=1e-5)
+    assert POSE_TENSOR[5, 6] == pytest.approx(math.cos(math.radians(0.0)),   abs=1e-5)

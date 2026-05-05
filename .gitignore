@@ -1,0 +1,13 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Training artifacts
+training/checkpoints/
+training/splits.json
+training/depth_stats.json
+training/*.onnx
+training/*.engine

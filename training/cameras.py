@@ -1,6 +1,10 @@
 import math
 import numpy as np
 
+# Camera poses from workspace/src/octane/octane/config/cameras.yaml (dev branch).
+# pos: meters from base_link (ROS: X=forward, Y=left, Z=up).
+# rot: degrees Euler — roll always 0 for all cameras; pitch=tilt-down; yaw=azimuth from robot forward.
+
 def _r(deg):
     return math.radians(deg)
 
