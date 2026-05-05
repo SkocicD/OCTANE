@@ -159,10 +159,11 @@ def main():
     val_ds   = TerrainDataset(data_root, val_ids,   depth_stats, augment=False)
 
     bs = cfg['training']['batch_size']
+    pin = torch.cuda.is_available()
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True,
-                              num_workers=4, pin_memory=True)
+                              num_workers=4, pin_memory=pin)
     val_loader   = DataLoader(val_ds,   batch_size=bs, shuffle=False,
-                              num_workers=4, pin_memory=True)
+                              num_workers=4, pin_memory=pin)
 
     model = TerrainModel().to(device)
     warmup_epochs   = cfg['training'].get('warmup_epochs', 5)
