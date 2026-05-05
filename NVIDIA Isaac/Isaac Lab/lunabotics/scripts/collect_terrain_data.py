@@ -72,9 +72,19 @@ def main():
         if ep > start_ep:
             obs, _ = env.reset()
 
-        # Warm up — 60 steps lets the render pipeline populate all annotators.
-        for _ in range(60):
+        # Adaptive warmup: minimum 60 steps, then keep going (up to 300) until
+        # all cameras return non-black frames.  The render pipeline varies per
+        # launch — a fixed count is a coin-flip on cold starts.
+        for _ws in range(300):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
+            if _ws >= 59:
+                _wf = getattr(env.unwrapped, "_last_frames", {})
+                _wb = [s for s, a in _wf.items()
+                       if (a.mean() < 3.0 if a.ndim == 3 else not np.any(a > 0.0))]
+                if not _wb and _wf:
+                    if _ws > 59:
+                        print(f"[TerrainCollect] ep {ep}: cameras ready after {_ws + 1} warmup steps")
+                    break
 
         ep_id = f"ep_{ep:06d}"
 

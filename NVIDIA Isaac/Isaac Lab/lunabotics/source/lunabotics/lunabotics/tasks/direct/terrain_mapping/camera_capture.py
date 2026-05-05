@@ -47,13 +47,31 @@ def _find_camera_prims() -> dict[str, str]:
     for prim in stage.Traverse():
         if not prim.IsA(UsdGeom.Camera):
             continue
-        path     = str(prim.GetPath())
+        path      = str(prim.GetPath())
         prim_name = prim.GetName()
         for key in _CAM_MAP:
             if key in prim_name or key in path:
                 if key not in found:
                     found[key] = path
                 break
+
+    # If any camera was not found via traversal, try the known static paths as a fallback.
+    # This covers the case where the prim isn't typed as UsdGeom.Camera yet during scan.
+    _KNOWN_PATHS = {
+        "LEFT_FRONT":           "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_LEFT_FRONT",
+        "LEFT_SIDE":            "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_LEFT_SIDE",
+        "RIGHT_FRONT":          "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_RIGHT_FRONT",
+        "RIGHT_SIDE":           "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_RIGHT_SIDE",
+        "BACK_REAR":            "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_BACK_REAR",
+        "Orbbec_Astra_Pro_RGB": "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Orbbec_Astra_Pro_RGB",
+        "Orbbec_Astra_Pro_D":   "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Orbbec_Astra_Pro_D",
+    }
+    for key, path in _KNOWN_PATHS.items():
+        if key not in found:
+            prim = stage.GetPrimAtPath(path)
+            if prim.IsValid():
+                found[key] = path
+                print(f"[CameraCapture] fallback path used for {key}: {path}")
 
     return found
 
