@@ -37,11 +37,10 @@ def _save_images(frames: dict, img_root: pathlib.Path, ep_id: str) -> None:
         folder = img_root / serial
         folder.mkdir(parents=True, exist_ok=True)
         if arr.ndim == 2:
-            # Depth — clip sky/infinity, invert so near=bright, save as PNG
-            depth = np.where(np.isfinite(arr), arr, 0.0)
-            depth = np.clip(depth, 0.0, 10.0)   # 10 m max range
-            vis = (255 - (depth / 10.0 * 255)).astype(np.uint8)  # near=white, far=black
-            Image.fromarray(vis, mode="L").save(folder / f"{ep_id}.png")
+            # Depth — save as 16-bit PNG in millimetres (standard ROS 16UC1 format).
+            # uint16 gives 0–65.535 m at 1 mm resolution; inf/nan → 0 (no-data).
+            depth_mm = np.where(np.isfinite(arr), arr * 1000.0, 0.0).clip(0, 65535).astype(np.uint16)
+            Image.fromarray(depth_mm).save(folder / f"{ep_id}.png")
         else:
             Image.fromarray(arr, mode="RGB").save(folder / f"{ep_id}.jpg", quality=85)
 
