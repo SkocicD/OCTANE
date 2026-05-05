@@ -162,23 +162,47 @@ def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
     return traces
 
 
+def _clip_to_bev(rx1, ry1, rx2, ry2):
+    """Liang-Barsky clip of a line segment to [-HALF, HALF]^2. Returns None if fully outside."""
+    dx, dy = rx2 - rx1, ry2 - ry1
+    p = [-dx, dx, -dy, dy]
+    q = [rx1 + HALF, HALF - rx1, ry1 + HALF, HALF - ry1]
+    t0, t1 = 0.0, 1.0
+    for pi, qi in zip(p, q):
+        if pi == 0:
+            if qi < 0:
+                return None
+        elif pi < 0:
+            t0 = max(t0, qi / pi)
+        else:
+            t1 = min(t1, qi / pi)
+    if t0 > t1:
+        return None
+    return rx1 + t0 * dx, ry1 + t0 * dy, rx1 + t1 * dx, ry1 + t1 * dy
+
+
 def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray):
+    """Wall segments clipped to BEV boundary so they don't expand the plot axis range."""
     import plotly.graph_objects as go
     traces = []
-    for i, wall in enumerate(walls_gt):
-        rx1, ry1, rx2, ry2 = wall
+    shown  = 0
+    for wall in walls_gt:
+        clipped = _clip_to_bev(*wall)
+        if clipped is None:
+            continue
+        rx1, ry1, rx2, ry2 = clipped
         n   = 20
         rxs = np.linspace(rx1, rx2, n)
         rys = np.linspace(ry1, ry2, n)
         cxs = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
         cys = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
-        # Constant z = mean terrain under the wall so the line is geometrically straight
         z_wall = float(height_map[cxs, cys].mean()) + 0.20
         traces.append(go.Scatter3d(
             x=rxs, y=rys, z=np.full(n, z_wall), mode='lines',
             line=dict(color='#ff9800', width=6),
-            name='walls (GT)', showlegend=(i == 0), legendgroup='walls',
+            name='walls (GT)', showlegend=(shown == 0), legendgroup='walls',
         ))
+        shown += 1
     return traces
 
 
