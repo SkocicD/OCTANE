@@ -162,9 +162,9 @@ class TerrainDataset(Dataset):
         return torch.stack(tensors, dim=0)  # (12, 3, 224, 224)
 
     def _load_rotation(self, npz) -> torch.Tensor:
-        roll  = float(npz.get('robot_roll',  np.float32(0.0)))
-        pitch = float(npz.get('robot_pitch', np.float32(0.0)))
-        yaw   = float(npz['robot_yaw'])
+        roll  = float(npz.get('robot_roll',  np.float32(0.0)).flat[0])
+        pitch = float(npz.get('robot_pitch', np.float32(0.0)).flat[0])
+        yaw   = float(npz['robot_yaw'].flat[0])
         return torch.tensor([
             math.sin(roll),  math.cos(roll),
             math.sin(pitch), math.cos(pitch),
