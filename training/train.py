@@ -2,6 +2,7 @@ import os
 import json
 import random
 import argparse
+import multiprocessing as mp
 import yaml
 import numpy as np
 import torch
@@ -16,9 +17,11 @@ from training.dataset import TerrainDataset, compute_depth_stats
 
 
 def create_splits(data_root: str, splits_file: str,
-                  val_ratio: float = 0.2, seed: int = 42):
-    """Load splits from file, or create and save them if missing."""
-    if os.path.exists(splits_file):
+                  val_ratio: float = 0.2, seed: int = 42,
+                  max_episodes: int = 0):
+    """Load splits from file, or create and save them if missing.
+    max_episodes: cap total episodes used (0 = use all)."""
+    if os.path.exists(splits_file) and max_episodes == 0:
         with open(splits_file) as f:
             splits = json.load(f)
         return splits['train'], splits['val']
@@ -31,16 +34,23 @@ def create_splits(data_root: str, splits_file: str,
     )
     rng = random.Random(seed)
     rng.shuffle(ep_ids)
+
+    if max_episodes > 0:
+        ep_ids = ep_ids[:max_episodes]
+        print(f"[train] Using {len(ep_ids)} of available episodes (--episodes {max_episodes})")
+
     n_val = max(1, int(len(ep_ids) * val_ratio))
-    val_ids = ep_ids[:n_val]
+    val_ids   = ep_ids[:n_val]
     train_ids = ep_ids[n_val:]
 
-    splits_dir = os.path.dirname(splits_file)
-    if splits_dir:
-        os.makedirs(splits_dir, exist_ok=True)
-    with open(splits_file, 'w') as f:
-        json.dump({'train': train_ids, 'val': val_ids}, f, indent=2)
-    print(f"[train] Splits saved: {len(train_ids)} train / {len(val_ids)} val")
+    if max_episodes == 0:
+        splits_dir = os.path.dirname(splits_file)
+        if splits_dir:
+            os.makedirs(splits_dir, exist_ok=True)
+        with open(splits_file, 'w') as f:
+            json.dump({'train': train_ids, 'val': val_ids}, f, indent=2)
+
+    print(f"[train] Splits: {len(train_ids)} train / {len(val_ids)} val")
     return train_ids, val_ids
 
 
@@ -136,40 +146,56 @@ def val_epoch(model, loader, device):
     return total / len(loader)
 
 
-def _init_plot():
+def _plot_process(queue: mp.Queue):
+    """Runs in a separate process — stays responsive while training blocks the main process."""
     import matplotlib
     matplotlib.use('TkAgg')
     import matplotlib.pyplot as plt
-    plt.ion()
+
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Loss')
     ax.set_title('Terrain Model Training')
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    train_line, = ax.plot([0], [0], label='train', color='steelblue', linewidth=2)
-    val_line,   = ax.plot([0], [0], label='val',   color='darkorange', linewidth=2)
+    train_line, = ax.plot([], [], label='train', color='steelblue', linewidth=2)
+    val_line,   = ax.plot([], [], label='val',   color='darkorange', linewidth=2)
     ax.legend(fontsize=12)
     fig.tight_layout()
+    plt.show(block=False)
     plt.pause(0.1)
-    return fig, ax, train_line, val_line
 
+    train_hist, val_hist = [], []
 
-def _update_plot(fig, ax, train_line, val_line, train_hist, val_hist):
-    import matplotlib.pyplot as plt
-    epochs = list(range(1, len(train_hist) + 1))
-    train_line.set_data(epochs, train_hist)
-    val_line.set_data(epochs, val_hist)
-    ax.set_xlim(1, max(2, len(train_hist)))
-    ax.set_ylim(0, max(max(train_hist), max(val_hist)) * 1.1)
-    plt.pause(0.05)
+    while True:
+        # Drain all pending messages before redrawing
+        updated = False
+        while not queue.empty():
+            msg = queue.get_nowait()
+            if msg == 'DONE':
+                plt.ioff()
+                plt.show()
+                return
+            train_hist.append(msg[0])
+            val_hist.append(msg[1])
+            updated = True
+
+        if updated and train_hist:
+            epochs = list(range(1, len(train_hist) + 1))
+            train_line.set_data(epochs, train_hist)
+            val_line.set_data(epochs, val_hist)
+            ax.relim()
+            ax.autoscale_view()
+            fig.canvas.draw()
+
+        plt.pause(0.2)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='training/config.yaml')
-    parser.add_argument('--view', action='store_true',
+    parser.add_argument('--config',   default='training/config.yaml')
+    parser.add_argument('--view',     action='store_true',
                         help='Show live loss plot during training')
+    parser.add_argument('--episodes', type=int, default=0,
+                        help='Max episodes to use (default: 0 = all). Useful for quick test runs.')
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -187,6 +213,7 @@ def main():
         data_root, splits_file,
         val_ratio=cfg['training']['val_ratio'],
         seed=cfg['training']['seed'],
+        max_episodes=args.episodes,
     )
 
     if os.path.exists(stats_file):
@@ -214,7 +241,6 @@ def main():
 
     model = TerrainModel().to(device)
 
-    # Auto-detect batch size to stay within GPU memory budget
     bs = find_batch_size(model, device,
                          start_bs=cfg['training']['batch_size'],
                          gpu_margin=gpu_margin)
@@ -230,7 +256,6 @@ def main():
         lr=cfg['training']['learning_rate'],
         weight_decay=cfg['training']['weight_decay'],
     )
-
     warmup = torch.optim.lr_scheduler.LinearLR(
         optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_epochs
     )
@@ -245,25 +270,27 @@ def main():
     save_every = cfg['checkpoints']['save_every']
     os.makedirs(ckpt_dir, exist_ok=True)
 
+    # Start plot in its own process so it stays responsive during GPU computation
+    plot_queue = None
+    plot_proc  = None
+    if args.view:
+        plot_queue = mp.Queue()
+        plot_proc  = mp.Process(target=_plot_process, args=(plot_queue,), daemon=True)
+        plot_proc.start()
+
     best_val          = float('inf')
     epochs_no_improve = 0
-    train_hist, val_hist = [], []
-
-    plot_handles = _init_plot() if args.view else None
 
     for epoch in range(1, max_epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, device, grad_clip)
         val_loss   = val_epoch(model, val_loader, device)
         scheduler.step()
 
-        train_hist.append(train_loss)
-        val_hist.append(val_loss)
-
         lr_now = optimizer.param_groups[0]['lr']
         print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
 
-        if plot_handles:
-            _update_plot(*plot_handles, train_hist, val_hist)
+        if plot_queue is not None:
+            plot_queue.put((train_loss, val_loss))
 
         if val_loss < best_val:
             best_val = val_loss
@@ -282,11 +309,11 @@ def main():
             torch.save({'epoch': epoch, 'model': model.state_dict()},
                        os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
 
-    if plot_handles:
-        import matplotlib.pyplot as plt
-        plt.ioff()
-        plt.show()
+    if plot_queue is not None:
+        plot_queue.put('DONE')
+        plot_proc.join()
 
 
 if __name__ == '__main__':
+    mp.freeze_support()
     main()
