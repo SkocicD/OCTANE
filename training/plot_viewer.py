@@ -22,59 +22,67 @@ def _read_status(status_path: str) -> str:
         return "Waiting for training to start..."
 
 
+def _read_log(log_path: str):
+    episodes, train_losses, val_episodes, val_losses = [], [], [], []
+    try:
+        with open(log_path, newline='') as f:
+            for row in csv.DictReader(f):
+                ep = int(row['episodes'])
+                train_val = row['train']
+                val_val   = row['val']
+                if train_val:
+                    episodes.append(ep)
+                    train_losses.append(float(train_val))
+                if val_val:
+                    val_episodes.append(ep)
+                    val_losses.append(float(val_val))
+    except Exception:
+        pass
+    return episodes, train_losses, val_episodes, val_losses
+
+
 def main(log_path: str):
-    status_path = os.path.join(os.path.dirname(log_path), 'train_status.json')
+    status_path = os.path.join(os.path.dirname(os.path.abspath(log_path)), 'train_status.json')
+
     fig, ax = plt.subplots(figsize=(11, 6))
-    ax.set_xlabel('Epoch', fontsize=12)
-    ax.set_ylabel('Loss', fontsize=12)
+    ax.set_xlabel('Episodes seen', fontsize=12)
+    ax.set_ylabel('Loss (mean)', fontsize=12)
     ax.set_title('Terrain Model — Training Progress', fontsize=14)
     ax.grid(True, alpha=0.3)
-    train_line, = ax.plot([], [], label='train', color='steelblue',  linewidth=2)
-    val_line,   = ax.plot([], [], label='val',   color='darkorange', linewidth=2)
-    best_marker, = ax.plot([], [], 'o', color='green', markersize=8,
-                           label='best val', zorder=5)
+
+    train_line, = ax.plot([], [], color='steelblue',  linewidth=1.5, label='train (running mean)', alpha=0.85)
+    val_line,   = ax.plot([], [], color='darkorange', linewidth=2,   label='val (per epoch)', marker='o', markersize=6)
+    best_marker, = ax.plot([], [], '*', color='green', markersize=14, label='best val', zorder=5)
     ax.legend(fontsize=11)
-    status_text = ax.text(0.02, 0.97, 'Waiting for training to start...',
+
+    status_text = ax.text(0.01, 0.97, _read_status(status_path),
                           transform=ax.transAxes, fontsize=10,
-                          verticalalignment='top', color='gray')
+                          verticalalignment='top', color='dimgray')
     fig.tight_layout()
 
     def update(_frame):
+        status_text.set_text(_read_status(status_path))
+
         if not os.path.exists(log_path):
             return train_line, val_line, best_marker, status_text
 
-        try:
-            epochs, train_losses, val_losses = [], [], []
-            with open(log_path, newline='') as f:
-                for row in csv.DictReader(f):
-                    epochs.append(int(row['epoch']))
-                    train_losses.append(float(row['train']))
-                    val_losses.append(float(row['val']))
+        episodes, train_losses, val_episodes, val_losses = _read_log(log_path)
 
-            status_text.set_text(_read_status(status_path))
-            status_text.set_color('black')
+        if episodes:
+            train_line.set_data(episodes, train_losses)
 
-            if not epochs:
-                return train_line, val_line, best_marker, status_text
-
-            train_line.set_data(epochs, train_losses)
-            val_line.set_data(epochs, val_losses)
-
-            # Mark the best val loss epoch
+        if val_losses:
+            val_line.set_data(val_episodes, val_losses)
             best_idx = val_losses.index(min(val_losses))
-            best_marker.set_data([epochs[best_idx]], [val_losses[best_idx]])
-
-            ax.relim()
-            ax.autoscale_view()
-
+            best_marker.set_data([val_episodes[best_idx]], [val_losses[best_idx]])
             status_text.set_text(
                 f"{_read_status(status_path)}  |  "
-                f"last: train {train_losses[-1]:.4f}  val {val_losses[-1]:.4f}  |  "
-                f"best val {min(val_losses):.4f} @ epoch {epochs[best_idx]}"
+                f"best val {min(val_losses):.4f} @ {val_episodes[best_idx]:,} episodes"
             )
 
-        except Exception:
-            pass
+        if episodes or val_losses:
+            ax.relim()
+            ax.autoscale_view()
 
         return train_line, val_line, best_marker, status_text
 
@@ -84,4 +92,4 @@ def main(log_path: str):
 
 if __name__ == '__main__':
     log_path = sys.argv[1] if len(sys.argv) > 1 else 'training/loss_log.csv'
-    main(log_path)
+    main(os.path.abspath(log_path))

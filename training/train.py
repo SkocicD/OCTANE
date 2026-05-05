@@ -116,10 +116,16 @@ def _to_device(obj, device):
     return obj
 
 
-def train_epoch(model, loader, optimizer, device, grad_clip: float = 0.0):
+def train_epoch(model, loader, optimizer, device, grad_clip: float = 0.0,
+                log_path: str = None, episodes_offset: int = 0,
+                batch_size: int = 1, log_every: int = 20):
     model.train()
-    total = 0.0
-    for images, rotation, gt in tqdm(loader, desc='train', leave=False):
+    total        = 0.0
+    running_sum  = 0.0
+    running_n    = 0
+    episodes_seen = episodes_offset
+
+    for batch_idx, (images, rotation, gt) in enumerate(tqdm(loader, desc='train', leave=False)):
         images   = _to_device(images, device)
         rotation = _to_device(rotation, device)
         gt       = _to_device(gt, device)
@@ -130,8 +136,23 @@ def train_epoch(model, loader, optimizer, device, grad_clip: float = 0.0):
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
-        total += loss.item()
-    return total / len(loader)
+
+        loss_val      = loss.item()
+        total        += loss_val
+        running_sum  += loss_val
+        running_n    += 1
+        episodes_seen += images.shape[0]
+
+        if log_path and (batch_idx + 1) % log_every == 0:
+            _append_loss_log(log_path, episodes_seen, running_sum / running_n)
+            running_sum = 0.0
+            running_n   = 0
+
+    # Flush any remaining batches
+    if log_path and running_n > 0:
+        _append_loss_log(log_path, episodes_seen, running_sum / running_n)
+
+    return total / len(loader), episodes_seen
 
 
 def val_epoch(model, loader, device):
@@ -147,13 +168,17 @@ def val_epoch(model, loader, device):
     return total / len(loader)
 
 
-def _append_loss_log(log_path: str, epoch: int, train_loss: float, val_loss: float):
+def _append_loss_log(log_path: str, episodes_seen: int, mean_loss: float, val_loss=None):
     write_header = not os.path.exists(log_path)
     with open(log_path, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['epoch', 'train', 'val'])
+        writer = csv.DictWriter(f, fieldnames=['episodes', 'train', 'val'])
         if write_header:
             writer.writeheader()
-        writer.writerow({'epoch': epoch, 'train': train_loss, 'val': val_loss})
+        writer.writerow({
+            'episodes': episodes_seen,
+            'train':    round(mean_loss, 6),
+            'val':      round(val_loss, 6) if val_loss is not None else '',
+        })
 
 
 def main():
@@ -258,18 +283,24 @@ def main():
 
     best_val          = float('inf')
     epochs_no_improve = 0
+    episodes_seen     = 0
 
     for epoch in range(1, max_epochs + 1):
         with open(status_path, 'w') as f:
             json.dump({'epoch': epoch, 'total': max_epochs, 'status': 'training'}, f)
-        train_loss = train_epoch(model, train_loader, optimizer, device, grad_clip)
-        val_loss   = val_epoch(model, val_loader, device)
+
+        train_loss, episodes_seen = train_epoch(
+            model, train_loader, optimizer, device, grad_clip,
+            log_path=log_path, episodes_offset=episodes_seen, batch_size=bs,
+        )
+        val_loss = val_epoch(model, val_loader, device)
         scheduler.step()
+
+        # Write val loss point at this episode count
+        _append_loss_log(log_path, episodes_seen, train_loss, val_loss=val_loss)
 
         lr_now = optimizer.param_groups[0]['lr']
         print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
-
-        _append_loss_log(log_path, epoch, train_loss, val_loss)
 
         if val_loss < best_val:
             best_val = val_loss
