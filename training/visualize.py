@@ -172,9 +172,9 @@ def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray):
         rys = np.linspace(ry1, ry2, n)
         cxs = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
         cys = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
-        z_wall = float(height_map[cxs, cys].mean()) + 0.20
+        zs  = height_map[cxs, cys] + 0.20
         traces.append(go.Scatter3d(
-            x=rxs, y=rys, z=np.full(n, z_wall), mode='lines',
+            x=rxs, y=rys, z=zs, mode='lines',
             line=dict(color='#ff9800', width=6),
             name='walls (GT)', showlegend=(i == 0), legendgroup='walls',
         ))
