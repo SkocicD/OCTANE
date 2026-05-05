@@ -144,11 +144,6 @@ class CameraCapture:
     def capture(self) -> dict[str, np.ndarray]:
         """Read latest rendered frames.  Returns {serial: ndarray}, skips empty."""
         if not self._ready:
-            # Lazy init: set up on first capture so the render pipeline is
-            # guaranteed to be running, avoiding the race that blacks out cameras.
-            self.setup()
-            # Return empty this frame — give the pipeline one step to render
-            # into the newly attached products before reading any data.
             return {}
 
         frames: dict[str, np.ndarray] = {}

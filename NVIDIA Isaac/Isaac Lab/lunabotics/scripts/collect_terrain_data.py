@@ -64,12 +64,17 @@ def main():
     if start_ep > 0:
         print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
 
-    for ep in range(start_ep, start_ep + args_cli.episodes):
-        obs, _ = env.reset()
+    # Setup cameras once after env is created — renderer is active post-reset
+    # but we attach before any steps so render products initialise cleanly.
+    obs, _ = env.reset()
+    env.unwrapped._cam_capture.setup()
 
-        # Warm up — let physics and cameras settle.
-        # 60 steps gives the GPU render pipeline enough frames to initialise
-        # all RGB annotators (they lag behind physics by several frames).
+    for ep in range(start_ep, start_ep + args_cli.episodes):
+        if ep > start_ep:
+            obs, _ = env.reset()
+
+        # Warm up — 60 steps lets all RGB annotators receive render frames
+        # before we capture.
         for _ in range(60):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
 
