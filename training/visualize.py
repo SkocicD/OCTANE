@@ -133,7 +133,7 @@ def _rock_circles(objects_gt: np.ndarray, height_map: np.ndarray):
         zs  = height_map[cxs, cys] + 0.08
         traces.append(go.Scatter3d(
             x=xs, y=ys, z=zs, mode='lines',
-            line=dict(color='#ef5350', width=3),
+            line=dict(color='#42a5f5', width=3),
             name='rocks (GT)', showlegend=(i == 0), legendgroup='rocks',
         ))
     return traces
@@ -156,7 +156,7 @@ def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
         zs  = height_map[cxs, cys] - 0.05
         traces.append(go.Scatter3d(
             x=xs, y=ys, z=zs, mode='lines',
-            line=dict(color='#42a5f5', width=3),
+            line=dict(color='#ef5350', width=3),
             name='craters (GT)', showlegend=(i == 0), legendgroup='craters',
         ))
     return traces
@@ -390,8 +390,8 @@ _HTML = """\
       TMPL_STAT_BADGES
     </div>
     <div class="legend">
-      <div class="chip"><span class="dot" style="background:#ef5350"></span>Rocks (GT)</div>
-      <div class="chip"><span class="dot-ring"></span>Craters (GT)</div>
+      <div class="chip"><span class="dot-ring"></span>Rocks (GT)</div>
+      <div class="chip"><span class="dot" style="background:#ef5350"></span>Craters (GT)</div>
       <div class="chip"><span class="dash-icon"></span>Walls (GT)</div>
     </div>
     TMPL_NOTICE
