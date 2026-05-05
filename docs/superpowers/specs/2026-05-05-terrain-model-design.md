@@ -57,20 +57,22 @@ terrain_data/
 
 12 images total, all resized to **224×224** at load time:
 
-| Index | Source file | Description |
-|-------|-------------|-------------|
-| 0 | `images/left_front` | Near RGB |
-| 1 | `images/left_side` | Near RGB |
-| 2 | `images/right_front` | Near RGB |
-| 3 | `images/right_side` | Near RGB |
-| 4 | `images/back_rear` | Near RGB |
-| 5 | `images/depth_cam_rgb` | Orbbec RGB |
-| 6 | `depth/left_front` | DA3 depth heatmap |
-| 7 | `depth/left_side` | DA3 depth heatmap |
-| 8 | `depth/right_front` | DA3 depth heatmap |
-| 9 | `depth/right_side` | DA3 depth heatmap |
-| 10 | `depth/back_rear` | DA3 depth heatmap |
-| 11 | `images/depth_cam_d` | Orbbec real depth (grayscale, loaded as RGB) |
+| Index | Source file | Physical camera | Modality |
+|-------|-------------|-----------------|----------|
+| 0 | `images/left_front` | `near_rgb_left_front` | RGB |
+| 1 | `images/left_side` | `near_rgb_left_side` | RGB |
+| 2 | `images/right_front` | `near_rgb_right_front` | RGB |
+| 3 | `images/right_side` | `near_rgb_right_side` | RGB |
+| 4 | `images/back_rear` | `near_rgb_back_rear` | RGB |
+| 5 | `images/depth_cam_rgb` | `orbbec_depth` | RGB |
+| 6 | `depth/left_front` | `near_rgb_left_front` | Depth |
+| 7 | `depth/left_side` | `near_rgb_left_side` | Depth |
+| 8 | `depth/right_front` | `near_rgb_right_front` | Depth |
+| 9 | `depth/right_side` | `near_rgb_right_side` | Depth |
+| 10 | `depth/back_rear` | `near_rgb_back_rear` | Depth |
+| 11 | `images/depth_cam_d` | `orbbec_depth` | Depth |
+
+Indices 0&6, 1&7, 2&8, 3&9, 4&10, 5&11 are RGB/depth pairs from the same physical camera.
 
 **Normalization:**
 - Indices 0–5 (RGB): ImageNet mean/std
@@ -82,11 +84,26 @@ terrain_data/
 
 ## Architecture
 
+### Camera Poses (from `workspace/src/octane/octane/config/cameras.yaml` on `dev`)
+
+Fixed at training and inference time. Positions in meters from base_link, rotations in degrees (Euler roll/pitch/yaw).
+
+| Camera | pos x | pos y | pos z | pitch | yaw |
+|--------|-------|-------|-------|-------|-----|
+| `near_rgb_left_front` | 0.472 | 0.232 | 0.376 | 135° | 45° |
+| `near_rgb_left_side` | 0.000 | 0.321 | 0.376 | 135° | 90° |
+| `near_rgb_right_front` | 0.472 | -0.232 | 0.376 | 135° | -45° |
+| `near_rgb_right_side` | 0.000 | -0.321 | 0.376 | 135° | -90° |
+| `near_rgb_back_rear` | -0.570 | 0.000 | 0.467 | 135° | 180° |
+| `orbbec_depth` | 0.442 | 0.038 | 0.661 | 120° | 0° |
+
+(Roll is 0° for all cameras.)
+
 ### Encoder
 - **Backbone:** EfficientNet-B0 pretrained on ImageNet (~5M params)
 - Each image processed independently through shared backbone
 - Output per image: (14×14×320) feature map (stride 16 from 224×224 input)
-- **Camera ID embedding:** 12 learned embeddings of dim 32, broadcast-added to each image's features after a projection conv → gives the model positional/directional context per camera without requiring explicit geometric projection
+- **Camera pose embedding:** each of the 12 inputs is tagged with its physical camera's pose encoded as 9 fixed values `[x, y, z, sin(pitch), cos(pitch), sin(yaw), cos(yaw), is_rgb, is_depth]` → `Linear(9, 32)` → broadcast-added to that image's feature map. RGB and depth pairs from the same camera share the same pose values but differ in the modality flags. These are fixed constants loaded from `cameras.yaml`, not learned — the model is told the geometry, not left to infer it.
 
 ### Fusion
 - Stack all 12 feature maps channel-wise: (14×14×3840)
@@ -199,7 +216,6 @@ training/
 ---
 
 ## Future Enhancements
-- Add camera pose embeddings derived from `cameras.yaml` extrinsics (geometric prior)
 - Semantic refinement head: lightweight Conv on top of the 4 output heads
 - Iterative refinement: feed predicted outputs back as additional input channels
 - Increase dataset to 10K–20K episodes for improved generalization
