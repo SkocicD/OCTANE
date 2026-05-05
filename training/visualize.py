@@ -234,11 +234,12 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
     _add_conf(gt['rocks'], gt['craters'], col=cols)
 
     scene_cfg = dict(
-        xaxis=dict(title='rx (fwd m)', range=[-HALF, HALF]),
-        yaxis=dict(title='ry (lat m)', range=[-HALF, HALF]),
-        zaxis=dict(title='height m'),
+        xaxis_title='rx (fwd m)',
+        yaxis_title='ry (lat m)',
+        zaxis_title='height m',
         camera=dict(eye=dict(x=1.4, y=1.4, z=1.0)),
-        aspectmode='data',
+        aspectmode='manual',
+        aspectratio=dict(x=1, y=1, z=0.15),
         bgcolor='rgba(0,0,0,0)',
     )
     layout_kw = dict(
