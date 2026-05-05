@@ -258,11 +258,15 @@ def main():
     writer   = SummaryWriter(log_dir=runs_dir)
 
     if args.view:
+        import time, webbrowser
         subprocess.Popen(
-            [sys.executable, '-m', 'tensorboard', '--logdir', runs_dir, '--bind_all'],
+            [sys.executable, '-m', 'tensorboard', '--logdir', runs_dir, '--port', '6006'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        print(f"[train] TensorBoard running — open http://localhost:6006")
+        print("[train] Starting TensorBoard...", end='', flush=True)
+        time.sleep(4)
+        print(" opening http://localhost:6006")
+        webbrowser.open('http://localhost:6006')
 
     best_val          = float('inf')
     epochs_no_improve = 0
