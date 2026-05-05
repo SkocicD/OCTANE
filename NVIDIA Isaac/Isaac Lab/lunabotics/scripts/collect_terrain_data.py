@@ -1,14 +1,25 @@
-"""Collect terrain data using the TerrainCollectionEnv.
+"""Collect terrain ground-truth data using the TerrainCollectionEnv.
 
-Saves per-episode NPZ files containing ground-truth terrain maps AND all 7
-camera frames (5 RGB + Orbbec RGB + Orbbec depth).  No ROS or DDS required.
+Saves per-episode NPZ files containing only ground-truth terrain maps.
+Camera frames are NOT saved — point clouds are generated separately by the
+ROS perception stack (DA3 + Orbbec) and paired with these NPZ files at
+training time.
+
+NPZ contents per episode:
+    height_gt   (200, 200) float32   robot-centric BEV heightmap (metres)
+    semantic_gt (200, 200) uint8     0=free 1=rock 2=crater 3=wall
+    objects_gt  (N, 4)    float32   [rx, ry, diameter, type] per object
+    walls_gt    (M, 4)    float32   [rx1, ry1, rx2, ry2] per wall segment
+    robot_yaw   (1,)      float32   radians (baked into BEV rotation)
+    robot_pitch (1,)      float32   radians
+    robot_roll  (1,)      float32   radians
 """
 
 import argparse
 
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="Terrain data collection.")
+parser = argparse.ArgumentParser(description="Terrain GT data collection.")
 parser.add_argument("--task",     type=str, default="Template-TerrainCollection-v0")
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--gt_dir",   type=str, default=r"E:\terrain_data\gt")
@@ -23,31 +34,20 @@ import gc
 import pathlib
 import numpy as np
 import gymnasium as gym
-from PIL import Image
 
 import lunabotics.tasks  # noqa: F401 — registers all envs, also sets up CUDA DLL paths
 import torch             # import torch AFTER isaaclab/lunabotics so CUDA paths are ready
 
 from lunabotics.tasks.direct.terrain_mapping.terrain_collection_env_cfg import TerrainCollectionEnvCfg
 
-
-def _save_images(frames: dict, img_root: pathlib.Path, ep_id: str) -> None:
-    for serial, arr in frames.items():
-        folder = img_root / serial
-        folder.mkdir(parents=True, exist_ok=True)
-        if arr.ndim == 2:
-            # Depth — clip sky/infinity, invert so near=bright, save as PNG
-            depth = np.where(np.isfinite(arr), arr, 0.0)
-            depth = np.clip(depth, 0.0, 10.0)   # 10 m max range
-            vis = (255 - (depth / 10.0 * 255)).astype(np.uint8)  # near=white, far=black
-            Image.fromarray(vis, mode="L").save(folder / f"{ep_id}.png")
-        else:
-            Image.fromarray(arr, mode="RGB").save(folder / f"{ep_id}.jpg", quality=85)
+# Minimum physics steps per episode so the robot settles onto terrain before
+# GT is read.  GT is computed at reset time so this only matters for physics
+# accuracy; 10 steps is enough for the robot to land.
+_WARMUP_STEPS = 10
 
 
 def main():
-    gt_dir  = pathlib.Path(args_cli.gt_dir)
-    img_dir = gt_dir.parent / "images"
+    gt_dir = pathlib.Path(args_cli.gt_dir)
     gt_dir.mkdir(parents=True, exist_ok=True)
 
     env_cfg = TerrainCollectionEnvCfg()
@@ -64,27 +64,14 @@ def main():
     if start_ep > 0:
         print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
 
-    # Setup cameras once after first reset — renderer is active at this point.
     obs, _ = env.reset()
-    env.unwrapped._cam_capture.setup()
 
     for ep in range(start_ep, start_ep + args_cli.episodes):
         if ep > start_ep:
             obs, _ = env.reset()
 
-        # Adaptive warmup: minimum 60 steps, then keep going (up to 300) until
-        # all cameras return non-black frames.  The render pipeline varies per
-        # launch — a fixed count is a coin-flip on cold starts.
-        for _ws in range(300):
+        for _ in range(_WARMUP_STEPS):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
-            if _ws >= 59:
-                _wf = getattr(env.unwrapped, "_last_frames", {})
-                _wb = [s for s, a in _wf.items()
-                       if (a.mean() < 3.0 if a.ndim == 3 else not np.any(a > 0.0))]
-                if not _wb and _wf:
-                    if _ws > 59:
-                        print(f"[TerrainCollect] ep {ep}: cameras ready after {_ws + 1} warmup steps")
-                    break
 
         ep_id = f"ep_{ep:06d}"
 
@@ -92,13 +79,6 @@ def main():
         if gt is None:
             print(f"[TerrainCollect] WARNING: no GT for episode {ep}, skipping")
             continue
-
-        frames = getattr(env.unwrapped, "_last_frames", {})
-
-        black = [s for s, arr in frames.items()
-                 if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
-        if black:
-            print(f"[TerrainCollect] WARNING ep {ep}: black cameras {black} — saving anyway")
 
         save_kwargs = dict(
             height_gt   = gt["height_gt"],
@@ -109,18 +89,14 @@ def main():
             robot_pitch = np.array([gt.get("robot_pitch", 0.0)]),
             robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
-        # Camera frames — present only if cameras were successfully attached
-        for serial, arr in frames.items():
-            save_kwargs[f"cam_{serial}"] = arr
 
         np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
-        _save_images(frames, img_dir, ep_id)
         (gt_dir / f"{ep_id}.ready").touch()
 
-        del frames, save_kwargs
-        if ep % 10 == 0:
+        del save_kwargs
+        if ep % 50 == 0:
             gc.collect()
-            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={len(getattr(env.unwrapped, '_last_frames', {}))}")
+            print(f"[TerrainCollect] Episode {ep} / {start_ep + args_cli.episodes - 1}")
 
     print("[TerrainCollect] Done.")
     env.close()
