@@ -1,7 +1,8 @@
 """Collect terrain data using the TerrainCollectionEnv.
 
-Saves per-episode NPZ files containing ground-truth terrain maps AND all 7
-camera frames (5 RGB + Orbbec RGB + Orbbec depth).  No ROS or DDS required.
+Saves per-episode NPZ files containing ground-truth terrain maps only.
+Camera images are saved separately under <gt_dir>/../images/<serial>/ for
+use by the ROS point-cloud generation pipeline.  No ROS or DDS required.
 """
 
 import argparse
@@ -109,12 +110,9 @@ def main():
             robot_pitch = np.array([gt.get("robot_pitch", 0.0)]),
             robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
-        # Camera frames — present only if cameras were successfully attached
-        for serial, arr in frames.items():
-            save_kwargs[f"cam_{serial}"] = arr
 
         np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
-        _save_images(frames, img_dir, ep_id)
+        _save_images(frames, img_dir, ep_id)  # images saved separately for ROS pipeline
         (gt_dir / f"{ep_id}.ready").touch()
 
         del frames, save_kwargs
