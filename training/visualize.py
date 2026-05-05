@@ -1,10 +1,11 @@
 """Inference visualizer for TerrainModel.
 
 Usage:
+    visualize.bat
     python training/visualize.py
     python training/visualize.py --checkpoint training/checkpoints/best.pt
     python training/visualize.py --episode ep_001234
-    python training/visualize.py --episode ep_001234 --gt-only   # skip model, just show GT
+    python training/visualize.py --episode ep_001234 --gt-only
 """
 import os
 import sys
@@ -12,6 +13,8 @@ import json
 import random
 import argparse
 import math
+import tempfile
+import webbrowser
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -38,7 +41,6 @@ def _pick_episode(data_root: str, episode_id: str | None) -> str:
     if episode_id:
         if episode_id in episodes:
             return episode_id
-        # Allow partial match (e.g. "1234" matches "ep_001234")
         matches = [e for e in episodes if episode_id in e]
         if len(matches) == 1:
             return matches[0]
@@ -47,7 +49,6 @@ def _pick_episode(data_root: str, episode_id: str | None) -> str:
             return matches[0]
         raise RuntimeError(f"Episode '{episode_id}' not found")
 
-    # Interactive prompt
     print(f"Available: {len(episodes)} episodes  (e.g. {episodes[0]}, {episodes[-1]})")
     raw = input("Episode ID (press Enter for random): ").strip()
     if not raw:
@@ -58,7 +59,7 @@ def _pick_episode(data_root: str, episode_id: str | None) -> str:
 
 
 def _run_inference(checkpoint_path: str, data_root: str, episode_id: str,
-                   depth_stats: dict, device_str: str) -> dict:
+                   depth_stats: dict, device_str: str) -> tuple[dict, dict]:
     import torch
     from training.model import TerrainModel
     from training.dataset import TerrainDataset
@@ -69,7 +70,12 @@ def _run_inference(checkpoint_path: str, data_root: str, episode_id: str,
     ckpt = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt['model'])
     model.eval()
-    print(f"  Checkpoint epoch {ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss', '?')}")
+
+    ckpt_info = {
+        'epoch':    ckpt.get('epoch', '?'),
+        'val_loss': ckpt.get('val_loss', None),
+    }
+    print(f"  Checkpoint epoch {ckpt_info['epoch']}  val_loss={ckpt_info['val_loss']}")
 
     ds = TerrainDataset(data_root, [episode_id], depth_stats, augment=False)
     images, rotation, gt = ds[0]
@@ -78,7 +84,7 @@ def _run_inference(checkpoint_path: str, data_root: str, episode_id: str,
         preds = model(images.unsqueeze(0).to(device),
                       rotation.unsqueeze(0).to(device))
 
-    return {k: v.squeeze(0).cpu().numpy() for k, v in preds.items()}
+    return {k: v.squeeze(0).cpu().numpy() for k, v in preds.items()}, ckpt_info
 
 
 def _load_gt(data_root: str, episode_id: str) -> dict:
@@ -87,10 +93,10 @@ def _load_gt(data_root: str, episode_id: str) -> dict:
     objects = npz['objects_gt']
     walls   = npz['walls_gt']
     return {
-        'height':  npz['height_gt'],
-        'rocks':   build_object_heatmap(objects, class_id=0),
-        'craters': build_object_heatmap(objects, class_id=1),
-        'walls':   build_wall_mask(walls),
+        'height':     npz['height_gt'],
+        'rocks':      build_object_heatmap(objects, class_id=0),
+        'craters':    build_object_heatmap(objects, class_id=1),
+        'walls':      build_wall_mask(walls),
         'objects_gt': objects,
         'walls_gt':   walls,
     }
@@ -98,16 +104,12 @@ def _load_gt(data_root: str, episode_id: str) -> dict:
 
 # ── plotting ──────────────────────────────────────────────────────────────────
 
-GRID   = 200
-CELL   = 0.05
-HALF   = GRID * CELL / 2   # 5.0 m
+GRID = 200
+CELL = 0.05
+HALF = GRID * CELL / 2  # 5.0 m
 
-def _cell_to_world(cell_idx: int) -> float:
-    return cell_idx * CELL - HALF
-
-
-_xs = np.array([_cell_to_world(i) for i in range(GRID)])  # world coords along rx axis
-_ys = np.array([_cell_to_world(i) for i in range(GRID)])  # world coords along ry axis
+_xs = np.array([i * CELL - HALF for i in range(GRID)])
+_ys = np.array([i * CELL - HALF for i in range(GRID)])
 
 
 def _surface(height: np.ndarray, title: str, colorscale='RdYlGn'):
@@ -122,20 +124,18 @@ def _surface(height: np.ndarray, title: str, colorscale='RdYlGn'):
 
 
 def _rock_scatter(objects_gt: np.ndarray, pred_map: np.ndarray | None = None):
-    """Red markers at GT rock positions; size scaled by confidence if pred given."""
     import plotly.graph_objects as go
     rocks = objects_gt[objects_gt[:, 3] == 0] if len(objects_gt) else np.zeros((0, 4))
     if len(rocks) == 0:
         return None
     rx, ry, diam = rocks[:, 0], rocks[:, 1], rocks[:, 2]
-    # Sample height at rock position for z placement
     cx = np.clip(((rx + HALF) / CELL).astype(int), 0, GRID - 1)
     cy = np.clip(((ry + HALF) / CELL).astype(int), 0, GRID - 1)
     z  = pred_map[cx, cy] + 0.1 if pred_map is not None else np.zeros_like(rx) + 0.1
     return go.Scatter3d(
         x=rx, y=ry, z=z,
         mode='markers',
-        marker=dict(size=np.clip(diam * 8, 4, 20), color='red', opacity=0.8),
+        marker=dict(size=np.clip(diam * 8, 4, 20), color='#ef5350', opacity=0.85),
         name='rocks (GT)',
     )
 
@@ -152,7 +152,7 @@ def _crater_scatter(objects_gt: np.ndarray, pred_map: np.ndarray | None = None):
     return go.Scatter3d(
         x=rx, y=ry, z=z,
         mode='markers',
-        marker=dict(size=np.clip(diam * 8, 4, 20), color='dodgerblue',
+        marker=dict(size=np.clip(diam * 8, 4, 20), color='#42a5f5',
                     symbol='circle-open', opacity=0.9),
         name='craters (GT)',
     )
@@ -163,7 +163,6 @@ def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray):
     traces = []
     for wall in walls_gt:
         rx1, ry1, rx2, ry2 = wall
-        # Sample a few z points along the wall so it follows the terrain
         n   = 10
         rxs = np.linspace(rx1, rx2, n)
         rys = np.linspace(ry1, ry2, n)
@@ -173,7 +172,7 @@ def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray):
         traces.append(go.Scatter3d(
             x=rxs, y=rys, z=zs,
             mode='lines',
-            line=dict(color='orange', width=6),
+            line=dict(color='#ff9800', width=6),
             name='walls (GT)',
             showlegend=len(traces) == 0,
         ))
@@ -192,23 +191,26 @@ def _confidence_heatmap(conf: np.ndarray, title: str, colorscale: str):
     )
 
 
-def build_figure(pred: dict | None, gt: dict, episode_id: str) -> 'plotly.graph_objects.Figure':
+def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
     has_pred = pred is not None
     cols     = 2 if has_pred else 1
-    col_titles = (['Predicted', 'Ground Truth'] if has_pred else ['Ground Truth'])
+
+    row1_specs = [{'type': 'scene'}, {'type': 'scene'}] if has_pred else [{'type': 'scene'}]
+    row2_specs = [{'type': 'xy'},    {'type': 'xy'}]    if has_pred else [{'type': 'xy'}]
+
+    subplot_titles = (
+        (['Height Map'] * cols) +
+        (['Rock / Crater Confidence'] * cols)
+    )
 
     fig = make_subplots(
         rows=2, cols=cols,
-        specs=[[{'type': 'scene'}, {'type': 'scene'}] if has_pred else [{'type': 'scene'}],
-               [{'type': 'xy'},    {'type': 'xy'}]    if has_pred else [{'type': 'xy'}]],
-        subplot_titles=(
-            [f'Height Map — {t}' for t in col_titles] +
-            [f'Rock / Crater Confidence — {t}' for t in col_titles]
-        ),
-        horizontal_spacing=0.05,
+        specs=[row1_specs, row2_specs],
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.04,
         vertical_spacing=0.08,
     )
 
@@ -216,7 +218,7 @@ def build_figure(pred: dict | None, gt: dict, episode_id: str) -> 'plotly.graph_
     walls   = gt.get('walls_gt',   np.zeros((0, 4), dtype=np.float32))
 
     def _add_scene(height, col):
-        fig.add_trace(_surface(height, col_titles[col - 1]), row=1, col=col)
+        fig.add_trace(_surface(height, ''), row=1, col=col)
         r = _rock_scatter(objects, height)
         c = _crater_scatter(objects, height)
         if r: fig.add_trace(r, row=1, col=col)
@@ -225,9 +227,8 @@ def build_figure(pred: dict | None, gt: dict, episode_id: str) -> 'plotly.graph_
             fig.add_trace(w, row=1, col=col)
 
     def _add_conf(rocks, craters, col):
-        # Overlay rocks (red) and craters (blue) as separate heatmaps
-        fig.add_trace(_confidence_heatmap(rocks,   'rocks',   'Reds'),   row=2, col=col)
-        fig.add_trace(_confidence_heatmap(craters, 'craters', 'Blues'),  row=2, col=col)
+        fig.add_trace(_confidence_heatmap(rocks,   'rocks',   'Reds'),  row=2, col=col)
+        fig.add_trace(_confidence_heatmap(craters, 'craters', 'Blues'), row=2, col=col)
 
     if has_pred:
         _add_scene(pred['height'], col=1)
@@ -236,7 +237,7 @@ def build_figure(pred: dict | None, gt: dict, episode_id: str) -> 'plotly.graph_
     _add_scene(gt['height'], col=cols)
     _add_conf(gt['rocks'], gt['craters'], col=cols)
 
-    camera = dict(eye=dict(x=1.4, y=1.4, z=1.0))
+    camera    = dict(eye=dict(x=1.4, y=1.4, z=1.0))
     scene_cfg = dict(
         xaxis_title='rx (fwd m)',
         yaxis_title='ry (lat m)',
@@ -244,15 +245,266 @@ def build_figure(pred: dict | None, gt: dict, episode_id: str) -> 'plotly.graph_
         camera=camera,
         aspectmode='manual',
         aspectratio=dict(x=1, y=1, z=0.35),
+        bgcolor='rgba(0,0,0,0)',
     )
-    fig.update_layout(
-        title=dict(text=f'TerrainModel — episode: {episode_id}', font_size=16),
-        scene=scene_cfg,
-        **(dict(scene2=scene_cfg) if has_pred else {}),
-        height=900,
+
+    layout_kwargs = dict(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(family='Roboto, sans-serif', color='#c4c6d0', size=12),
+        legend=dict(bgcolor='rgba(26,29,36,0.8)', bordercolor='#44474f', borderwidth=1),
+        margin=dict(l=10, r=10, t=40, b=10),
+        height=820,
         template='plotly_dark',
+        scene=scene_cfg,
     )
+    if has_pred:
+        layout_kwargs['scene2'] = scene_cfg
+
+    fig.update_layout(**layout_kwargs)
+
+    # Style subplot title annotations
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=13, color='#8e9099', family='Roboto, sans-serif')
+
     return fig
+
+
+# ── HTML template ─────────────────────────────────────────────────────────────
+
+_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TerrainModel — TMPL_EPISODE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d24;
+      --surf-var:  #252930;
+      --primary:   #80cbc4;
+      --on-surf:   #e2e2e6;
+      --on-var:    #8e9099;
+      --outline:   #44474f;
+      --pred-col:  #80cbc4;
+      --gt-col:    #aed581;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Roboto', sans-serif;
+      background: var(--bg);
+      color: var(--on-surf);
+      min-height: 100vh;
+    }
+
+    /* ── top bar ── */
+    .top-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--outline);
+      padding: 0 20px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .top-bar-left { display: flex; align-items: center; gap: 14px; }
+    .app-icon {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, #4db6ac 0%, #26a69a 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; flex-shrink: 0; user-select: none;
+    }
+    .title-block h1 {
+      font-size: 17px; font-weight: 500; letter-spacing: 0.1px; line-height: 1;
+    }
+    .title-block .ep {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 11px; color: var(--on-var); margin-top: 3px;
+    }
+    .close-btn {
+      width: 38px; height: 38px; border-radius: 50%;
+      border: none; background: transparent;
+      color: var(--on-var); cursor: pointer; font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .close-btn:hover { background: rgba(255,255,255,0.09); color: var(--on-surf); }
+
+    /* ── content ── */
+    .content { padding: 18px 20px 28px; }
+
+    /* ── info row ── */
+    .info-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .badge {
+      padding: 4px 13px; border-radius: 20px;
+      font-size: 12px; font-weight: 500; letter-spacing: 0.4px;
+      border: 1px solid transparent;
+    }
+    .badge-mode-pred { background: rgba(128,203,196,0.1); color: var(--pred-col); border-color: rgba(128,203,196,0.25); }
+    .badge-mode-gt   { background: rgba(174,213,129,0.1); color: var(--gt-col);   border-color: rgba(174,213,129,0.25); }
+    .badge-stat { background: var(--surf-var); color: var(--on-var); border-color: var(--outline); }
+
+    /* ── legend chips ── */
+    .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .chip {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 13px; border-radius: 8px;
+      background: var(--surf-var); border: 1px solid var(--outline);
+      font-size: 12px; font-weight: 500; color: var(--on-var);
+    }
+    .dot       { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .dot-ring  { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #42a5f5; flex-shrink: 0; }
+    .dash-icon { width: 16px; height: 3px; border-radius: 2px; flex-shrink: 0; background: #ff9800; }
+
+    /* ── column headers ── */
+    .col-header-row { display: flex; gap: 12px; margin-bottom: 8px; }
+    .col-header {
+      flex: 1; text-align: center;
+      padding: 8px 12px; border-radius: 10px;
+      font-size: 12px; font-weight: 500; letter-spacing: 0.8px; text-transform: uppercase;
+      border: 1px solid transparent;
+    }
+    .col-header.predicted  { color: var(--pred-col); background: rgba(128,203,196,0.07); border-color: rgba(128,203,196,0.2); }
+    .col-header.gt         { color: var(--gt-col);   background: rgba(174,213,129,0.07); border-color: rgba(174,213,129,0.2); }
+
+    /* ── no-pred notice ── */
+    .notice {
+      margin-bottom: 14px; padding: 10px 16px;
+      background: var(--surf-var); border: 1px solid var(--outline);
+      border-radius: 10px; font-size: 13px; color: var(--on-var);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .notice-icon { font-size: 16px; flex-shrink: 0; }
+
+    /* ── plot card ── */
+    .plot-card {
+      background: var(--surface);
+      border-radius: 16px;
+      border: 1px solid var(--outline);
+      overflow: hidden;
+      padding: 6px 4px 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <div class="app-icon">🗺</div>
+      <div class="title-block">
+        <h1>TerrainModel Visualizer</h1>
+        <div class="ep">TMPL_EPISODE</div>
+      </div>
+    </div>
+    <button class="close-btn" onclick="window.close()" title="Close tab">&#x2715;</button>
+  </div>
+
+  <div class="content">
+    <div class="info-row">
+      TMPL_MODE_BADGE
+      TMPL_STAT_BADGES
+    </div>
+
+    <div class="legend">
+      <div class="chip"><span class="dot" style="background:#ef5350"></span>Rocks (GT)</div>
+      <div class="chip"><span class="dot-ring"></span>Craters (GT)</div>
+      <div class="chip"><span class="dash-icon"></span>Walls (GT)</div>
+    </div>
+
+    TMPL_NOTICE
+    TMPL_COL_HEADERS
+
+    <div class="plot-card">
+      TMPL_PLOT_DIV
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+# ── HTML builder ──────────────────────────────────────────────────────────────
+
+def _open_html(fig, episode_id: str, pred: dict | None, gt: dict,
+               ckpt_info: dict | None = None):
+    import plotly.io as pio
+
+    plot_div = pio.to_html(
+        fig, include_plotlyjs='cdn', full_html=False,
+        config={'responsive': True, 'displayModeBar': True,
+                'modeBarButtonsToRemove': ['sendDataToCloud']},
+    )
+
+    has_pred = pred is not None
+
+    # mode badge
+    if has_pred:
+        epoch_str = f"epoch {ckpt_info['epoch']}" if ckpt_info else ''
+        val_str   = (f"  val_loss={ckpt_info['val_loss']:.4f}" if ckpt_info and ckpt_info['val_loss'] else '')
+        mode_badge = f'<span class="badge badge-mode-pred">AI Prediction ({epoch_str}{val_str})</span>'
+    else:
+        mode_badge = '<span class="badge badge-mode-gt">Ground Truth Only</span>'
+
+    # stat badges
+    objects   = gt.get('objects_gt', np.zeros((0, 4)))
+    walls_gt  = gt.get('walls_gt',   np.zeros((0, 4)))
+    n_rocks   = int((objects[:, 3] == 0).sum()) if len(objects) else 0
+    n_craters = int((objects[:, 3] == 1).sum()) if len(objects) else 0
+    n_walls   = len(walls_gt)
+    stat_badges = (
+        f'<span class="badge badge-stat">{n_rocks} rock{"s" if n_rocks != 1 else ""}</span>'
+        f'<span class="badge badge-stat">{n_craters} crater{"s" if n_craters != 1 else ""}</span>'
+        f'<span class="badge badge-stat">{n_walls} wall{"s" if n_walls != 1 else ""}</span>'
+    )
+
+    # notice when no checkpoint
+    notice = (
+        '<div class="notice">'
+        '<span class="notice-icon">ℹ</span>'
+        'No checkpoint loaded — showing ground truth only. '
+        'The AI prediction column will appear once <code>training/checkpoints/best.pt</code> exists.'
+        '</div>'
+    ) if not has_pred else ''
+
+    # column headers
+    if has_pred:
+        col_headers = (
+            '<div class="col-header-row">'
+            '<div class="col-header predicted">▶ AI Prediction</div>'
+            '<div class="col-header gt">Ground Truth</div>'
+            '</div>'
+        )
+    else:
+        col_headers = (
+            '<div class="col-header-row">'
+            '<div class="col-header gt">Ground Truth</div>'
+            '</div>'
+        )
+
+    html = _HTML
+    html = html.replace('TMPL_EPISODE',     episode_id)
+    html = html.replace('TMPL_MODE_BADGE',  mode_badge)
+    html = html.replace('TMPL_STAT_BADGES', stat_badges)
+    html = html.replace('TMPL_NOTICE',      notice)
+    html = html.replace('TMPL_COL_HEADERS', col_headers)
+    html = html.replace('TMPL_PLOT_DIV',    plot_div)
+
+    with tempfile.NamedTemporaryFile(
+        'w', suffix='.html', delete=False, encoding='utf-8'
+    ) as f:
+        f.write(html)
+        path = f.name
+
+    url = 'file:///' + path.replace('\\', '/')
+    webbrowser.open(url)
+    print(f"  Opened in browser: {path}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -277,7 +529,8 @@ def main():
           f"craters: {int((gt['objects_gt'][:,3]==1).sum())}  "
           f"walls: {len(gt['walls_gt'])}")
 
-    pred = None
+    pred      = None
+    ckpt_info = None
     if not args.gt_only:
         if not os.path.exists(args.checkpoint):
             print(f"  Checkpoint not found at {args.checkpoint} — showing GT only")
@@ -291,15 +544,16 @@ def main():
 
             device = 'cuda' if __import__('torch').cuda.is_available() else 'cpu'
             print(f"  Running inference on {device}...")
-            pred = _run_inference(args.checkpoint, data_root, episode_id, depth_stats, device)
+            pred, ckpt_info = _run_inference(
+                args.checkpoint, data_root, episode_id, depth_stats, device)
             print(f"  height range: [{pred['height'].min():.3f}, {pred['height'].max():.3f}]  "
                   f"rocks max: {pred['rocks'].max():.3f}  "
                   f"craters max: {pred['craters'].max():.3f}  "
                   f"walls max: {pred['walls'].max():.3f}")
 
     print("\nBuilding visualization...")
-    fig = build_figure(pred, gt, episode_id)
-    fig.show()
+    fig = build_figure(pred, gt)
+    _open_html(fig, episode_id, pred, gt, ckpt_info)
 
 
 if __name__ == '__main__':
