@@ -1200,7 +1200,8 @@ class TerrainCollectionEnv(DirectRLEnv):
 
         from .camera_capture import CameraCapture
         self._cam_capture = CameraCapture()
-        self._cam_capture.setup()
+        # setup() is called lazily on first capture() so the render pipeline
+        # is guaranteed active — calling it here caused random black cameras.
 
         disk_cfg = sim_utils.DiskLightCfg(intensity=45_000.0, radius=1.5, color=(1.00, 0.95, 0.88))
         disk_cfg.func("/World/envs/env_.*/SpotA", disk_cfg, translation=(-7.0,  5.0, 12.0))
