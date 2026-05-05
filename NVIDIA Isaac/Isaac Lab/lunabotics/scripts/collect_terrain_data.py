@@ -64,14 +64,28 @@ def main():
     if start_ep > 0:
         print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
 
-    for ep in range(start_ep, start_ep + args_cli.episodes):
-        obs, _ = env.reset()
+    # Call setup() once after the first reset so the renderer is active.
+    # Never call it again — annotators are shared singletons and re-attaching
+    # them after destroy() corrupts their state.
+    obs, _ = env.reset()
+    env.unwrapped._cam_capture.setup()
 
-        # Warm up — let physics and cameras settle.
-        # 60 steps gives the GPU render pipeline enough frames to initialise
-        # all RGB annotators (they lag behind physics by several frames).
-        for _ in range(60):
+    for ep in range(start_ep, start_ep + args_cli.episodes):
+        if ep > start_ep:
+            obs, _ = env.reset()
+
+        # Adaptive warmup: step until all cameras have valid frames or 300 steps pass.
+        # 60 steps is usually enough; Orbbec RGB occasionally needs more.
+        for _ws in range(300):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
+            if _ws >= 59:
+                _wf = getattr(env.unwrapped, "_last_frames", {})
+                _wb = [s for s, a in _wf.items()
+                       if (a.mean() < 3.0 if a.ndim == 3 else not np.any(a > 0.0))]
+                if not _wb and _wf:
+                    if _ws > 59:
+                        print(f"[TerrainCollect] ep {ep}: all cameras ready after {_ws + 1} steps")
+                    break
 
         ep_id = f"ep_{ep:06d}"
 
@@ -82,6 +96,11 @@ def main():
 
         frames = getattr(env.unwrapped, "_last_frames", {})
 
+        black = [s for s, arr in frames.items()
+                 if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
+        if black:
+            print(f"[TerrainCollect] WARNING ep {ep}: black cameras {black} — saving anyway")
+
         save_kwargs = dict(
             height_gt   = gt["height_gt"],
             semantic_gt = gt["semantic_gt"],
@@ -91,7 +110,6 @@ def main():
             robot_pitch = np.array([gt.get("robot_pitch", 0.0)]),
             robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
-        # Camera frames — present only if cameras were successfully attached
         for serial, arr in frames.items():
             save_kwargs[f"cam_{serial}"] = arr
 

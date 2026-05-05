@@ -30,6 +30,17 @@ _CAM_MAP: dict[str, tuple] = {
     "Orbbec_Astra_Pro_D":   ("depth_cam_d",   "depth", 640, 480),
 }
 
+# Known-good prim paths (fallback if stage traversal misses a camera).
+_KNOWN_PATHS: dict[str, str] = {
+    "LEFT_FRONT":           "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_LEFT_FRONT",
+    "LEFT_SIDE":            "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_LEFT_SIDE",
+    "RIGHT_FRONT":          "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_RIGHT_FRONT",
+    "RIGHT_SIDE":           "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_RIGHT_SIDE",
+    "BACK_REAR":            "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_BACK_REAR",
+    "Orbbec_Astra_Pro_RGB": "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Orbbec_Astra_Pro_RGB",
+    "Orbbec_Astra_Pro_D":   "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Orbbec_Astra_Pro_D",
+}
+
 
 def _find_camera_prims() -> dict[str, str]:
     """Traverse the USD stage and return {key: prim_path} for known cameras."""
@@ -47,13 +58,21 @@ def _find_camera_prims() -> dict[str, str]:
     for prim in stage.Traverse():
         if not prim.IsA(UsdGeom.Camera):
             continue
-        path     = str(prim.GetPath())
+        path      = str(prim.GetPath())
         prim_name = prim.GetName()
         for key in _CAM_MAP:
             if key in prim_name or key in path:
                 if key not in found:
                     found[key] = path
                 break
+
+    # Fallback: use known static paths for any camera the traversal missed.
+    for key, path in _KNOWN_PATHS.items():
+        if key not in found:
+            prim = stage.GetPrimAtPath(path)
+            if prim.IsValid():
+                found[key] = path
+                print(f"[CameraCapture] fallback path used for {key}: {path}")
 
     return found
 
@@ -81,8 +100,7 @@ class CameraCapture:
         for k, p in cam_prims.items():
             print(f"  {k:30s} → {p}")
         if not cam_prims:
-            print("[CameraCapture] WARNING: no camera prims found in stage — "
-                  "run scripts/find_camera_prims.py in the Script Editor to inspect paths")
+            print("[CameraCapture] WARNING: no camera prims found in stage")
 
         try:
             import omni.usd
@@ -97,28 +115,30 @@ class CameraCapture:
                 print(f"[CameraCapture] SKIP {key}: not in stage")
                 continue
 
-            # Ensure clipping range is sane — black images are usually a near-clip problem
             if _stage is not None:
                 try:
-                    cam_prim = UsdGeom.Camera(_stage.GetPrimAtPath(prim))
+                    cam_prim  = UsdGeom.Camera(_stage.GetPrimAtPath(prim))
                     clip_attr = cam_prim.GetClippingRangeAttr()
                     existing  = clip_attr.Get() if clip_attr else None
                     near = float(existing[0]) if existing else None
                     far  = float(existing[1]) if existing else None
-                    if near is None or near > 0.05 or (far is not None and far < 20.0):
-                        clip_attr.Set(Gf.Vec2f(0.01, 150.0))
-                        print(f"[CameraCapture]   {key}: clipping fixed {existing} → (0.01, 150)")
+
+                    # Orbbec sensor housings sit several cm in front of the lens.
+                    # 0.01 m clips INTO the plastic and renders the black interior;
+                    # 0.10 m clears it.  Standard cameras are fine at 0.01 m.
+                    near_target = 0.10 if "Orbbec" in key else 0.01
+                    if near is None or near != near_target or (far is not None and far < 20.0):
+                        clip_attr.Set(Gf.Vec2f(near_target, 150.0))
+                        print(f"[CameraCapture]   {key}: clipping fixed {existing} → ({near_target}, 150)")
                     else:
                         print(f"[CameraCapture]   {key}: clipping OK near={near:.4f} far={far:.1f}")
 
-                    # Print world-space forward direction so bad orientations are obvious
-                    xf   = UsdGeom.Xformable(_stage.GetPrimAtPath(prim))
-                    mat  = xf.ComputeLocalToWorldTransform(0)
-                    # USD cameras look down -Z in local space
-                    fwd  = mat.TransformDir(Gf.Vec3d(0, 0, -1))
-                    fwd  = fwd.GetNormalized()
+                    xf  = UsdGeom.Xformable(_stage.GetPrimAtPath(prim))
+                    mat = xf.ComputeLocalToWorldTransform(0)
+                    fwd = mat.TransformDir(Gf.Vec3d(0, 0, -1))
+                    fwd = fwd.GetNormalized()
                     print(f"[CameraCapture]   {key}: world forward ({fwd[0]:+.2f}, {fwd[1]:+.2f}, {fwd[2]:+.2f})"
-                          f"  {'*** pointing UP — check USD orientation ***' if fwd[2] > 0.7 else ''}")
+                          f"  {'*** pointing UP ***' if fwd[2] > 0.7 else ''}")
                 except Exception as ce:
                     print(f"[CameraCapture]   {key}: could not inspect clipping — {ce}")
 
@@ -144,10 +164,6 @@ class CameraCapture:
     def capture(self) -> dict[str, np.ndarray]:
         """Read latest rendered frames.  Returns {serial: ndarray}, skips empty."""
         if not self._ready:
-            # Lazy init: set up on first capture so the render pipeline is
-            # guaranteed to be running, avoiding the race that blacks out cameras.
-            self.setup()
-        if not self._ready:
             return {}
 
         frames: dict[str, np.ndarray] = {}
@@ -160,7 +176,7 @@ class CameraCapture:
                 frames[cam["serial"]] = data.reshape(h, w).astype(np.float32)
             else:
                 rgba = data.reshape(h, w, 4)
-                frames[cam["serial"]] = rgba[:, :, :3].copy()  # drop alpha → RGB uint8
+                frames[cam["serial"]] = rgba[:, :, :3].copy()
 
         return frames
 
