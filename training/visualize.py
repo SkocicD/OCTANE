@@ -123,58 +123,81 @@ def _surface(height: np.ndarray, title: str, colorscale='RdYlGn'):
     )
 
 
-def _rock_scatter(objects_gt: np.ndarray, pred_map: np.ndarray | None = None):
+def _rock_circles(objects_gt: np.ndarray, height_map: np.ndarray):
+    """Circles in world space at the correct physical diameter for each rock."""
     import plotly.graph_objects as go
     rocks = objects_gt[objects_gt[:, 3] == 0] if len(objects_gt) else np.zeros((0, 4))
     if len(rocks) == 0:
-        return None
-    rx, ry, diam = rocks[:, 0], rocks[:, 1], rocks[:, 2]
-    cx = np.clip(((rx + HALF) / CELL).astype(int), 0, GRID - 1)
-    cy = np.clip(((ry + HALF) / CELL).astype(int), 0, GRID - 1)
-    z  = pred_map[cx, cy] + 0.1 if pred_map is not None else np.zeros_like(rx) + 0.1
-    return go.Scatter3d(
-        x=rx, y=ry, z=z,
-        mode='markers',
-        marker=dict(size=np.clip(diam * 8, 4, 20), color='#ef5350', opacity=0.85),
-        name='rocks (GT)',
-    )
+        return []
+    theta = np.linspace(0, 2 * np.pi, 37)  # 36 segments + close
+    traces = []
+    for i, obj in enumerate(rocks):
+        rx, ry, diam = float(obj[0]), float(obj[1]), float(obj[2])
+        r  = diam / 2
+        xs = rx + r * np.cos(theta)
+        ys = ry + r * np.sin(theta)
+        cxs = np.clip(((xs + HALF) / CELL).astype(int), 0, GRID - 1)
+        cys = np.clip(((ys + HALF) / CELL).astype(int), 0, GRID - 1)
+        zs  = height_map[cxs, cys] + 0.08
+        traces.append(go.Scatter3d(
+            x=xs, y=ys, z=zs,
+            mode='lines',
+            line=dict(color='#ef5350', width=3),
+            name='rocks (GT)',
+            showlegend=(i == 0),
+            legendgroup='rocks',
+        ))
+    return traces
 
 
-def _crater_scatter(objects_gt: np.ndarray, pred_map: np.ndarray | None = None):
+def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
+    """Circles in world space at the correct physical diameter for each crater."""
     import plotly.graph_objects as go
     craters = objects_gt[objects_gt[:, 3] == 1] if len(objects_gt) else np.zeros((0, 4))
     if len(craters) == 0:
-        return None
-    rx, ry, diam = craters[:, 0], craters[:, 1], craters[:, 2]
-    cx = np.clip(((rx + HALF) / CELL).astype(int), 0, GRID - 1)
-    cy = np.clip(((ry + HALF) / CELL).astype(int), 0, GRID - 1)
-    z  = pred_map[cx, cy] - 0.05 if pred_map is not None else np.zeros_like(rx)
-    return go.Scatter3d(
-        x=rx, y=ry, z=z,
-        mode='markers',
-        marker=dict(size=np.clip(diam * 8, 4, 20), color='#42a5f5',
-                    symbol='circle-open', opacity=0.9),
-        name='craters (GT)',
-    )
+        return []
+    theta = np.linspace(0, 2 * np.pi, 37)
+    traces = []
+    for i, obj in enumerate(craters):
+        rx, ry, diam = float(obj[0]), float(obj[1]), float(obj[2])
+        r  = diam / 2
+        xs = rx + r * np.cos(theta)
+        ys = ry + r * np.sin(theta)
+        cxs = np.clip(((xs + HALF) / CELL).astype(int), 0, GRID - 1)
+        cys = np.clip(((ys + HALF) / CELL).astype(int), 0, GRID - 1)
+        zs  = height_map[cxs, cys] - 0.05
+        traces.append(go.Scatter3d(
+            x=xs, y=ys, z=zs,
+            mode='lines',
+            line=dict(color='#42a5f5', width=3),
+            name='craters (GT)',
+            showlegend=(i == 0),
+            legendgroup='craters',
+        ))
+    return traces
 
 
 def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray):
+    """Straight wall segments at constant z (mean terrain height) so they appear as flat lines."""
     import plotly.graph_objects as go
     traces = []
-    for wall in walls_gt:
+    for i, wall in enumerate(walls_gt):
         rx1, ry1, rx2, ry2 = wall
-        n   = 10
+        n   = 20
         rxs = np.linspace(rx1, rx2, n)
         rys = np.linspace(ry1, ry2, n)
         cxs = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
         cys = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
-        zs  = height_map[cxs, cys] + 0.15
+        # Constant z = mean terrain under the wall + offset → line is straight
+        z_wall = float(height_map[cxs, cys].mean()) + 0.20
+        zs = np.full(n, z_wall)
         traces.append(go.Scatter3d(
             x=rxs, y=rys, z=zs,
             mode='lines',
             line=dict(color='#ff9800', width=6),
             name='walls (GT)',
-            showlegend=len(traces) == 0,
+            showlegend=(i == 0),
+            legendgroup='walls',
         ))
     return traces
 
@@ -219,10 +242,10 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
 
     def _add_scene(height, col):
         fig.add_trace(_surface(height, ''), row=1, col=col)
-        r = _rock_scatter(objects, height)
-        c = _crater_scatter(objects, height)
-        if r: fig.add_trace(r, row=1, col=col)
-        if c: fig.add_trace(c, row=1, col=col)
+        for t in _rock_circles(objects, height):
+            fig.add_trace(t, row=1, col=col)
+        for t in _crater_circles(objects, height):
+            fig.add_trace(t, row=1, col=col)
         for w in _wall_lines(walls, height):
             fig.add_trace(w, row=1, col=col)
 
@@ -243,8 +266,8 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
         yaxis_title='ry (lat m)',
         zaxis_title='height m',
         camera=camera,
-        aspectmode='manual',
-        aspectratio=dict(x=1, y=1, z=0.35),
+        # 'data' mode respects actual axis ranges → x and y both span 10 m so they stay square
+        aspectmode='data',
         bgcolor='rgba(0,0,0,0)',
     )
 
@@ -254,7 +277,7 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
         font=dict(family='Roboto, sans-serif', color='#c4c6d0', size=12),
         legend=dict(bgcolor='rgba(26,29,36,0.8)', bordercolor='#44474f', borderwidth=1),
         margin=dict(l=10, r=10, t=40, b=10),
-        height=820,
+        height=920,
         template='plotly_dark',
         scene=scene_cfg,
     )
@@ -262,6 +285,12 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
         layout_kwargs['scene2'] = scene_cfg
 
     fig.update_layout(**layout_kwargs)
+
+    # Force square aspect on 2D confidence heatmaps
+    fig.update_xaxes(constrain='domain', row=2)
+    fig.update_yaxes(scaleanchor='x',  scaleratio=1, constrain='domain', row=2, col=1)
+    if has_pred:
+        fig.update_yaxes(scaleanchor='x2', scaleratio=1, constrain='domain', row=2, col=2)
 
     # Style subplot title annotations
     for ann in fig.layout.annotations:
