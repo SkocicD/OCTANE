@@ -4,13 +4,26 @@ Can also be run standalone: python training/plot_viewer.py"""
 import sys
 import os
 import csv
+import json
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 
+def _read_status(status_path: str) -> str:
+    try:
+        with open(status_path) as f:
+            s = json.load(f)
+        if s.get('status') == 'done':
+            return f"Training complete — {s['total']} epochs"
+        return f"Epoch {s['epoch']} / {s['total']} in progress..."
+    except Exception:
+        return "Waiting for training to start..."
+
+
 def main(log_path: str):
+    status_path = os.path.join(os.path.dirname(log_path), 'train_status.json')
     fig, ax = plt.subplots(figsize=(11, 6))
     ax.set_xlabel('Epoch', fontsize=12)
     ax.set_ylabel('Loss', fontsize=12)
@@ -38,6 +51,9 @@ def main(log_path: str):
                     train_losses.append(float(row['train']))
                     val_losses.append(float(row['val']))
 
+            status_text.set_text(_read_status(status_path))
+            status_text.set_color('black')
+
             if not epochs:
                 return train_line, val_line, best_marker, status_text
 
@@ -52,12 +68,10 @@ def main(log_path: str):
             ax.autoscale_view()
 
             status_text.set_text(
-                f"Epoch {epochs[-1]}  |  "
-                f"train {train_losses[-1]:.4f}  |  "
-                f"val {val_losses[-1]:.4f}  |  "
+                f"{_read_status(status_path)}  |  "
+                f"last: train {train_losses[-1]:.4f}  val {val_losses[-1]:.4f}  |  "
                 f"best val {min(val_losses):.4f} @ epoch {epochs[best_idx]}"
             )
-            status_text.set_color('black')
 
         except Exception:
             pass

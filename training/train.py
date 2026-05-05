@@ -161,9 +161,14 @@ def main():
     parser.add_argument('--config',   default='training/config.yaml')
     parser.add_argument('--view',     action='store_true',
                         help='Open live loss plot window during training')
-    parser.add_argument('--episodes', type=int, default=0,
-                        help='Max episodes to use (default: 0 = all). Useful for quick test runs.')
+    parser.add_argument('--episodes', type=int, default=None,
+                        help='Max episodes to use (default: prompt). Pass 0 for all.')
     args = parser.parse_args()
+
+    # Interactive prompt if --episodes not passed on command line
+    if args.episodes is None:
+        raw = input("Episodes to use (press Enter for all): ").strip()
+        args.episodes = int(raw) if raw else 0
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
@@ -175,11 +180,13 @@ def main():
     data_root   = cfg['data']['root']
     splits_file = cfg['data']['splits_file']
     stats_file  = cfg['data']['depth_stats_file']
-    log_path    = os.path.join(os.path.dirname(splits_file) or 'training', 'loss_log.csv')
+    log_path    = os.path.abspath('training/loss_log.csv')
+    status_path = os.path.abspath('training/train_status.json')
 
     # Clear previous log so the plot starts fresh
-    if os.path.exists(log_path):
-        os.remove(log_path)
+    for p in (log_path, status_path):
+        if os.path.exists(p):
+            os.remove(p)
 
     train_ids, val_ids = create_splits(
         data_root, splits_file,
@@ -253,6 +260,8 @@ def main():
     epochs_no_improve = 0
 
     for epoch in range(1, max_epochs + 1):
+        with open(status_path, 'w') as f:
+            json.dump({'epoch': epoch, 'total': max_epochs, 'status': 'training'}, f)
         train_loss = train_epoch(model, train_loader, optimizer, device, grad_clip)
         val_loss   = val_epoch(model, val_loader, device)
         scheduler.step()
@@ -278,6 +287,9 @@ def main():
         if epoch % save_every == 0:
             torch.save({'epoch': epoch, 'model': model.state_dict()},
                        os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+
+    with open(status_path, 'w') as f:
+        json.dump({'epoch': max_epochs, 'total': max_epochs, 'status': 'done'}, f)
 
     if viewer_proc is not None:
         print("[train] Training done — close the plot window to exit.")
