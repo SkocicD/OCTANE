@@ -258,15 +258,30 @@ def main():
     writer   = SummaryWriter(log_dir=runs_dir)
 
     if args.view:
-        import time, webbrowser
-        subprocess.Popen(
-            [sys.executable, '-m', 'tensorboard', '--logdir', runs_dir, '--port', '6006'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        print("[train] Starting TensorBoard...", end='', flush=True)
-        time.sleep(4)
-        print(" opening http://localhost:6006")
-        webbrowser.open('http://localhost:6006')
+        import time, webbrowser, sysconfig
+        # Find tensorboard executable — may be in user scripts, not system scripts
+        tb_exe = None
+        for scripts_dir in [
+            sysconfig.get_path('scripts'),
+            os.path.join(os.path.expandvars('%APPDATA%'), 'Python',
+                         f'Python{sys.version_info.major}{sys.version_info.minor}', 'Scripts'),
+        ]:
+            candidate = os.path.join(scripts_dir, 'tensorboard.exe')
+            if os.path.exists(candidate):
+                tb_exe = candidate
+                break
+
+        if tb_exe is None:
+            print("[train] TensorBoard not found — run: pip install tensorboard")
+        else:
+            subprocess.Popen(
+                [tb_exe, '--logdir', runs_dir, '--port', '6006'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            print("[train] Starting TensorBoard...", end='', flush=True)
+            time.sleep(4)
+            print(" opening http://localhost:6006")
+            webbrowser.open('http://localhost:6006')
 
     best_val          = float('inf')
     epochs_no_improve = 0
