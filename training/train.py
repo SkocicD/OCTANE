@@ -52,6 +52,51 @@ def compute_loss(preds: dict, targets: dict) -> torch.Tensor:
     return height_loss + rocks_loss + craters_loss + walls_loss
 
 
+def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> int:
+    """Find largest batch size that leaves gpu_margin fraction of VRAM free."""
+    if not torch.cuda.is_available():
+        return start_bs
+
+    total_mem = torch.cuda.get_device_properties(device).total_memory
+    target_max = total_mem * (1.0 - gpu_margin)
+    bs = start_bs
+
+    print(f"[train] Auto batch size — GPU: {total_mem/1e9:.1f}GB total, target ≤{(1-gpu_margin)*100:.0f}% usage")
+
+    while bs >= 1:
+        try:
+            torch.cuda.empty_cache()
+            model.zero_grad()
+            dummy_img = torch.randn(bs, 12, 3, 224, 224, device=device)
+            dummy_rot = torch.randn(bs, 6, device=device)
+            dummy_gt  = {
+                'height':  torch.randn(bs, 200, 200, device=device),
+                'rocks':   torch.rand(bs, 200, 200, device=device),
+                'craters': torch.rand(bs, 200, 200, device=device),
+                'walls':   (torch.rand(bs, 200, 200, device=device) > 0.8).float(),
+            }
+            preds = model(dummy_img, dummy_rot)
+            loss  = compute_loss(preds, dummy_gt)
+            loss.backward()
+
+            used = torch.cuda.memory_allocated(device)
+            pct  = used / total_mem * 100
+            if used <= target_max:
+                print(f"[train] Batch size {bs} — {used/1e9:.1f}GB / {total_mem/1e9:.1f}GB ({pct:.0f}%)")
+                model.zero_grad()
+                torch.cuda.empty_cache()
+                return bs
+
+            bs //= 2
+
+        except torch.cuda.OutOfMemoryError:
+            bs //= 2
+            torch.cuda.empty_cache()
+
+    print("[train] Warning: could not fit even batch size 1 — using 1 anyway")
+    return 1
+
+
 def _to_device(obj, device):
     if isinstance(obj, torch.Tensor):
         return obj.to(device)
@@ -92,17 +137,21 @@ def val_epoch(model, loader, device):
 
 
 def _init_plot():
+    import matplotlib
+    matplotlib.use('TkAgg')
     import matplotlib.pyplot as plt
     plt.ion()
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(10, 5))
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Loss')
     ax.set_title('Terrain Model Training')
-    train_line, = ax.plot([], [], label='train', color='steelblue')
-    val_line,   = ax.plot([], [], label='val',   color='darkorange')
-    ax.legend()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    train_line, = ax.plot([0], [0], label='train', color='steelblue', linewidth=2)
+    val_line,   = ax.plot([0], [0], label='val',   color='darkorange', linewidth=2)
+    ax.legend(fontsize=12)
     fig.tight_layout()
-    plt.show(block=False)
+    plt.pause(0.1)
     return fig, ax, train_line, val_line
 
 
@@ -111,10 +160,9 @@ def _update_plot(fig, ax, train_line, val_line, train_hist, val_hist):
     epochs = list(range(1, len(train_hist) + 1))
     train_line.set_data(epochs, train_hist)
     val_line.set_data(epochs, val_hist)
-    ax.relim()
-    ax.autoscale_view()
-    fig.canvas.draw()
-    fig.canvas.flush_events()
+    ax.set_xlim(1, max(2, len(train_hist)))
+    ax.set_ylim(0, max(max(train_hist), max(val_hist)) * 1.1)
+    plt.pause(0.05)
 
 
 def main():
@@ -158,18 +206,24 @@ def main():
     train_ds = TerrainDataset(data_root, train_ids, depth_stats, augment=True)
     val_ds   = TerrainDataset(data_root, val_ids,   depth_stats, augment=False)
 
-    bs = cfg['training']['batch_size']
+    warmup_epochs = cfg['training'].get('warmup_epochs', 5)
+    grad_clip     = cfg['training'].get('grad_clip', 1.0)
+    patience      = cfg['training'].get('early_stop_patience', 15)
+    max_epochs    = cfg['training']['epochs']
+    gpu_margin    = cfg['training'].get('gpu_memory_margin', 0.20)
+
+    model = TerrainModel().to(device)
+
+    # Auto-detect batch size to stay within GPU memory budget
+    bs = find_batch_size(model, device,
+                         start_bs=cfg['training']['batch_size'],
+                         gpu_margin=gpu_margin)
+
     pin = torch.cuda.is_available()
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True,
                               num_workers=4, pin_memory=pin)
     val_loader   = DataLoader(val_ds,   batch_size=bs, shuffle=False,
                               num_workers=4, pin_memory=pin)
-
-    model = TerrainModel().to(device)
-    warmup_epochs   = cfg['training'].get('warmup_epochs', 5)
-    grad_clip       = cfg['training'].get('grad_clip', 1.0)
-    patience        = cfg['training'].get('early_stop_patience', 15)
-    max_epochs      = cfg['training']['epochs']
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -177,7 +231,6 @@ def main():
         weight_decay=cfg['training']['weight_decay'],
     )
 
-    # Linear warmup for warmup_epochs, then cosine anneal for the remainder
     warmup = torch.optim.lr_scheduler.LinearLR(
         optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_epochs
     )

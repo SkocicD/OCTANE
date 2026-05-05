@@ -13,6 +13,7 @@ training:
   warmup_epochs: 5        # linear LR ramp-up from 0 → learning_rate
   grad_clip: 1.0          # max gradient norm; 0 to disable
   early_stop_patience: 15 # stop if val loss hasn't improved for N epochs
+  gpu_memory_margin: 0.20 # keep this fraction of VRAM free (auto-tunes batch size)
 
 checkpoints:
   dir: "training/checkpoints"
