@@ -147,7 +147,8 @@ class CameraCapture:
             # Lazy init: set up on first capture so the render pipeline is
             # guaranteed to be running, avoiding the race that blacks out cameras.
             self.setup()
-        if not self._ready:
+            # Return empty this frame — give the pipeline one step to render
+            # into the newly attached products before reading any data.
             return {}
 
         frames: dict[str, np.ndarray] = {}
