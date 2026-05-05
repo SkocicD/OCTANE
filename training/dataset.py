@@ -1,6 +1,7 @@
 import os
 import json
 import math
+import zipfile
 import numpy as np
 import cv2
 import torch
@@ -119,11 +120,28 @@ _DEPTH_SLOTS = set(range(6, 12))
 _FLIP_SWAP_PAIRS = [(0, 2), (1, 3), (6, 8), (7, 9)]
 
 
+def _valid_episodes(data_root: str, episode_ids: list) -> list:
+    """Return episode_ids with corrupted or missing NPZ files removed."""
+    valid, bad = [], []
+    for ep_id in episode_ids:
+        path = os.path.join(data_root, 'gt', f'{ep_id}_gt.npz')
+        try:
+            with zipfile.ZipFile(path, 'r'):
+                pass
+            valid.append(ep_id)
+        except Exception:
+            bad.append(ep_id)
+    if bad:
+        print(f"[dataset] WARNING: skipping {len(bad)} corrupted/missing episode(s): "
+              f"{bad[:5]}{'...' if len(bad) > 5 else ''}")
+    return valid
+
+
 class TerrainDataset(Dataset):
     def __init__(self, data_root: str, episode_ids: list,
                  depth_stats: dict, augment: bool = False):
         self.root        = data_root
-        self.episode_ids = episode_ids
+        self.episode_ids = _valid_episodes(data_root, episode_ids)
         self.augment     = augment
 
         self._rgb_transform = transforms.Compose([
