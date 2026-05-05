@@ -2,7 +2,8 @@ import os
 import json
 import random
 import argparse
-import multiprocessing as mp
+import subprocess
+import csv
 import yaml
 import numpy as np
 import torch
@@ -37,7 +38,7 @@ def create_splits(data_root: str, splits_file: str,
 
     if max_episodes > 0:
         ep_ids = ep_ids[:max_episodes]
-        print(f"[train] Using {len(ep_ids)} of available episodes (--episodes {max_episodes})")
+        print(f"[train] Using {len(ep_ids)} episodes (--episodes {max_episodes})")
 
     n_val = max(1, int(len(ep_ids) * val_ratio))
     val_ids   = ep_ids[:n_val]
@@ -146,54 +147,20 @@ def val_epoch(model, loader, device):
     return total / len(loader)
 
 
-def _plot_process(queue: mp.Queue):
-    """Runs in a separate process — stays responsive while training blocks the main process."""
-    import matplotlib
-    matplotlib.use('TkAgg')
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Loss')
-    ax.set_title('Terrain Model Training')
-    train_line, = ax.plot([], [], label='train', color='steelblue', linewidth=2)
-    val_line,   = ax.plot([], [], label='val',   color='darkorange', linewidth=2)
-    ax.legend(fontsize=12)
-    fig.tight_layout()
-    plt.show(block=False)
-    plt.pause(0.1)
-
-    train_hist, val_hist = [], []
-
-    while True:
-        # Drain all pending messages before redrawing
-        updated = False
-        while not queue.empty():
-            msg = queue.get_nowait()
-            if msg == 'DONE':
-                plt.ioff()
-                plt.show()
-                return
-            train_hist.append(msg[0])
-            val_hist.append(msg[1])
-            updated = True
-
-        if updated and train_hist:
-            epochs = list(range(1, len(train_hist) + 1))
-            train_line.set_data(epochs, train_hist)
-            val_line.set_data(epochs, val_hist)
-            ax.relim()
-            ax.autoscale_view()
-            fig.canvas.draw()
-
-        plt.pause(0.2)
+def _append_loss_log(log_path: str, epoch: int, train_loss: float, val_loss: float):
+    write_header = not os.path.exists(log_path)
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['epoch', 'train', 'val'])
+        if write_header:
+            writer.writeheader()
+        writer.writerow({'epoch': epoch, 'train': train_loss, 'val': val_loss})
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config',   default='training/config.yaml')
     parser.add_argument('--view',     action='store_true',
-                        help='Show live loss plot during training')
+                        help='Open live loss plot window during training')
     parser.add_argument('--episodes', type=int, default=0,
                         help='Max episodes to use (default: 0 = all). Useful for quick test runs.')
     args = parser.parse_args()
@@ -208,6 +175,11 @@ def main():
     data_root   = cfg['data']['root']
     splits_file = cfg['data']['splits_file']
     stats_file  = cfg['data']['depth_stats_file']
+    log_path    = os.path.join(os.path.dirname(splits_file) or 'training', 'loss_log.csv')
+
+    # Clear previous log so the plot starts fresh
+    if os.path.exists(log_path):
+        os.remove(log_path)
 
     train_ids, val_ids = create_splits(
         data_root, splits_file,
@@ -270,13 +242,12 @@ def main():
     save_every = cfg['checkpoints']['save_every']
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    # Start plot in its own process so it stays responsive during GPU computation
-    plot_queue = None
-    plot_proc  = None
+    # Launch plot viewer as a completely separate process (no torch, stays responsive)
+    viewer_proc = None
     if args.view:
-        plot_queue = mp.Queue()
-        plot_proc  = mp.Process(target=_plot_process, args=(plot_queue,), daemon=True)
-        plot_proc.start()
+        viewer_script = os.path.join(os.path.dirname(__file__), 'plot_viewer.py')
+        viewer_proc = subprocess.Popen([sys.executable, viewer_script, log_path])
+        print(f"[train] Plot viewer launched (reading {log_path})")
 
     best_val          = float('inf')
     epochs_no_improve = 0
@@ -289,8 +260,7 @@ def main():
         lr_now = optimizer.param_groups[0]['lr']
         print(f"[epoch {epoch:03d}] train={train_loss:.4f}  val={val_loss:.4f}  lr={lr_now:.2e}")
 
-        if plot_queue is not None:
-            plot_queue.put((train_loss, val_loss))
+        _append_loss_log(log_path, epoch, train_loss, val_loss)
 
         if val_loss < best_val:
             best_val = val_loss
@@ -309,11 +279,10 @@ def main():
             torch.save({'epoch': epoch, 'model': model.state_dict()},
                        os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
 
-    if plot_queue is not None:
-        plot_queue.put('DONE')
-        plot_proc.join()
+    if viewer_proc is not None:
+        print("[train] Training done — close the plot window to exit.")
+        viewer_proc.wait()
 
 
 if __name__ == '__main__':
-    mp.freeze_support()
     main()
