@@ -64,17 +64,31 @@ def main():
     if start_ep > 0:
         print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
 
-    # Setup cameras once after env is created — renderer is active post-reset
-    # but we attach before any steps so render products initialise cleanly.
+    # Setup cameras after first reset (renderer is active).
+    # Retry up to 3 times if any camera is still black after warm-up —
+    # some render products need a fresh attach to initialise reliably.
     obs, _ = env.reset()
-    env.unwrapped._cam_capture.setup()
+    cam = env.unwrapped._cam_capture
+    for attempt in range(3):
+        cam.destroy()
+        cam.setup()
+        for _ in range(60):
+            obs, _, terminated, truncated, _ = env.step(zero_actions)
+        frames = cam.capture()
+        black = [s for s, arr in frames.items()
+                 if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
+        if not black:
+            print(f"[TerrainCollect] All cameras ready (attempt {attempt + 1})")
+            break
+        print(f"[TerrainCollect] Black cameras after attempt {attempt + 1}: {black} — retrying setup...")
+    else:
+        print(f"[TerrainCollect] WARNING: cameras still black after 3 attempts: {black}")
 
     for ep in range(start_ep, start_ep + args_cli.episodes):
         if ep > start_ep:
             obs, _ = env.reset()
 
-        # Warm up — 60 steps lets all RGB annotators receive render frames
-        # before we capture.
+        # Warm up — let physics and cameras settle.
         for _ in range(60):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
 
