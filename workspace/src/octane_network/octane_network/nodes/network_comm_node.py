@@ -11,6 +11,7 @@ Implementation: workspace/src/octane_network/octane_network/protocol.py
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from sensor_msgs.msg import Imu
 from std_msgs.msg import String, Empty, UInt8
 import socket
 import threading
@@ -58,6 +59,10 @@ class NetworkCommNode(Node):
         self.supervisor_fault_sub = self.create_subscription(
             String, '/supervisor/fault_signal', self.fault_callback, qos
         )
+        self.create_subscription(
+            Imu, 'sensors/imu/accel', self._imu_cb,
+            QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT),
+        )
 
         # ROS2 publishers
         self.mode_command_pub    = self.create_publisher(String, '/supervisor/mode_command',  qos)
@@ -70,6 +75,7 @@ class NetworkCommNode(Node):
         # State
         self.current_state = 'STANDBY'
         self.current_fault = None
+        self._latest_accel: tuple | None = None
         self.client_socket = None
         self.connected = False
         self.running = False
@@ -313,14 +319,21 @@ class NetworkCommNode(Node):
         self._client_ip_pub.publish(ip_msg)
         self.get_logger().warn('NetworkGuard: heartbeat lost — video feed killed')
 
+    def _imu_cb(self, msg: Imu):
+        a = msg.linear_acceleration
+        self._latest_accel = (a.x, a.y, a.z)
+
     def send_telemetry(self):
         """Send periodic telemetry to GUI using binary protocol."""
         if not self.connected or not self.client_socket:
             return
 
         try:
-            # Encode telemetry as binary frame
-            telemetry_frame = encode_telemetry(self.current_state, fault=self.current_fault)
+            telemetry_frame = encode_telemetry(
+                self.current_state,
+                fault=self.current_fault,
+                accel=self._latest_accel,
+            )
             self.client_socket.sendall(telemetry_frame)
 
         except Exception as e:

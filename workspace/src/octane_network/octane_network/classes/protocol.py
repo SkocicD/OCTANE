@@ -91,35 +91,33 @@ def crc8(data: bytes) -> int:
 
 
 def encode_telemetry(state: str, fault: Optional[str] = None,
-                     battery: Optional[float] = None) -> bytes:
-    """Encode telemetry: T + state_char + optional fault/battery.
+                     battery: Optional[float] = None,
+                     accel: Optional[tuple] = None) -> bytes:
+    """Encode telemetry: T + state_char + optional fields.
 
-    Example: T1 = Manual, T2 = Autonomous
-    With fault: T1|battery_fault| (fault char appended)
+    Wire format: [O][T][n][state][optional fields][crc]
 
-    Wire format: [O][T][n][state][optional data][crc]
+    Optional field markers:
+      B + float32LE  — battery voltage (volts)
+      F + char       — active fault code
+      I + 3×float32LE — accelerometer x, y, z (m/s²)
     """
-    # Map state string to single char
     state_map = {'STANDBY': b'0', 'MANUAL': b'1',
                  'AUTONOMOUS': b'2', 'FAULT': b'3'}
     state_byte = state_map.get(state, b'0')
 
-    # Build payload
     payload = state_byte
     if battery is not None:
-        # Pack battery as float (4 bytes) with marker
         payload += b'B' + struct.pack('<f', battery)
     if fault:
-        # Truncate fault name to single char for now (can expand later)
         payload += b'F' + fault[:1].encode()
+    if accel is not None:
+        ax, ay, az = accel
+        payload += b'I' + struct.pack('<fff', ax, ay, az)
 
-    # Header + payload
     header = struct.pack('!BBB', MAGIC, TYPE_TELEMETRY, len(payload))
     frame = header + payload
-
-    # Add CRC
-    crc = crc8(frame)
-    return frame + bytes([crc])
+    return frame + bytes([crc8(frame)])
 
 
 def encode_command(mode: str, estop: bool = False) -> bytes:
@@ -262,10 +260,14 @@ def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
                 battery = struct.unpack('<f', payload[idx+1:idx+5])[0]
                 result['battery'] = battery
                 idx += 5
-            elif marker == b'F' and idx + 1 < len(payload):
+            elif marker == b'F' and idx + 2 <= len(payload):
                 fault_char = payload[idx+1:idx+2].decode()
                 result['fault'] = fault_char
                 idx += 2
+            elif marker == b'I' and idx + 13 <= len(payload):
+                ax, ay, az = struct.unpack('<fff', payload[idx+1:idx+13])
+                result['accel'] = (ax, ay, az)
+                idx += 13
             else:
                 idx += 1
 
