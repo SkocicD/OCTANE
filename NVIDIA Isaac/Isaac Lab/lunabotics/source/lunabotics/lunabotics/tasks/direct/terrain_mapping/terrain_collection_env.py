@@ -187,7 +187,7 @@ _POLYHAVEN_SLUGS = [
     "moon_dusted_01", "moon_dusted_02", "moon_dusted_03",
     "moon_meteor_01", "moon_meteor_02",
     "moon_track_01", "moon_track_02",
-    # Rocky terrain
+    # Rocky terrain (will get dust overlay)
     "rock_ground", "rock_ground_02",
     "rocks_ground_01", "rocks_ground_02", "rocks_ground_04",
     "rocky_terrain", "rocky_terrain_02",
@@ -198,6 +198,16 @@ _POLYHAVEN_SLUGS = [
     "dry_ground_01", "dry_ground_rocks",
     "coast_sand_01", "coast_sand_02",
 ]
+
+# Slugs with large colourful rocks (Grand Canyon / Iceland scale) get a pale
+# lunar-regolith dust layer blended in during variant generation.
+_DUST_OVERLAY_SLUGS = frozenset({
+    "rock_ground", "rock_ground_02",
+    "rocks_ground_01", "rocks_ground_02", "rocks_ground_04",
+    "rocky_terrain", "rocky_terrain_02",
+    "aerial_rocks_01", "aerial_rocks_02",
+    "dry_ground_rocks",
+})
 
 
 def _try_download_polyhaven(slug: str, dest_dir: str) -> bool:
@@ -268,8 +278,14 @@ def _make_texture_variants(
     variants_dir: str,
     n: int,
     rng: np.random.Generator,
+    dust_strength: float = 0.0,
 ) -> list[str]:
-    """Produce n brightness / contrast / hue-shifted variants of a PBR texture set."""
+    """Produce n brightness / contrast / hue-shifted variants of a PBR texture set.
+
+    dust_strength > 0 blends a pale lunar-regolith dust layer over the albedo,
+    used for large rocky textures (Grand Canyon / Iceland scale) to make them
+    look appropriately lunar.
+    """
     import os
     import shutil
     from PIL import Image, ImageEnhance
@@ -309,6 +325,28 @@ def _make_texture_variants(
                 )
             except ImportError:
                 pass
+
+        if dust_strength > 0.0:
+            arr = np.array(img).astype(np.float32)
+            H, W = arr.shape[:2]
+            # Pale warm-grey lunar regolith colour, slightly randomised per variant
+            dust_rgb = np.array([
+                float(rng.uniform(185, 205)),
+                float(rng.uniform(178, 196)),
+                float(rng.uniform(162, 180)),
+            ], dtype=np.float32)
+            # Low-frequency noise so dust settles unevenly (thicker in hollows)
+            noise_small = rng.standard_normal((max(H // 16, 4), max(W // 16, 4))).astype(np.float32)
+            noise_img = Image.fromarray(
+                np.clip((noise_small - noise_small.min()) /
+                        max(noise_small.max() - noise_small.min(), 1e-6) * 255, 0, 255
+                        ).astype(np.uint8)
+            ).resize((W, H), Image.BILINEAR)
+            noise_f = np.array(noise_img, dtype=np.float32) / 255.0  # [0,1]
+            # Alpha: base strength + noise variation, so some spots are more dusty
+            alpha = np.clip(dust_strength * 0.5 + noise_f * dust_strength * 0.6, 0.0, dust_strength)[..., np.newaxis]
+            arr = arr * (1.0 - alpha) + dust_rgb * alpha
+            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
         img.save(os.path.join(vdir, "albedo.png"))
 
@@ -973,7 +1011,8 @@ class TerrainCollectionEnv(DirectRLEnv):
                     continue
                 print(f"[TerrainCollectionEnv] Downloaded: {slug}")
 
-            vdirs = _make_texture_variants(slug_dir, variants_dir, n=3, rng=self._rng)
+            dust = float(self._rng.uniform(0.35, 0.55)) if slug in _DUST_OVERLAY_SLUGS else 0.0
+            vdirs = _make_texture_variants(slug_dir, variants_dir, n=3, rng=self._rng, dust_strength=dust)
             self._ground_tex_sets.extend(vdirs)
 
         # ── Procedural biomes (always available) ─────────────────────────────
