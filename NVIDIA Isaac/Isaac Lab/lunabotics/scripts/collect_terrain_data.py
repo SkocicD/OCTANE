@@ -37,9 +37,10 @@ def _save_images(frames: dict, img_root: pathlib.Path, ep_id: str) -> None:
         folder = img_root / serial
         folder.mkdir(parents=True, exist_ok=True)
         if arr.ndim == 2:
-            # Depth — save as raw float32 .npy (metres).  Faster than PNG compression;
-            # the ROS image_replay_node converts to 16UC1 mm on load.
-            np.save(folder / f"{ep_id}.npy", np.where(np.isfinite(arr), arr, 0.0).astype(np.float32))
+            # Depth — encode as 16-bit PNG (millimetres, uint16, max 65.5 m).
+            depth_m  = np.where(np.isfinite(arr), arr, 0.0)
+            depth_mm = np.clip(depth_m * 1000.0, 0, 65535).astype(np.int32)
+            Image.fromarray(depth_mm, mode='I').save(folder / f"{ep_id}.png")
         else:
             Image.fromarray(arr, mode="RGB").save(folder / f"{ep_id}.jpg", quality=85)
 
