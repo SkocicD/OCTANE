@@ -93,7 +93,10 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
                 return bs
             bs //= 2
 
-        except torch.cuda.OutOfMemoryError:
+        except Exception as e:
+            _oom_strings = ('out of memory', 'cudaErrorMemoryAllocation', 'CUDA error: out of memory')
+            if not any(s in str(e) for s in _oom_strings):
+                raise
             bs //= 2
             torch.cuda.empty_cache()
 
