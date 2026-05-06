@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:isaac-sim.github.io)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.\\(py|usd\\)$\")",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(find \"C:/Users/adam.carbone/source/repos/ros_intro/NVIDIA Isaac/Isaac Lab/lunabotics/source\" -name \"*.pyc\" -delete)",
+      "Bash(find \"C:/Users/adam.carbone/source/repos/ros_intro/NVIDIA Isaac/Isaac Lab/lunabotics/source\" -name \"__pycache__\" -type d -exec rm -rf {} +)"
+    ]
+  }
+}

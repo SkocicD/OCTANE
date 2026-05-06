@@ -1,0 +1,19 @@
+[package]
+version = "0.1.0"
+category = "isaaclab"
+readme = "README.md"
+title = "CSU Lunabotics Isaac Lab"
+author = "CSU Lunabotics"
+maintainer = "CSU Lunabotics"
+description = "Isaac Lab training environments for the CSU Lunabotics 6-wheel skid-steer rover"
+repository = "https://github.com/your-org/ros_intro"
+keywords = ["lunabotics", "skid-steer", "rover", "isaaclab", "rl"]
+
+[dependencies]
+"isaaclab" = {}
+"isaaclab_assets" = {}
+"isaaclab_rl" = {}
+"isaaclab_tasks" = {}
+
+[[python.module]]
+name = "lunabotics"
