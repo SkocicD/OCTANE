@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>octane_sensors</name>
+  <version>0.0.0</version>
+  <description>Hardware sensor drivers for the OCTANE rover. Includes ADXL345 accelerometer with I2C auto-detection.</description>
+  <maintainer email="adam.r.carbone@live.com">Adam Carbone</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+
+  <test_depend>pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
