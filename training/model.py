@@ -10,13 +10,12 @@ from training.cameras import POSE_TENSOR
 
 
 class PoseEmbedding(nn.Module):
-    """Projects fixed 9-dim pose vectors to embed_dim feature space."""
     def __init__(self, pose_dim: int = 9, embed_dim: int = 32):
         super().__init__()
         self.proj = nn.Linear(pose_dim, embed_dim)
 
     def forward(self, pose: torch.Tensor) -> torch.Tensor:
-        return self.proj(pose)  # (12, embed_dim)
+        return self.proj(pose)
 
 
 class UpBlock(nn.Module):
@@ -38,6 +37,14 @@ class UpBlock(nn.Module):
         return self.conv(x)
 
 
+def _proj(in_ch: int, out_ch: int) -> nn.Sequential:
+    return nn.Sequential(
+        nn.Conv2d(in_ch, out_ch, 1, bias=False),
+        nn.BatchNorm2d(out_ch),
+        nn.ReLU(inplace=True),
+    )
+
+
 class TerrainModel(nn.Module):
     """
     Inputs:
@@ -45,98 +52,120 @@ class TerrainModel(nn.Module):
         rotation: (B, 6)  — [sin_r, cos_r, sin_p, cos_p, sin_y, cos_y]
     Outputs:
         dict with keys 'height', 'rocks', 'craters', 'walls' — each (B, 200, 200)
+
+    EfficientNet-B0 is split at three spatial resolutions so the decoder can
+    pull in spatial detail via skip connections instead of reconstructing
+    everything from the 7×7 bottleneck:
+        enc_s3  features[:4]  → 28×28, 40ch
+        enc_s2  features[4:6] → 14×14, 112ch
+        enc_s1  features[6:]  → 7×7,  1280ch
     """
 
-    FEAT_DIM   = 1280   # EfficientNet-B0 output channels for 224x224 input
-    PROJ_DIM   = 128    # per-camera projection dim
+    _S3_CH = 40
+    _S2_CH = 112
+    _S1_CH = 1280
+
+    PROJ_S3  = 64
+    PROJ_S2  = 128
+    PROJ_S1  = 256
     POSE_DIM   = 9
     POSE_EMBED = 32
-    FUSION_DIM = 512
     ROT_EMBED  = 32
 
     def __init__(self):
         super().__init__()
 
-        # Register pose tensor as non-trainable buffer (moves with .to(device))
-        self.register_buffer('pose_tensor', torch.from_numpy(POSE_TENSOR))  # (12, 9)
+        self.register_buffer('pose_tensor', torch.from_numpy(POSE_TENSOR))
 
-        # Shared image encoder — EfficientNet-B0 features
-        # For 224x224 input: outputs (B, 1280, 7, 7)
-        backbone = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
-        self.encoder = backbone.features  # (B, 1280, 7, 7)
+        f = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1).features
+        self.enc_s3 = f[:4]   # (B*12, 40,   28, 28)
+        self.enc_s2 = f[4:6]  # (B*12, 112,  14, 14)
+        self.enc_s1 = f[6:]   # (B*12, 1280,  7,  7)
 
-        # Per-camera feature projection: 1280 → PROJ_DIM
-        self.feat_proj = nn.Sequential(
-            nn.Conv2d(self.FEAT_DIM, self.PROJ_DIM, 1, bias=False),
-            nn.BatchNorm2d(self.PROJ_DIM),
-            nn.ReLU(inplace=True),
-        )
+        self.proj_s3 = _proj(self._S3_CH, self.PROJ_S3)
+        self.proj_s2 = _proj(self._S2_CH, self.PROJ_S2)
+        self.proj_s1 = _proj(self._S1_CH, self.PROJ_S1)
 
-        # Camera pose embedding: 9-dim fixed → POSE_EMBED-dim learned
-        self.pose_emb = PoseEmbedding(self.POSE_DIM, self.POSE_EMBED)
-        # Project pose embedding to the same feature space as feat_proj output
-        self.pose_to_feat = nn.Conv2d(self.POSE_EMBED, self.PROJ_DIM, 1)
+        self.pose_emb   = PoseEmbedding(self.POSE_DIM, self.POSE_EMBED)
+        self.pose_to_s3 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S3, 1)
+        self.pose_to_s2 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S2, 1)
+        self.pose_to_s1 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S1, 1)
 
-        # Fusion: 12 cameras × PROJ_DIM channels → FUSION_DIM
-        self.fusion = nn.Sequential(
-            nn.Conv2d(12 * self.PROJ_DIM, self.FUSION_DIM, 1, bias=False),
-            nn.BatchNorm2d(self.FUSION_DIM),
-            nn.ReLU(inplace=True),
-        )
-
-        # Robot rotation embedding: 6 → ROT_EMBED
         self.rot_mlp = nn.Sequential(
-            nn.Linear(6, 64),
-            nn.ReLU(inplace=True),
+            nn.Linear(6, 64), nn.ReLU(inplace=True),
             nn.Linear(64, self.ROT_EMBED),
         )
-        self.rot_to_feat = nn.Conv2d(self.ROT_EMBED, self.FUSION_DIM, 1)
+        self.rot_to_feat = nn.Conv2d(self.ROT_EMBED, self.PROJ_S1, 1)
 
-        # BEV decoder: 7×7 → 14 → 25 → 50 → 100 → 200
-        self.decoder = nn.Sequential(
-            UpBlock(self.FUSION_DIM, 256, 14),
-            UpBlock(256, 128, 25),
-            UpBlock(128, 64,  50),
-            UpBlock(64,  32,  100),
-            UpBlock(32,  32,  200),
+        # Decoder: 7→14 (skip s2) → 28 (skip s3) → 50 → 100 → 200
+        self.dec1  = UpBlock(self.PROJ_S1, 192, 14)
+        self.fuse2 = _proj(192 + self.PROJ_S2, 192)
+        self.dec2  = UpBlock(192, 128, 28)
+        self.fuse3 = _proj(128 + self.PROJ_S3, 128)
+        self.dec3  = UpBlock(128, 96, 50)
+        self.dec4  = UpBlock(96,  64, 100)
+        self.dec5  = UpBlock(64,  48, 200)
+
+        # Height gets a dedicated refinement pass for finer spatial output
+        self.height_refine = nn.Sequential(
+            nn.Conv2d(48, 64, 3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 1, 1),
         )
 
-        # Output heads
-        self.height_head  = nn.Conv2d(32, 1, 1)
-        self.rocks_head   = nn.Conv2d(32, 1, 1)
-        self.craters_head = nn.Conv2d(32, 1, 1)
-        self.walls_head   = nn.Conv2d(32, 1, 1)
+        self.rocks_head   = nn.Conv2d(48, 1, 1)
+        self.craters_head = nn.Conv2d(48, 1, 1)
+        self.walls_head   = nn.Conv2d(48, 1, 1)
+
+    def _fuse_cameras(self, images: torch.Tensor, B: int):
+        imgs_flat = images.view(B * 12, 3, 224, 224)
+
+        x   = self.enc_s3(imgs_flat)
+        s3r = x
+        x   = self.enc_s2(x)
+        s2r = x
+        x   = self.enc_s1(x)
+        s1r = x
+
+        s3 = self.proj_s3(s3r)
+        s2 = self.proj_s2(s2r)
+        s1 = self.proj_s1(s1r)
+
+        pe = self.pose_emb(self.pose_tensor)                    # (12, POSE_EMBED)
+        pe = pe.unsqueeze(0).expand(B, -1, -1)                 # (B, 12, POSE_EMBED)
+        pe = pe.reshape(B * 12, self.POSE_EMBED, 1, 1)
+
+        s3 = s3 + self.pose_to_s3(pe)
+        s2 = s2 + self.pose_to_s2(pe)
+        s1 = s1 + self.pose_to_s1(pe)
+
+        # Average over cameras (pose embeddings encode camera identity before pooling)
+        s3 = s3.view(B, 12, self.PROJ_S3, 28, 28).mean(1)
+        s2 = s2.view(B, 12, self.PROJ_S2, 14, 14).mean(1)
+        s1 = s1.view(B, 12, self.PROJ_S1,  7,  7).mean(1)
+
+        return s1, s2, s3
 
     def forward(self, images: torch.Tensor, rotation: torch.Tensor) -> dict:
         B = images.shape[0]
 
-        # Encode all 12 images in a single batch pass through shared backbone
-        imgs_flat = images.view(B * 12, 3, 224, 224)
-        feats = self.encoder(imgs_flat)       # (B*12, 1280, 7, 7)
-        feats = self.feat_proj(feats)         # (B*12, 128, 7, 7)
+        s1, s2, s3 = self._fuse_cameras(images, B)
 
-        # Camera pose embeddings: fixed 9-dim → 32-dim → add to features
-        pose_emb = self.pose_emb(self.pose_tensor)        # (12, 32)
-        pose_emb = pose_emb.unsqueeze(-1).unsqueeze(-1)   # (12, 32, 1, 1)
-        # Expand to (B*12, 32, 1, 1)
-        pose_emb = pose_emb.unsqueeze(0).expand(B, -1, -1, 1, 1).reshape(B * 12, self.POSE_EMBED, 1, 1)
-        feats = feats + self.pose_to_feat(pose_emb)       # broadcast add
+        rot_emb = self.rot_mlp(rotation).unsqueeze(-1).unsqueeze(-1)
+        s1 = s1 + self.rot_to_feat(rot_emb)
 
-        # Fuse all 12 camera features
-        feats = feats.view(B, 12 * self.PROJ_DIM, 7, 7)  # (B, 1536, 7, 7)
-        bev   = self.fusion(feats)                        # (B, 512, 7, 7)
-
-        # Robot rotation embedding
-        rot_emb = self.rot_mlp(rotation)                  # (B, 32)
-        rot_emb = rot_emb.unsqueeze(-1).unsqueeze(-1)     # (B, 32, 1, 1)
-        bev = bev + self.rot_to_feat(rot_emb)             # broadcast add
-
-        # Decode to BEV
-        bev = self.decoder(bev)                           # (B, 32, 200, 200)
+        x = self.dec1(s1)
+        x = self.fuse2(torch.cat([x, s2], dim=1))
+        x = self.dec2(x)
+        x = self.fuse3(torch.cat([x, s3], dim=1))
+        x = self.dec3(x)
+        x = self.dec4(x)
+        x = self.dec5(x)
 
         return {
-            'height':  self.height_head(bev).squeeze(1),
-            'rocks':   torch.sigmoid(self.rocks_head(bev)).squeeze(1),
-            'craters': torch.sigmoid(self.craters_head(bev)).squeeze(1),
-            'walls':   torch.sigmoid(self.walls_head(bev)).squeeze(1),
+            'height':  self.height_refine(x).squeeze(1),
+            'rocks':   torch.sigmoid(self.rocks_head(x)).squeeze(1),
+            'craters': torch.sigmoid(self.craters_head(x)).squeeze(1),
+            'walls':   torch.sigmoid(self.walls_head(x)).squeeze(1),
         }
