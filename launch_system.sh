@@ -6,6 +6,7 @@
 # Usage:
 #   ./launch_system.sh                  - Launch all subsystems
 #   ./launch_system.sh supervisor       - Launch supervisor only
+#   ./launch_system.sh sensors          - Launch sensors only (ADXL345, etc.)
 #   ./launch_system.sh perception       - Launch perception only
 #   ./launch_system.sh mapping          - Launch mapping only
 #   ./launch_system.sh network          - Launch network only
@@ -114,6 +115,7 @@ EOF
 
 case "$SUBSYSTEM" in
     supervisor)  run_launch supervisor ;;
+    sensors)     run_launch sensors ;;
     perception)
         kill_cameras
         run_launch perception
@@ -135,6 +137,8 @@ case "$SUBSYSTEM" in
         PIDS=()
         ros2 launch "$LAUNCH_PKG" supervisor.launch.py &
         PIDS+=($!)
+        ros2 launch "$LAUNCH_PKG" sensors.launch.py &
+        PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" perception.launch.py &
         PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" mapping.launch.py &
@@ -153,7 +157,7 @@ case "$SUBSYSTEM" in
         ;;
     *)
         echo "Unknown subsystem: $SUBSYSTEM"
-        echo "Usage: $0 [supervisor|perception|mapping|network|all]"
+        echo "Usage: $0 [supervisor|sensors|perception|mapping|network|all|data_process]"
         exit 1
         ;;
 esac
