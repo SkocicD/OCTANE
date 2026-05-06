@@ -174,8 +174,15 @@ class TerrainDataset(Dataset):
         tensors = []
         for i, (rel_path, ext) in enumerate(_SLOT_PATHS):
             path = os.path.join(self.root, rel_path, f'{ep_id}{ext}')
-            img  = Image.open(path).convert('RGB')
-            t    = self._rgb_transform(img) if i in _RGB_SLOTS else self._depth_transform(img)
+            if i in _DEPTH_SLOTS:
+                # 16-bit PNG saved as millimetres (PIL mode 'I'); decode to metres then to RGB
+                raw = np.array(Image.open(path), dtype=np.float32) / 1000.0
+                raw = np.clip(raw / 20.0, 0.0, 1.0)  # normalise 0–20m → 0–1
+                arr = (raw * 255).astype(np.uint8)
+                img = Image.fromarray(np.stack([arr, arr, arr], axis=-1), mode='RGB')
+            else:
+                img = Image.open(path).convert('RGB')
+            t = self._rgb_transform(img) if i in _RGB_SLOTS else self._depth_transform(img)
             tensors.append(t)
         return torch.stack(tensors, dim=0)  # (12, 3, 224, 224)
 
