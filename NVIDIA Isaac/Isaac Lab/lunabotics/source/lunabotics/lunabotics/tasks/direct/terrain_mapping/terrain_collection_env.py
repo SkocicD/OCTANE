@@ -182,30 +182,21 @@ def _sample_ground_mat(rng: np.random.Generator) -> tuple:
 
 
 _POLYHAVEN_SLUGS = [
-    # Sand / dust
-    "sand_01",
-    "coast_sand_01",
-    "brown_sand_02",
-    # Gravel / rocks
-    "sandy_gravel_02",
-    "gravel_02",
-    "pebbles_ground_01",
-    "pebbles_ground_02",
-    "aerial_rocks_01",
-    "rock_ground_02",
-    "rocky_trail_02",
-    # Dirt / mud
-    "rocky_dirt_02",
-    "dried_mud_03",
-    "cracked_dried_mud_01",
-    "brown_mud_01",
-    "gravel_dirt_path",
-    # Mars / iron oxide tones
-    "red_muddy_ground",
-    "red_gravel_02",
-    # Pale / lunar grey
-    "ground_grey_var1",
-    "grey_rock_02",
+    # Lunar surface (moon-specific)
+    "moon_01", "moon_02", "moon_03", "moon_04",
+    "moon_dusted_01", "moon_dusted_02", "moon_dusted_03",
+    "moon_meteor_01", "moon_meteor_02",
+    "moon_track_01", "moon_track_02",
+    # Rocky terrain
+    "rock_ground", "rock_ground_02",
+    "rocks_ground_01", "rocks_ground_02", "rocks_ground_04",
+    "rocky_terrain", "rocky_terrain_02",
+    # Gravel / sand
+    "gravel_ground_01", "gravelly_sand", "sandy_gravel_02",
+    "aerial_rocks_01", "aerial_rocks_02", "aerial_sand",
+    # Dry ground
+    "dry_ground_01", "dry_ground_rocks",
+    "coast_sand_01", "coast_sand_02",
 ]
 
 
@@ -239,21 +230,23 @@ def _try_download_polyhaven(slug: str, dest_dir: str) -> bool:
         print(f"[PolyHaven] API lookup failed for {slug}: {e}")
         return False
 
-    def _find_url(keys: list[str]) -> str | None:
-        for fmt in ("jpg", "png"):
-            if fmt not in files:
+    # API structure: files[Category][resolution][format]["url"]
+    # e.g. files["Diffuse"]["1k"]["jpg"]["url"]
+    def _find_url(category_keys: list[str]) -> str | None:
+        for cat in category_keys:
+            if cat not in files:
                 continue
             for res in ("1k", "2k"):
-                if res not in files[fmt]:
+                if res not in files[cat]:
                     continue
-                for key in keys:
-                    if key in files[fmt][res]:
-                        return files[fmt][res][key]["url"]
+                for fmt in ("jpg", "png"):
+                    if fmt in files[cat][res]:
+                        return files[cat][res][fmt]["url"]
         return None
 
-    albedo_url = _find_url(["diffuse", "diff", "color", "col"])
-    normal_url = _find_url(["nor_gl", "normal_gl", "nor", "normal"])
-    rough_url  = _find_url(["rough", "roughness"])
+    albedo_url = _find_url(["Diffuse", "diffuse", "diff", "color"])
+    normal_url = _find_url(["nor_gl", "nor_dx", "normal"])
+    rough_url  = _find_url(["Rough", "rough", "arm"])
 
     if albedo_url is None:
         print(f"[PolyHaven] No diffuse map found for {slug}")
@@ -971,7 +964,7 @@ class TerrainCollectionEnv(DirectRLEnv):
                 self._ground_tex_sets.extend(vdirs)
                 continue
 
-            if not os.path.isfile(os.path.join(slug_dir, "albedo.jpg")):
+            if not any(os.path.isfile(os.path.join(slug_dir, f"albedo.{e}")) for e in ("jpg", "png")):
                 if not _try_download_polyhaven(slug, slug_dir):
                     print(f"[TerrainCollectionEnv] Skipped Poly Haven: {slug}")
                     continue
