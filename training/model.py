@@ -53,18 +53,23 @@ class TerrainModel(nn.Module):
     Outputs:
         dict with keys 'height', 'rocks', 'craters', 'walls' — each (B, 200, 200)
 
-    EfficientNet-B0 is split at three spatial resolutions so the decoder can
-    pull in spatial detail via skip connections instead of reconstructing
-    everything from the 7×7 bottleneck:
-        enc_s3  features[:4]  → 28×28, 40ch
+    EfficientNet-B0 split at four spatial resolutions for skip connections:
+        enc_s4  features[:3]  → 56×56, 24ch   (highest spatial detail)
+        enc_s3  features[3:4] → 28×28, 40ch
         enc_s2  features[4:6] → 14×14, 112ch
-        enc_s1  features[6:]  → 7×7,  1280ch
+        enc_s1  features[6:]  → 7×7,  1280ch  (bottleneck / global context)
+
+    Decoder concatenates each skip at its matching resolution so the
+    200×200 output has camera-resolution detail at every step, not just
+    global context from the 7×7 bottleneck.
     """
 
+    _S4_CH = 24
     _S3_CH = 40
     _S2_CH = 112
     _S1_CH = 1280
 
+    PROJ_S4  = 32
     PROJ_S3  = 64
     PROJ_S2  = 128
     PROJ_S1  = 256
@@ -78,15 +83,18 @@ class TerrainModel(nn.Module):
         self.register_buffer('pose_tensor', torch.from_numpy(POSE_TENSOR))
 
         f = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1).features
-        self.enc_s3 = f[:4]   # (B*12, 40,   28, 28)
-        self.enc_s2 = f[4:6]  # (B*12, 112,  14, 14)
+        self.enc_s4 = f[:3]   # (B*12,   24, 56, 56)
+        self.enc_s3 = f[3:4]  # (B*12,   40, 28, 28)
+        self.enc_s2 = f[4:6]  # (B*12,  112, 14, 14)
         self.enc_s1 = f[6:]   # (B*12, 1280,  7,  7)
 
+        self.proj_s4 = _proj(self._S4_CH, self.PROJ_S4)
         self.proj_s3 = _proj(self._S3_CH, self.PROJ_S3)
         self.proj_s2 = _proj(self._S2_CH, self.PROJ_S2)
         self.proj_s1 = _proj(self._S1_CH, self.PROJ_S1)
 
         self.pose_emb   = PoseEmbedding(self.POSE_DIM, self.POSE_EMBED)
+        self.pose_to_s4 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S4, 1)
         self.pose_to_s3 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S3, 1)
         self.pose_to_s2 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S2, 1)
         self.pose_to_s1 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S1, 1)
@@ -97,12 +105,13 @@ class TerrainModel(nn.Module):
         )
         self.rot_to_feat = nn.Conv2d(self.ROT_EMBED, self.PROJ_S1, 1)
 
-        # Decoder: 7→14 (skip s2) → 28 (skip s3) → 50 → 100 → 200
+        # Decoder: 7→14 (skip s2) → 28 (skip s3) → 56 (skip s4) → 100 → 200
         self.dec1  = UpBlock(self.PROJ_S1, 192, 14)
         self.fuse2 = _proj(192 + self.PROJ_S2, 192)
         self.dec2  = UpBlock(192, 128, 28)
         self.fuse3 = _proj(128 + self.PROJ_S3, 128)
-        self.dec3  = UpBlock(128, 96, 50)
+        self.dec3  = UpBlock(128, 96, 56)
+        self.fuse4 = _proj(96 + self.PROJ_S4, 96)
         self.dec4  = UpBlock(96,  64, 100)
         self.dec5  = UpBlock(64,  48, 200)
 
@@ -121,36 +130,39 @@ class TerrainModel(nn.Module):
     def _fuse_cameras(self, images: torch.Tensor, B: int):
         imgs_flat = images.view(B * 12, 3, 224, 224)
 
-        x   = self.enc_s3(imgs_flat)
+        x   = self.enc_s4(imgs_flat)
+        s4r = x
+        x   = self.enc_s3(x)
         s3r = x
         x   = self.enc_s2(x)
         s2r = x
         x   = self.enc_s1(x)
         s1r = x
 
+        s4 = self.proj_s4(s4r)
         s3 = self.proj_s3(s3r)
         s2 = self.proj_s2(s2r)
         s1 = self.proj_s1(s1r)
 
-        pe = self.pose_emb(self.pose_tensor)                    # (12, POSE_EMBED)
-        pe = pe.unsqueeze(0).expand(B, -1, -1)                 # (B, 12, POSE_EMBED)
-        pe = pe.reshape(B * 12, self.POSE_EMBED, 1, 1)
+        pe = self.pose_emb(self.pose_tensor)
+        pe = pe.unsqueeze(0).expand(B, -1, -1).reshape(B * 12, self.POSE_EMBED, 1, 1)
 
+        s4 = s4 + self.pose_to_s4(pe)
         s3 = s3 + self.pose_to_s3(pe)
         s2 = s2 + self.pose_to_s2(pe)
         s1 = s1 + self.pose_to_s1(pe)
 
-        # Average over cameras (pose embeddings encode camera identity before pooling)
+        s4 = s4.view(B, 12, self.PROJ_S4, 56, 56).mean(1)
         s3 = s3.view(B, 12, self.PROJ_S3, 28, 28).mean(1)
         s2 = s2.view(B, 12, self.PROJ_S2, 14, 14).mean(1)
         s1 = s1.view(B, 12, self.PROJ_S1,  7,  7).mean(1)
 
-        return s1, s2, s3
+        return s1, s2, s3, s4
 
     def forward(self, images: torch.Tensor, rotation: torch.Tensor) -> dict:
         B = images.shape[0]
 
-        s1, s2, s3 = self._fuse_cameras(images, B)
+        s1, s2, s3, s4 = self._fuse_cameras(images, B)
 
         rot_emb = self.rot_mlp(rotation).unsqueeze(-1).unsqueeze(-1)
         s1 = s1 + self.rot_to_feat(rot_emb)
@@ -160,6 +172,7 @@ class TerrainModel(nn.Module):
         x = self.dec2(x)
         x = self.fuse3(torch.cat([x, s3], dim=1))
         x = self.dec3(x)
+        x = self.fuse4(torch.cat([x, s4], dim=1))
         x = self.dec4(x)
         x = self.dec5(x)
 
