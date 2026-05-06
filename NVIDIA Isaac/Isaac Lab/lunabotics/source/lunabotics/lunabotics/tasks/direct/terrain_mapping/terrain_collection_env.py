@@ -961,8 +961,8 @@ class TerrainCollectionEnv(DirectRLEnv):
         """Compute robot-centric BEV ground truth arrays from terrain data."""
         from scipy.ndimage import map_coordinates
 
-        BEV_N    = 400
-        CELL     = 0.05        # m per BEV cell
+        BEV_N    = 200
+        CELL     = 0.10        # m per BEV cell
         BEV_HALF = BEV_N * CELL / 2.0   # 10.0 m
         h_scale  = self.cfg.regolith_horizontal_scale
 
