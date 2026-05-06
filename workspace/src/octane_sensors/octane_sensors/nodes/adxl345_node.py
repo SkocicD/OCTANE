@@ -188,23 +188,37 @@ class KlipperMCU:
                 self._handlers.pop(resp_id, None)
 
     def _identify(self, timeout: float):
+        # BTT ADXL345 V2.0 firmware sends only 2 bytes of dict data per
+        # identify_response.  Synchronous send-one/wait-one takes ~82 s for a
+        # 1644-byte dict.  Instead we run a sender thread at 5 ms intervals so
+        # ~20 requests are in-flight at any time, cutting collection to ~4 s.
         CHUNK = 40
         total_size: int | None = None
         chunks: dict[int, bytes] = {}
         raw_q: queue.Queue = queue.Queue()
         self._raw_q = raw_q
         deadline = time.time() + timeout
-        seq = 0
+
+        _seq = [self._seq]
+        stop_flag = threading.Event()
+
+        def _sender():
+            while not stop_flag.is_set():
+                try:
+                    pl = _enc_vlq(0) + _enc_vlq(0) + _enc_vlq(CHUNK)
+                    self._ser.write(_frame(pl, _seq[0]))
+                    _seq[0] = (_seq[0] + 1) & _MSG_SEQ
+                except Exception:
+                    break
+                time.sleep(0.005)
+
+        send_thread = threading.Thread(target=_sender, daemon=True)
+        send_thread.start()
 
         try:
-            offset = 0
             while time.time() < deadline:
-                identify_pl = _enc_vlq(0) + _enc_vlq(offset) + _enc_vlq(CHUNK)
-                self._ser.write(_frame(identify_pl, seq))
-                seq = (seq + 1) & _MSG_SEQ
-
                 try:
-                    pl = raw_q.get(timeout=2.0)
+                    pl = raw_q.get(timeout=0.5)
                 except queue.Empty:
                     continue
 
@@ -222,12 +236,14 @@ class KlipperMCU:
                     total_size = resp_tot
                 if data:
                     chunks[resp_off] = data
-                next_off = resp_off + len(data)
-                if total_size and next_off >= total_size:
+
+                if total_size and resp_off + len(data) >= total_size:
                     break
-                offset = next_off
         finally:
+            stop_flag.set()
+            send_thread.join(timeout=1.0)
             self._raw_q = None
+            self._seq = _seq[0]
 
         if not chunks or total_size is None:
             raise RuntimeError('Klipper identify timed out')
@@ -239,7 +255,7 @@ class KlipperMCU:
             raise RuntimeError(f'Klipper identify dict decompress failed: {e}')
 
         self.cmds  = d.get('commands',  {})
-        self.resps = {v: k for k, v in d.get('responses', {}).items()}
+        self.resps = d.get('responses', {})
 
     def disconnect(self):
         self._running = False
@@ -308,7 +324,7 @@ class Adxl345Node(Node):
         self.get_logger().info(f'[ADXL345] Connecting to {port}')
 
         self._mcu = KlipperMCU(port)
-        self._mcu.connect(timeout=15.0)
+        self._mcu.connect(timeout=30.0)
         self.get_logger().info('[ADXL345] Klipper identify OK — configuring sensor')
 
         self._configure()
@@ -360,7 +376,7 @@ class Adxl345Node(Node):
 
         # Register data response handler
         data_resp = next(
-            (k for k in mcu.resps.values() if 'adxl345_data' in k), None
+            (k for k in mcu.resps if 'adxl345_data' in k), None
         )
         if data_resp:
             self._data_q = mcu.register_resp(data_resp)
