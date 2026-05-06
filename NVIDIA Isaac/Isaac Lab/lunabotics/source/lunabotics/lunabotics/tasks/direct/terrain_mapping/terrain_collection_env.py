@@ -224,7 +224,8 @@ def _try_download_polyhaven(slug: str, dest_dir: str) -> bool:
                 with open(path, "wb") as f:
                     f.write(resp.read())
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[PolyHaven] FAIL {url}: {e}")
             return False
 
     albedo_path = os.path.join(dest_dir, "albedo.jpg")
