@@ -14,7 +14,6 @@ def generate_launch_description():
             parameters=[{
                 'publish_rate': 50.0,
                 'frame_id':     'imu_frame',
-                'range_g':      2,
             }],
         ),
         LogInfo(msg='Sensors subsystem online'),
