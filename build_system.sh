@@ -431,7 +431,7 @@ fi
 # ── 10. Build ──────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
-OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane"
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)
