@@ -182,16 +182,30 @@ def _sample_ground_mat(rng: np.random.Generator) -> tuple:
 
 
 _POLYHAVEN_SLUGS = [
+    # Sand / dust
     "sand_01",
     "coast_sand_01",
+    "brown_sand_02",
+    # Gravel / rocks
     "sandy_gravel_02",
+    "gravel_02",
+    "pebbles_ground_01",
+    "pebbles_ground_02",
+    "aerial_rocks_01",
+    "rock_ground_02",
+    "rocky_trail_02",
+    # Dirt / mud
     "rocky_dirt_02",
     "dried_mud_03",
-    "red_muddy_ground",
-    "ground_grey_var1",
-    "rock_ground_02",
+    "cracked_dried_mud_01",
+    "brown_mud_01",
     "gravel_dirt_path",
-    "aerial_rocks_01",
+    # Mars / iron oxide tones
+    "red_muddy_ground",
+    "red_gravel_02",
+    # Pale / lunar grey
+    "ground_grey_var1",
+    "grey_rock_02",
 ]
 
 
@@ -908,20 +922,28 @@ class TerrainCollectionEnv(DirectRLEnv):
         assets_dir   = os.path.join(os.path.dirname(__file__), "assets")
         ph_cache_dir = os.path.join(assets_dir, "polyhaven_textures")
 
+        def _variant_has_textures(vdir: str) -> bool:
+            return os.path.isfile(os.path.join(vdir, "albedo.png"))
+
+        def _valid_variants(variants_dir: str) -> list[str]:
+            if not os.path.isdir(variants_dir):
+                return []
+            return sorted(
+                os.path.join(variants_dir, d)
+                for d in os.listdir(variants_dir)
+                if os.path.isdir(os.path.join(variants_dir, d))
+                and _variant_has_textures(os.path.join(variants_dir, d))
+            )
+
         # ── Poly Haven (internet, first run only) ────────────────────────────
         for slug in _POLYHAVEN_SLUGS:
             slug_dir     = os.path.join(ph_cache_dir, slug)
             variants_dir = os.path.join(ph_cache_dir, f"{slug}_variants")
 
-            if os.path.isdir(variants_dir):
-                vdirs = sorted(
-                    os.path.join(variants_dir, d)
-                    for d in os.listdir(variants_dir)
-                    if os.path.isdir(os.path.join(variants_dir, d))
-                )
-                if vdirs:
-                    self._ground_tex_sets.extend(vdirs)
-                    continue
+            vdirs = _valid_variants(variants_dir)
+            if vdirs:
+                self._ground_tex_sets.extend(vdirs)
+                continue
 
             if not os.path.isfile(os.path.join(slug_dir, "albedo.jpg")):
                 if not _try_download_polyhaven(slug, slug_dir):
@@ -936,15 +958,10 @@ class TerrainCollectionEnv(DirectRLEnv):
         for bdir in self._generate_biome_textures():
             bname        = os.path.basename(bdir)
             variants_dir = os.path.join(os.path.dirname(bdir), f"{bname}_variants")
-            if os.path.isdir(variants_dir):
-                vdirs = sorted(
-                    os.path.join(variants_dir, d)
-                    for d in os.listdir(variants_dir)
-                    if os.path.isdir(os.path.join(variants_dir, d))
-                )
-                if vdirs:
-                    self._ground_tex_sets.extend(vdirs)
-                    continue
+            vdirs = _valid_variants(variants_dir)
+            if vdirs:
+                self._ground_tex_sets.extend(vdirs)
+                continue
             vdirs = _make_texture_variants(bdir, variants_dir, n=2, rng=self._rng)
             self._ground_tex_sets.extend(vdirs if vdirs else [bdir])
 
