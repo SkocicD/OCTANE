@@ -80,6 +80,39 @@ def _sample_rock_mat(rng: np.random.Generator) -> tuple:
     return diffuse, roughness, metallic
 
 
+def _clip_segment(x1: float, y1: float, x2: float, y2: float,
+                  bound: float) -> tuple | None:
+    """Liang-Barsky clip segment to [-bound, bound]×[-bound, bound].
+    Returns (cx1, cy1, cx2, cy2) or None if fully outside."""
+    dx, dy = x2 - x1, y2 - y1
+    p = [-dx, dx, -dy, dy]
+    q = [x1 - (-bound), bound - x1, y1 - (-bound), bound - y1]
+    t0, t1 = 0.0, 1.0
+    for pi, qi in zip(p, q):
+        if pi == 0.0:
+            if qi < 0.0:
+                return None
+        elif pi < 0.0:
+            t0 = max(t0, qi / pi)
+        else:
+            t1 = min(t1, qi / pi)
+    if t0 > t1:
+        return None
+    return (x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy)
+
+
+def _segments_intersect(ax1: float, ay1: float, ax2: float, ay2: float,
+                         bx1: float, by1: float, bx2: float, by2: float) -> bool:
+    """True if segment AB properly crosses segment CD (ignores collinear/touching)."""
+    def _cross(ox, oy, ax, ay, bx, by):
+        return (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+    d1 = _cross(bx1, by1, bx2, by2, ax1, ay1)
+    d2 = _cross(bx1, by1, bx2, by2, ax2, ay2)
+    d3 = _cross(ax1, ay1, ax2, ay2, bx1, by1)
+    d4 = _cross(ax1, ay1, ax2, ay2, bx2, by2)
+    return (d1 * d2 < 0) and (d3 * d4 < 0)
+
+
 def _sample_wall_mat(rng: np.random.Generator, allow_glass: bool = True) -> tuple:
     """Return (diffuse_rgb, roughness, metallic, opacity) for a random wall type."""
     # Glass / acrylic 50% of the time (when allowed); remaining types split evenly.
@@ -1122,28 +1155,51 @@ class TerrainCollectionEnv(DirectRLEnv):
             else:
                 t_op.Set(PARK)
 
-        # ── walls (perimeter-placed) + footers ────────────────────────────
+        # ── walls (perimeter-placed, clipped to terrain, no intersections) ──
+        terrain_half = cfg.regolith_size[0] / 2.0
         n_walls = int(rng.integers(cfg.wall_count_range[0], cfg.wall_count_range[1] + 1))
         walls: list[list[float]] = []
+        placed_segs: list[tuple] = []  # (cx1, cy1, cx2, cy2) of accepted walls
         for i, (cube, t_op, r_op, s_op) in enumerate(self._wall_slots):
             _, ft_op, fr_op, fs_op = self._footer_slots[i]
             if i < n_walls:
-                lx, ly, ang_deg = _wall_perimeter()
-                ang_rad  = float(np.deg2rad(ang_deg))
-                length   = float(rng.uniform(cfg.wall_length_range[0], cfg.wall_length_range[1]))
-                wz       = cfg.wall_height / 2.0
-                t_op.Set(Gf.Vec3d(env_ox + lx, env_oy + ly, wz))
-                r_op.Set(ang_deg)
-                s_op.Set(Gf.Vec3d(length / 2.0, self._wall_width / 2.0, cfg.wall_height / 2.0))
-                # Footer: thicker base trim, randomised height
-                footer_h = float(rng.uniform(0.25, 0.55))
-                footer_w = self._wall_width + float(rng.uniform(0.06, 0.18))
-                ft_op.Set(Gf.Vec3d(env_ox + lx, env_oy + ly, footer_h / 2.0))
-                fr_op.Set(ang_deg)
-                fs_op.Set(Gf.Vec3d(length / 2.0, footer_w / 2.0, footer_h / 2.0))
-                dx = float(np.cos(ang_rad)) * length / 2.0
-                dy = float(np.sin(ang_rad)) * length / 2.0
-                walls.append([lx - dx, ly - dy, lx + dx, ly + dy, cfg.wall_height])
+                placed = False
+                for _attempt in range(30):
+                    lx, ly, ang_deg = _wall_perimeter()
+                    ang_rad = float(np.deg2rad(ang_deg))
+                    length  = float(rng.uniform(cfg.wall_length_range[0], cfg.wall_length_range[1]))
+                    dx = float(np.cos(ang_rad)) * length / 2.0
+                    dy = float(np.sin(ang_rad)) * length / 2.0
+                    # Clip endpoints to terrain boundary
+                    clipped = _clip_segment(lx - dx, ly - dy, lx + dx, ly + dy, terrain_half)
+                    if clipped is None:
+                        continue
+                    cx1, cy1, cx2, cy2 = clipped
+                    clip_len = float(np.sqrt((cx2 - cx1) ** 2 + (cy2 - cy1) ** 2))
+                    if clip_len < 0.5:
+                        continue
+                    # Reject if this wall crosses any already-placed wall
+                    if any(_segments_intersect(cx1, cy1, cx2, cy2, *seg) for seg in placed_segs):
+                        continue
+                    # Accepted — update Isaac Sim geometry with clipped dimensions
+                    new_cx = (cx1 + cx2) / 2.0
+                    new_cy = (cy1 + cy2) / 2.0
+                    wz = cfg.wall_height / 2.0
+                    t_op.Set(Gf.Vec3d(env_ox + new_cx, env_oy + new_cy, wz))
+                    r_op.Set(ang_deg)
+                    s_op.Set(Gf.Vec3d(clip_len / 2.0, self._wall_width / 2.0, cfg.wall_height / 2.0))
+                    footer_h = float(rng.uniform(0.25, 0.55))
+                    footer_w = self._wall_width + float(rng.uniform(0.06, 0.18))
+                    ft_op.Set(Gf.Vec3d(env_ox + new_cx, env_oy + new_cy, footer_h / 2.0))
+                    fr_op.Set(ang_deg)
+                    fs_op.Set(Gf.Vec3d(clip_len / 2.0, footer_w / 2.0, footer_h / 2.0))
+                    walls.append([cx1, cy1, cx2, cy2, cfg.wall_height])
+                    placed_segs.append((cx1, cy1, cx2, cy2))
+                    placed = True
+                    break
+                if not placed:
+                    t_op.Set(PARK)
+                    ft_op.Set(PARK)
             else:
                 t_op.Set(PARK)
                 ft_op.Set(PARK)
