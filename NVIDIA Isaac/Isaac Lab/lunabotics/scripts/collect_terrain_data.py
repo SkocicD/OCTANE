@@ -11,7 +11,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Terrain data collection.")
 parser.add_argument("--task",     type=str, default="Template-TerrainCollection-v0")
 parser.add_argument("--num_envs", type=int, default=1)
-parser.add_argument("--gt_dir",   type=str, default=r"E:\terrain_data\gt")
+parser.add_argument("--gt_dir",   type=str, default=r"F:\terrain_data\gt")
 parser.add_argument("--episodes", type=int, default=100)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
