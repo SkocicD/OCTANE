@@ -113,39 +113,157 @@ def _segments_intersect(ax1: float, ay1: float, ax2: float, ay2: float,
     return (d1 * d2 < 0) and (d3 * d4 < 0)
 
 
-def _sample_wall_mat(rng: np.random.Generator, allow_glass: bool = True) -> tuple:
-    """Return (diffuse_rgb, roughness, metallic, opacity) for a random wall type."""
-    # Glass / acrylic 50% of the time (when allowed); remaining types split evenly.
-    t = 1 if (allow_glass and float(rng.random()) < 0.5) else [0, 2, 3, 4][int(rng.integers(4))]
-    if t == 0:                                  # concrete
-        v = float(rng.uniform(0.28, 0.78))
-        w = float(rng.uniform(-0.03, 0.04))
-        d = (v + w, v, max(0.0, v - w * 0.8))
-        r, m, o = float(rng.uniform(0.82, 0.98)), 0.0, 1.0
-    elif t == 1:                                # hazed glass / acrylic
-        h   = float(rng.uniform(0.60, 0.96))
-        tnt = int(rng.integers(3))
-        if tnt == 0:   d = (h * 0.82, h * 0.90, h)
-        elif tnt == 1: d = (h * 0.86, h, h * 0.86)
-        else:          d = (h, h, h)
-        # Low roughness → strong specular highlight makes glass clearly visible
-        r, m, o = float(rng.uniform(0.02, 0.12)), 0.0, float(rng.uniform(0.40, 0.70))
-    elif t == 2:                                # metal / aluminium framing
-        v = float(rng.uniform(0.22, 0.68))
-        d = (v, v, min(1.0, v * 1.04))
-        r, m, o = float(rng.uniform(0.08, 0.50)), float(rng.uniform(0.72, 0.98)), 1.0
-    elif t == 3:                                # safety / hi-vis colour
-        palette = [(0.92, 0.46, 0.05), (1.0, 0.82, 0.0),
-                   (0.08, 0.42, 0.90), (0.85, 0.08, 0.08)]
-        d = palette[int(rng.integers(len(palette)))]
-        r, m, o = float(rng.uniform(0.55, 0.82)), 0.0, 1.0
-    else:                                       # painted board / plywood
-        v = float(rng.uniform(0.68, 0.96))
-        w = float(rng.uniform(-0.06, 0.06))
-        d = (min(1.0, v + w), v, max(0.0, v - w))
-        r, m, o = float(rng.uniform(0.60, 0.88)), 0.0, 1.0
-    diffuse = tuple(float(np.clip(x, 0.0, 1.0)) for x in d)
+def _sample_wall_panel_mat(rng: np.random.Generator) -> tuple:
+    """Return (diffuse_rgb, roughness, metallic, opacity) for a random wall panel.
+
+    Distribution: 66 % translucent / glass-like, 34 % opaque coloured.
+
+    Translucent sub-types (equally weighted within the 66 %):
+      0  Frosted PETG      — milky white, medium roughness
+      1  Smudged acrylic   — near-clear, very low roughness, very light tint
+      2  Hazy tinted       — pastel blue / green / amber, medium-low roughness
+      3  Frosted coloured  — pastel tint, high roughness (deeply frosted)
+      4  Clear high-gloss  — nearly invisible, very low roughness, low opacity
+      5  Milky translucent — cream-white, high roughness, moderate opacity
+
+    Opaque sub-types (equally weighted within the 34 %):
+      0  Safety / hi-vis   — strong saturated colour (orange, yellow, blue, red)
+      1  Painted panel     — any hue, matte-to-satin finish
+      2  Tinted concrete   — grey slab with subtle warm / cool cast
+    """
+    _CLAMP = lambda x: float(np.clip(x, 0.0, 1.0))
+
+    if float(rng.random()) < 0.66:
+        # ── Translucent / glass ───────────────────────────────────────────────
+        t = int(rng.integers(6))
+
+        if t == 0:                              # frosted PETG (milky white)
+            v = float(rng.uniform(0.82, 0.96))
+            d = (v, v * 0.98, v * 0.96)
+            r, m, o = float(rng.uniform(0.35, 0.55)), 0.0, float(rng.uniform(0.42, 0.65))
+
+        elif t == 1:                            # smudged / lightly hazy clear acrylic
+            v = float(rng.uniform(0.88, 0.98))
+            # Near-neutral with a very faint warm or cool cast from handling marks
+            w = float(rng.uniform(-0.04, 0.04))
+            d = (v + w * 0.5, v, v - w * 0.5)
+            r, m, o = float(rng.uniform(0.06, 0.20)), 0.0, float(rng.uniform(0.28, 0.50))
+
+        elif t == 2:                            # hazy tinted plastic (blue / green / amber)
+            tnt = int(rng.integers(3))
+            v   = float(rng.uniform(0.70, 0.92))
+            if tnt == 0:   d = (v * 0.78, v * 0.88, v)          # cool blue
+            elif tnt == 1: d = (v * 0.80, v, v * 0.80)          # green tint
+            else:          d = (v, v * 0.88, v * 0.62)          # amber
+            r, m, o = float(rng.uniform(0.14, 0.32)), 0.0, float(rng.uniform(0.32, 0.58))
+
+        elif t == 3:                            # deeply frosted / satin coloured sheet
+            # Any hue but washed out and heavily diffused
+            h = float(rng.uniform(0.0, 1.0))
+            from colorsys import hsv_to_rgb
+            rgb = hsv_to_rgb(h, float(rng.uniform(0.25, 0.55)), float(rng.uniform(0.70, 0.92)))
+            d   = tuple(rgb)
+            r, m, o = float(rng.uniform(0.55, 0.75)), 0.0, float(rng.uniform(0.45, 0.68))
+
+        elif t == 4:                            # clear high-gloss (nearly transparent)
+            v = float(rng.uniform(0.92, 1.00))
+            d = (v, v, v)
+            r, m, o = float(rng.uniform(0.02, 0.08)), 0.0, float(rng.uniform(0.14, 0.32))
+
+        else:                                   # milky translucent / polycarbonate
+            v = float(rng.uniform(0.78, 0.94))
+            w = float(rng.uniform(-0.03, 0.05))
+            d = (min(1.0, v + w), v, max(0.0, v - w * 0.6))
+            r, m, o = float(rng.uniform(0.58, 0.78)), 0.0, float(rng.uniform(0.52, 0.72))
+
+    else:
+        # ── Opaque coloured ──────────────────────────────────────────────────
+        t = int(rng.integers(3))
+        o = 1.0
+
+        if t == 0:                              # safety / hi-vis colour
+            palette = [
+                (0.92, 0.46, 0.05),            # construction orange
+                (1.00, 0.82, 0.00),            # hi-vis yellow
+                (0.08, 0.42, 0.90),            # safety blue
+                (0.85, 0.08, 0.08),            # hazard red
+            ]
+            d = palette[int(rng.integers(len(palette)))]
+            r, m = float(rng.uniform(0.55, 0.80)), 0.0
+
+        elif t == 1:                            # painted panel — any hue, matte-to-satin
+            from colorsys import hsv_to_rgb
+            rgb = hsv_to_rgb(
+                float(rng.uniform(0.0, 1.0)),
+                float(rng.uniform(0.40, 0.90)),
+                float(rng.uniform(0.50, 0.90)),
+            )
+            d   = tuple(rgb)
+            r, m = float(rng.uniform(0.50, 0.82)), 0.0
+
+        else:                                   # tinted concrete — grey with warm/cool cast
+            v = float(rng.uniform(0.28, 0.72))
+            w = float(rng.uniform(-0.04, 0.05))
+            d = (v + w, v, max(0.0, v - w * 0.8))
+            r, m = float(rng.uniform(0.80, 0.96)), 0.0
+
+    diffuse = tuple(_CLAMP(x) for x in d)
     return diffuse, r, m, o
+
+
+def _sample_wall_footer_mat(rng: np.random.Generator) -> tuple:
+    """Return (diffuse_rgb, roughness, metallic, opacity=1.0) for a wall footer.
+
+    Footers are always metallic — a structural base trim that reads as hardware.
+
+    Sub-types (equally weighted):
+      0  Matte painted metal   — any colour, high roughness, high metallic
+      1  Semi-gloss painted    — any colour, medium roughness, medium-high metallic
+      2  Hammered / textured   — dark charcoal, very high roughness, very high metallic
+      3  Brushed aluminium     — cool silver, medium roughness, very high metallic
+      4  Galvanized / zinc     — bluish grey, medium-high roughness, high metallic
+    """
+    _CLAMP = lambda x: float(np.clip(x, 0.0, 1.0))
+    t = int(rng.integers(5))
+
+    if t == 0:                                  # matte painted metal (any hue)
+        from colorsys import hsv_to_rgb
+        rgb = hsv_to_rgb(
+            float(rng.uniform(0.0, 1.0)),
+            float(rng.uniform(0.30, 0.80)),
+            float(rng.uniform(0.25, 0.70)),
+        )
+        d   = tuple(rgb)
+        r, m = float(rng.uniform(0.65, 0.85)), float(rng.uniform(0.82, 0.95))
+
+    elif t == 1:                                # semi-gloss painted metal (any hue)
+        from colorsys import hsv_to_rgb
+        rgb = hsv_to_rgb(
+            float(rng.uniform(0.0, 1.0)),
+            float(rng.uniform(0.20, 0.70)),
+            float(rng.uniform(0.35, 0.80)),
+        )
+        d   = tuple(rgb)
+        r, m = float(rng.uniform(0.35, 0.55)), float(rng.uniform(0.65, 0.82))
+
+    elif t == 2:                                # hammered / textured dark metal
+        v = float(rng.uniform(0.06, 0.28))
+        w = float(rng.uniform(-0.02, 0.02))
+        d = (v + w, v, max(0.0, v - w))
+        r, m = float(rng.uniform(0.72, 0.92)), float(rng.uniform(0.85, 0.98))
+
+    elif t == 3:                                # brushed aluminium — cool silver
+        v = float(rng.uniform(0.55, 0.80))
+        d = (v * 0.98, v, min(1.0, v * 1.04))  # very slight cool cast
+        r, m = float(rng.uniform(0.28, 0.48)), float(rng.uniform(0.88, 1.00))
+
+    else:                                       # galvanized / zinc — bluish grey
+        v = float(rng.uniform(0.42, 0.68))
+        d = (v * 0.92, v * 0.96, v)            # cool blue-grey shift
+        r, m = float(rng.uniform(0.48, 0.66)), float(rng.uniform(0.84, 0.96))
+
+    diffuse = tuple(_CLAMP(x) for x in d)
+    return diffuse, r, m, 1.0
 
 
 def _sample_ground_mat(rng: np.random.Generator) -> tuple:
@@ -1204,16 +1322,16 @@ class TerrainCollectionEnv(DirectRLEnv):
             self._ep_rock_shader.GetInput("diffuseColor").Set(d)
             self._ep_rock_shader.GetInput("roughness").Set(r)
             self._ep_rock_shader.GetInput("metallic").Set(m)
-            d, r, m, o = _sample_wall_mat(rng, allow_glass=True)
+            d, r, m, o = _sample_wall_panel_mat(rng)
             self._ep_wall_shader.GetInput("diffuseColor").Set(d)
             self._ep_wall_shader.GetInput("roughness").Set(r)
             self._ep_wall_shader.GetInput("metallic").Set(m)
             self._ep_wall_shader.GetInput("opacity").Set(o)
-            d, r, m, _ = _sample_wall_mat(rng, allow_glass=False)
+            d, r, m, o = _sample_wall_footer_mat(rng)
             self._ep_footer_shader.GetInput("diffuseColor").Set(d)
             self._ep_footer_shader.GetInput("roughness").Set(r)
             self._ep_footer_shader.GetInput("metallic").Set(m)
-            self._ep_footer_shader.GetInput("opacity").Set(1.0)
+            self._ep_footer_shader.GetInput("opacity").Set(o)
 
         # ── rocks (jagged meshes — shape regenerated each episode) ─────────────
         n_rocks = int(rng.integers(cfg.rock_count_range[0], cfg.rock_count_range[1] + 1))

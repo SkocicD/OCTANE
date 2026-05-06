@@ -68,13 +68,19 @@ def main():
     obs, _ = env.reset()
     env.unwrapped._cam_capture.setup()
 
-    for ep in range(start_ep, start_ep + args_cli.episodes):
-        if ep > start_ep:
-            obs, _ = env.reset()
+    _MAX_RETRIES = 3   # resets allowed per episode slot before giving up
 
-        # Adaptive warmup: minimum 60 steps, then keep going (up to 300) until
-        # all cameras return non-black frames.  The render pipeline varies per
-        # launch — a fixed count is a coin-flip on cold starts.
+    ep          = start_ep
+    _need_reset = False   # first ep already reset above
+    while ep < start_ep + args_cli.episodes:
+
+        if _need_reset:
+            obs, _ = env.reset()
+        _need_reset = True
+
+        # ── Adaptive warmup ──────────────────────────────────────────────────
+        # Minimum 60 steps, then poll until all cameras return non-black frames
+        # (up to 300 steps total).  The render pipeline varies per launch.
         for _ws in range(300):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
             if _ws >= 59:
@@ -86,20 +92,35 @@ def main():
                         print(f"[TerrainCollect] ep {ep}: cameras ready after {_ws + 1} warmup steps")
                     break
 
-        ep_id = f"ep_{ep:06d}"
-
         gt = env.unwrapped._current_gt
         if gt is None:
             print(f"[TerrainCollect] WARNING: no GT for episode {ep}, skipping")
+            ep += 1
             continue
 
         frames = getattr(env.unwrapped, "_last_frames", {})
+        black  = [s for s, arr in frames.items()
+                  if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
 
-        black = [s for s, arr in frames.items()
-                 if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
+        # ── Black-camera guard ───────────────────────────────────────────────
+        # If any camera is still black after full warmup, reset and try again.
+        # After _MAX_RETRIES failures for this episode slot we give up and move on.
         if black:
-            print(f"[TerrainCollect] WARNING ep {ep}: black cameras {black} — saving anyway")
+            _need_reset = getattr(main, "_retry_count", 0) < _MAX_RETRIES - 1
+            main._retry_count = getattr(main, "_retry_count", 0) + 1
+            if main._retry_count < _MAX_RETRIES:
+                print(f"[TerrainCollect] ep {ep}: black cameras {black} "
+                      f"— retrying ({main._retry_count}/{_MAX_RETRIES})")
+                continue
+            print(f"[TerrainCollect] ep {ep}: black cameras {black} "
+                  f"after {_MAX_RETRIES} retries — skipping episode")
+            main._retry_count = 0
+            ep += 1
+            continue
+        main._retry_count = 0
 
+        # ── Save ─────────────────────────────────────────────────────────────
+        ep_id = f"ep_{ep:06d}"
         save_kwargs = dict(
             height_gt   = gt["height_gt"],
             semantic_gt = gt["semantic_gt"],
@@ -109,15 +130,16 @@ def main():
             robot_pitch = np.array([gt.get("robot_pitch", 0.0)]),
             robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
-
         np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
-        _save_images(frames, img_dir, ep_id)  # images saved separately for ROS pipeline
+        _save_images(frames, img_dir, ep_id)
         (gt_dir / f"{ep_id}.ready").touch()
 
         del frames, save_kwargs
         if ep % 10 == 0:
             gc.collect()
-            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}  cameras={len(getattr(env.unwrapped, '_last_frames', {}))}")
+            print(f"[TerrainCollect] Episode {ep}/{args_cli.episodes}"
+                  f"  cameras={len(getattr(env.unwrapped, '_last_frames', {}))}")
+        ep += 1
 
     print("[TerrainCollect] Done.")
     env.close()
