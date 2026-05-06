@@ -84,12 +84,15 @@ def _load_gt(data_root: str, episode_id: str) -> dict:
     objects = npz['objects_gt']
     walls   = npz['walls_gt']
     return {
-        'height':     npz['height_gt'],
-        'rocks':      build_object_heatmap(objects, class_id=0),
-        'craters':    build_object_heatmap(objects, class_id=1),
-        'walls':      build_wall_mask(walls),
-        'objects_gt': objects,
-        'walls_gt':   walls,
+        'height':      npz['height_gt'],
+        'rocks':       build_object_heatmap(objects, class_id=0),
+        'craters':     build_object_heatmap(objects, class_id=1),
+        'walls':       build_wall_mask(walls),
+        'objects_gt':  objects,
+        'walls_gt':    walls,
+        'robot_roll':  float(npz.get('robot_roll',  np.float32(0.0)).flat[0]),
+        'robot_pitch': float(npz.get('robot_pitch', np.float32(0.0)).flat[0]),
+        'robot_yaw':   float(npz.get('robot_yaw',   np.float32(0.0)).flat[0]),
     }
 
 
@@ -199,6 +202,50 @@ def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray, floor_z: float):
     return traces
 
 
+def _rover_box(height_map: np.ndarray, roll: float, pitch: float):
+    """Wireframe rectangular prism for the rover at (0,0) with terrain-following z.
+    In BEV space the robot always faces +rx; only roll/pitch tilt the box."""
+    import plotly.graph_objects as go
+
+    L, W, H = 0.90, 0.55, 0.40  # approx rover dims in metres (length, width, height)
+
+    z0 = float(height_map[GRID // 2, GRID // 2])
+
+    cr, sr = np.cos(roll),  np.sin(roll)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    Rx = np.array([[1,  0,   0 ], [0, cr, -sr], [0, sr,  cr]])
+    Ry = np.array([[cp, 0,  sp ], [0,  1,   0], [-sp, 0, cp]])
+    R  = Rx @ Ry
+
+    raw = np.array([
+        [-L/2, -W/2, 0], [ L/2, -W/2, 0], [ L/2,  W/2, 0], [-L/2,  W/2, 0],
+        [-L/2, -W/2, H], [ L/2, -W/2, H], [ L/2,  W/2, H], [-L/2,  W/2, H],
+    ])
+    v = (R @ raw.T).T + np.array([0, 0, z0])
+
+    edges = [(0,1),(1,2),(2,3),(3,0), (4,5),(5,6),(6,7),(7,4),
+             (0,4),(1,5),(2,6),(3,7)]
+    xs, ys, zs = [], [], []
+    for a, b in edges:
+        xs += [v[a,0], v[b,0], None]
+        ys += [v[a,1], v[b,1], None]
+        zs += [v[a,2], v[b,2], None]
+
+    body = go.Scatter3d(x=xs, y=ys, z=zs, mode='lines',
+                        line=dict(color='#eeeeee', width=3),
+                        name='rover', showlegend=True)
+
+    # Forward arrow: yellow line from front face centre to ahead
+    mid_front = (R @ np.array([L/2, 0, H/2])) + [0, 0, z0]
+    tip        = (R @ np.array([L/2 + 0.35, 0, H/2])) + [0, 0, z0]
+    arrow = go.Scatter3d(x=[mid_front[0], tip[0]], y=[mid_front[1], tip[1]],
+                         z=[mid_front[2], tip[2]], mode='lines',
+                         line=dict(color='#ffeb3b', width=6),
+                         name='forward', showlegend=False)
+
+    return [body, arrow]
+
+
 def _confidence_heatmap(conf: np.ndarray, title: str, colorscale: str):
     import plotly.graph_objects as go
     return go.Heatmap(
@@ -228,10 +275,12 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
         vertical_spacing=0.08,
     )
 
-    objects = gt.get('objects_gt', np.zeros((0, 4), dtype=np.float32))
-    walls   = gt.get('walls_gt',   np.zeros((0, 4), dtype=np.float32))
+    objects = gt.get('objects_gt',  np.zeros((0, 4), dtype=np.float32))
+    walls   = gt.get('walls_gt',    np.zeros((0, 4), dtype=np.float32))
+    roll    = gt.get('robot_roll',  0.0)
+    pitch   = gt.get('robot_pitch', 0.0)
 
-    def _add_scene(height, col):
+    def _add_scene(height, col, show_rover=False):
         floor_z = float(height.mean())
         fig.add_trace(_floor_plane(floor_z), row=1, col=col)
         fig.add_trace(_surface(height, ''), row=1, col=col)
@@ -241,6 +290,9 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
             fig.add_trace(t, row=1, col=col)
         for w in _wall_lines(walls, height, floor_z):
             fig.add_trace(w, row=1, col=col)
+        if show_rover:
+            for t in _rover_box(height, roll, pitch):
+                fig.add_trace(t, row=1, col=col)
 
     def _add_conf(rocks, craters, col):
         fig.add_trace(_confidence_heatmap(rocks,   'rocks',   'Reds'),  row=2, col=col)
@@ -250,7 +302,7 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
         _add_scene(pred['height'], col=1)
         _add_conf(pred['rocks'], pred['craters'], col=1)
 
-    _add_scene(gt['height'], col=cols)
+    _add_scene(gt['height'], col=cols, show_rover=True)
     _add_conf(gt['rocks'], gt['craters'], col=cols)
 
     scene_cfg = dict(
