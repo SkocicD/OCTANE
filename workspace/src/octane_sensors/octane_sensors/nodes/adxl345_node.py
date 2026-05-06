@@ -109,8 +109,9 @@ class KlipperMCU:
         self._lock = threading.Lock()
         self._handlers: dict[int, queue.Queue] = {}
         self._raw_q: queue.Queue | None = None
-        self.cmds: dict[str, int] = {}
+        self.cmds:  dict[str, int] = {}
         self.resps: dict[str, int] = {}
+        self.enums: dict[str, int] = {}  # flattened enumerations from identify
 
     def connect(self, timeout: float = 15.0):
         self._ser = serial.Serial(self._port, 250000, timeout=0.1)
@@ -256,6 +257,10 @@ class KlipperMCU:
 
         self.cmds  = d.get('commands',  {})
         self.resps = d.get('responses', {})
+        # Flatten all enum groups into one dict: {"gpio9": 9, "spi1_...": 2, ...}
+        for group in d.get('enumerations', {}).values():
+            if isinstance(group, dict):
+                self.enums.update(group)
 
     def disconnect(self):
         self._running = False
@@ -336,6 +341,14 @@ class Adxl345Node(Node):
     def _configure(self):
         mcu = self._mcu
 
+        # Resolve SPI bus and CS pin from firmware enumerations.
+        # These are integer IDs, not raw GPIO numbers.
+        spi_bus = mcu.enums.get('spi1_gpio8_gpio11_gpio10', _SPI_BUS)
+        cs_pin  = mcu.enums.get('gpio9', _SPI_PIN)
+        self.get_logger().info(
+            f'[ADXL345] SPI bus enum={spi_bus} CS pin enum={cs_pin}'
+        )
+
         # 1. Allocate 2 OIDs: 0=SPI, 1=ADXL345
         mcu.send_cmd('allocate_oids count=%c', 2)
         time.sleep(0.05)
@@ -343,7 +356,7 @@ class Adxl345Node(Node):
         # 2. Configure SPI peripheral
         mcu.send_cmd(
             'config_spi oid=%c bus=%u pin=%u mode=%u rate=%u shutdown_msg=%*s',
-            0, _SPI_BUS, _SPI_PIN, _SPI_MODE, _SPI_RATE, b'',
+            0, spi_bus, cs_pin, _SPI_MODE, _SPI_RATE, b'',
         )
         time.sleep(0.05)
 
@@ -353,8 +366,6 @@ class Adxl345Node(Node):
         )
         if cmd_name is None:
             raise RuntimeError('[ADXL345] config_adxl345 not found in firmware')
-        # Handle both 'config_adxl345 oid=%c spi_oid=%c' and
-        # 'config_adxl345 oid=%c spi_oid=%c axes_data=%u'
         axes_data = 0x00
         if 'axes_data' in cmd_name:
             mcu.send_cmd(cmd_name, 1, 0, axes_data)
@@ -367,23 +378,28 @@ class Adxl345Node(Node):
             mcu.send_cmd('finalize_config crc=%u', 0)
             time.sleep(0.05)
 
-        # 5. Start bulk query
+        # 5. Register bulk data response handler.
+        # Klipper ≥ ~2022 uses 'sensor_bulk_data'; older builds used 'adxl345_data'.
+        data_resp = next(
+            (k for k in mcu.resps if 'sensor_bulk_data' in k or 'adxl345_data' in k),
+            None,
+        )
+        if data_resp is None:
+            raise RuntimeError('[ADXL345] No bulk data response found in firmware dict')
+        self.get_logger().info(f'[ADXL345] Using response: {data_resp}')
+        self._data_q = mcu.register_resp(data_resp)
+        threading.Thread(target=self._data_loop, daemon=True).start()
+
+        # 6. Start bulk query
         query_name = next(
             (k for k in mcu.cmds if k.startswith('query_adxl345')), None
         )
         if query_name is None:
             raise RuntimeError('[ADXL345] query_adxl345 not found in firmware')
-
-        # Register data response handler
-        data_resp = next(
-            (k for k in mcu.resps if 'adxl345_data' in k), None
-        )
-        if data_resp:
-            self._data_q = mcu.register_resp(data_resp)
-            threading.Thread(target=self._data_loop, daemon=True).start()
-
-        # rest_ticks=0 means run continuously
-        if 'time=%u' in query_name:
+        # Newer firmware: 'query_adxl345 oid=%c clock=%u rest_ticks=%u'
+        # Older firmware: 'query_adxl345 oid=%c rest_ticks=%u'
+        # rest_ticks=0 → run continuously on both variants.
+        if 'clock=%u' in query_name:
             mcu.send_cmd(query_name, 1, 0, 0)
         else:
             mcu.send_cmd(query_name, 1, 0)
