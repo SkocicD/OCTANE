@@ -1,7 +1,8 @@
 """Collect terrain data using the TerrainCollectionEnv.
 
-Saves per-episode NPZ files containing ground-truth terrain maps AND all 7
-camera frames (5 RGB + Orbbec RGB + Orbbec depth).  No ROS or DDS required.
+Saves per-episode NPZ files containing ground-truth terrain maps only.
+Camera images are saved separately under <gt_dir>/../images/<serial>/ for
+use by the ROS point-cloud generation pipeline.  No ROS or DDS required.
 """
 
 import argparse
@@ -36,11 +37,9 @@ def _save_images(frames: dict, img_root: pathlib.Path, ep_id: str) -> None:
         folder = img_root / serial
         folder.mkdir(parents=True, exist_ok=True)
         if arr.ndim == 2:
-            # Depth — clip sky/infinity, invert so near=bright, save as PNG
-            depth = np.where(np.isfinite(arr), arr, 0.0)
-            depth = np.clip(depth, 0.0, 10.0)   # 10 m max range
-            vis = (255 - (depth / 10.0 * 255)).astype(np.uint8)  # near=white, far=black
-            Image.fromarray(vis, mode="L").save(folder / f"{ep_id}.png")
+            # Depth — save as raw float32 .npy (metres).  Faster than PNG compression;
+            # the ROS image_replay_node converts to 16UC1 mm on load.
+            np.save(folder / f"{ep_id}.npy", np.where(np.isfinite(arr), arr, 0.0).astype(np.float32))
         else:
             Image.fromarray(arr, mode="RGB").save(folder / f"{ep_id}.jpg", quality=85)
 
@@ -64,9 +63,7 @@ def main():
     if start_ep > 0:
         print(f"[TerrainCollect] Resuming from episode {start_ep} ({len(existing)} existing)")
 
-    # Call setup() once after the first reset so the renderer is active.
-    # Never call it again — annotators are shared singletons and re-attaching
-    # them after destroy() corrupts their state.
+    # Setup cameras once after first reset — renderer is active at this point.
     obs, _ = env.reset()
     env.unwrapped._cam_capture.setup()
 
@@ -74,8 +71,9 @@ def main():
         if ep > start_ep:
             obs, _ = env.reset()
 
-        # Adaptive warmup: step until all cameras have valid frames or 300 steps pass.
-        # 60 steps is usually enough; Orbbec RGB occasionally needs more.
+        # Adaptive warmup: minimum 60 steps, then keep going (up to 300) until
+        # all cameras return non-black frames.  The render pipeline varies per
+        # launch — a fixed count is a coin-flip on cold starts.
         for _ws in range(300):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
             if _ws >= 59:
@@ -84,7 +82,7 @@ def main():
                        if (a.mean() < 3.0 if a.ndim == 3 else not np.any(a > 0.0))]
                 if not _wb and _wf:
                     if _ws > 59:
-                        print(f"[TerrainCollect] ep {ep}: all cameras ready after {_ws + 1} steps")
+                        print(f"[TerrainCollect] ep {ep}: cameras ready after {_ws + 1} warmup steps")
                     break
 
         ep_id = f"ep_{ep:06d}"
@@ -110,11 +108,9 @@ def main():
             robot_pitch = np.array([gt.get("robot_pitch", 0.0)]),
             robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
-        for serial, arr in frames.items():
-            save_kwargs[f"cam_{serial}"] = arr
 
         np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
-        _save_images(frames, img_dir, ep_id)
+        _save_images(frames, img_dir, ep_id)  # images saved separately for ROS pipeline
         (gt_dir / f"{ep_id}.ready").touch()
 
         del frames, save_kwargs

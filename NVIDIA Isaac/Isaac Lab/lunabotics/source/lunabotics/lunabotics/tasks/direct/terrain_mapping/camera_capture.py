@@ -151,7 +151,7 @@ class CameraCapture:
                 self._cameras.append({
                     "key": key, "serial": serial,
                     "cam_type": cam_type, "w": w, "h": h,
-                    "annotator": annot,
+                    "annotator": annot, "render_product": rp,
                 })
                 print(f"[CameraCapture] attached: {key}")
             except Exception as e:
@@ -182,5 +182,14 @@ class CameraCapture:
 
     # ──────────────────────────────────────────────────────────────────────
     def destroy(self) -> None:
+        for cam in self._cameras:
+            try:
+                cam["annotator"].detach()
+            except Exception:
+                pass
+            try:
+                cam["render_product"].destroy()
+            except Exception:
+                pass
         self._ready   = False
         self._cameras = []
