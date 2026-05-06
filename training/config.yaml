@@ -1,10 +1,10 @@
 data:
-  root: "E:/terrain_data"
+  root: "F:/terrain_data"
   splits_file: "training/splits.json"
   depth_stats_file: "training/depth_stats.json"
 
 training:
-  batch_size: 16
+  batch_size: 8
   epochs: 100
   learning_rate: 1.0e-4
   weight_decay: 1.0e-4

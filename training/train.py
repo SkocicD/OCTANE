@@ -72,8 +72,8 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
 
     total_mem  = torch.cuda.get_device_properties(device).total_memory
     target_max = total_mem * (1.0 - gpu_margin)
-    # Cap starting probe at 4 — 12×224×224 images make this model very memory-heavy
-    bs = min(start_bs, 4)
+    # Cap starting probe at 8 — auto-tuner steps down by halves if OOM
+    bs = min(start_bs, 8)
 
     print(f"[train] Auto batch size — GPU: {total_mem/1e9:.1f}GB, target ≤{(1-gpu_margin)*100:.0f}% usage")
 
