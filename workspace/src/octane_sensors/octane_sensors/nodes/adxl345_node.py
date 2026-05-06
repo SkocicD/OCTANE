@@ -189,64 +189,48 @@ class KlipperMCU:
                 self._handlers.pop(resp_id, None)
 
     def _identify(self, timeout: float):
-        # BTT ADXL345 V2.0 firmware sends only 2 bytes of dict data per
-        # identify_response.  Synchronous send-one/wait-one takes ~82 s for a
-        # 1644-byte dict.  Instead we run a sender thread at 5 ms intervals so
-        # ~20 requests are in-flight at any time, cutting collection to ~4 s.
+        # identify command = ID 1 (not 0 — 0 is get_uptime on Klipper MCU)
+        # identify_response format: resp_id=0, offset=%u, data=%*s (NO total field)
+        # Terminate when MCU returns empty data (offset past end of dict)
         CHUNK = 40
-        total_size: int | None = None
         chunks: dict[int, bytes] = {}
         raw_q: queue.Queue = queue.Queue()
         self._raw_q = raw_q
         deadline = time.time() + timeout
-
         _seq = [self._seq]
-        stop_flag = threading.Event()
-
-        def _sender():
-            while not stop_flag.is_set():
-                try:
-                    pl = _enc_vlq(0) + _enc_vlq(0) + _enc_vlq(CHUNK)
-                    self._ser.write(_frame(pl, _seq[0]))
-                    _seq[0] = (_seq[0] + 1) & _MSG_SEQ
-                except Exception:
-                    break
-                time.sleep(0.005)
-
-        send_thread = threading.Thread(target=_sender, daemon=True)
-        send_thread.start()
 
         try:
+            offset = 0
             while time.time() < deadline:
+                pl = _enc_vlq(1) + _enc_vlq(offset) + _enc_vlq(CHUNK)
+                self._ser.write(_frame(pl, _seq[0]))
+                _seq[0] = (_seq[0] + 1) & _MSG_SEQ
+
                 try:
                     pl = raw_q.get(timeout=0.5)
                 except queue.Empty:
-                    continue
+                    continue  # retry same offset
 
                 try:
                     pos = 0
-                    _resp_id, pos = _dec_vlq(pl, pos)
+                    resp_id, pos = _dec_vlq(pl, pos)
+                    if resp_id != 0:
+                        continue  # not identify_response (e.g. uptime frame)
                     resp_off, pos = _dec_vlq(pl, pos)
-                    resp_tot, pos = _dec_vlq(pl, pos)
                     data_len = pl[pos]; pos += 1
                     data = pl[pos:pos + data_len]
                 except Exception:
                     continue
 
-                if total_size is None:
-                    total_size = resp_tot
-                if data:
-                    chunks[resp_off] = data
-
-                if total_size and resp_off + len(data) >= total_size:
-                    break
+                if not data:
+                    break  # MCU signals end of dict with empty payload
+                chunks[resp_off] = data
+                offset = resp_off + data_len
         finally:
-            stop_flag.set()
-            send_thread.join(timeout=1.0)
             self._raw_q = None
             self._seq = _seq[0]
 
-        if not chunks or total_size is None:
+        if not chunks:
             raise RuntimeError('Klipper identify timed out')
 
         compressed = b''.join(chunks[k] for k in sorted(chunks))
@@ -255,12 +239,24 @@ class KlipperMCU:
         except Exception as e:
             raise RuntimeError(f'Klipper identify dict decompress failed: {e}')
 
-        self.cmds  = d.get('commands',  {})
-        self.resps = d.get('responses', {})
-        # Flatten all enum groups into one dict: {"gpio9": 9, "spi1_...": 2, ...}
+        self.cmds  = d.get('commands',  {})   # {name: id}
+        self.resps = d.get('responses', {})   # {name: id}
         for group in d.get('enumerations', {}).values():
             if isinstance(group, dict):
-                self.enums.update(group)
+                for k, v in group.items():
+                    if isinstance(v, list) and len(v) == 2:
+                        # Range encoding: [start_value, count] → expand
+                        # e.g. "gpio0": [0, 30] → gpio0=0, gpio1=1, ..., gpio29=29
+                        start_val, count = v
+                        m = re.match(r'^(.*?)(\d+)$', k)
+                        if m:
+                            base, start_idx = m.group(1), int(m.group(2))
+                            for i in range(count):
+                                self.enums[f'{base}{start_idx + i}'] = start_val + i
+                        else:
+                            self.enums[k] = start_val
+                    else:
+                        self.enums[k] = v
 
     def disconnect(self):
         self._running = False
@@ -341,47 +337,36 @@ class Adxl345Node(Node):
     def _configure(self):
         mcu = self._mcu
 
-        # Resolve SPI bus and CS pin from firmware enumerations.
-        # These are integer IDs, not raw GPIO numbers.
-        spi_bus = mcu.enums.get('spi1_gpio8_gpio11_gpio10', _SPI_BUS)
-        cs_pin  = mcu.enums.get('gpio9', _SPI_PIN)
-        self.get_logger().info(
-            f'[ADXL345] SPI bus enum={spi_bus} CS pin enum={cs_pin}'
-        )
+        # BTT ADXL345 V2.0: RP2040 hardware SPI1a
+        # GPIO9=CS, GPIO8=MISO(RX), GPIO10=SCLK, GPIO11=MOSI(TX)
+        CS_PIN  = 9
+        SPI_BUS = mcu.enums.get('spi1a', 4)  # spi1a = SPI1 on GPIO8/10/11
+        self.get_logger().info(f'[ADXL345] SPI bus={SPI_BUS} CS=GPIO{CS_PIN}')
 
         # 1. Allocate 2 OIDs: 0=SPI, 1=ADXL345
         mcu.send_cmd('allocate_oids count=%c', 2)
         time.sleep(0.05)
 
-        # 2. Configure SPI peripheral
-        mcu.send_cmd(
-            'config_spi oid=%c bus=%u pin=%u mode=%u rate=%u shutdown_msg=%*s',
-            0, spi_bus, cs_pin, _SPI_MODE, _SPI_RATE, b'',
-        )
+        # 2. Configure CS pin for SPI OID 0
+        mcu.send_cmd('config_spi oid=%c pin=%u cs_active_high=%c', 0, CS_PIN, 0)
         time.sleep(0.05)
 
-        # 3. Configure ADXL345 OID
-        cmd_name = next(
-            (k for k in mcu.cmds if k.startswith('config_adxl345')), None
-        )
-        if cmd_name is None:
-            raise RuntimeError('[ADXL345] config_adxl345 not found in firmware')
-        axes_data = 0x00
-        if 'axes_data' in cmd_name:
-            mcu.send_cmd(cmd_name, 1, 0, axes_data)
-        else:
-            mcu.send_cmd(cmd_name, 1, 0)
+        # 3. Configure hardware SPI1 bus on OID 0
+        mcu.send_cmd('spi_set_bus oid=%c spi_bus=%u mode=%u rate=%u', 0, SPI_BUS, _SPI_MODE, _SPI_RATE)
         time.sleep(0.05)
 
-        # 4. Finalize config (required by some Klipper versions)
+        # 4. Configure ADXL345 OID 1 linked to SPI OID 0
+        mcu.send_cmd('config_adxl345 oid=%c spi_oid=%c', 1, 0)
+        time.sleep(0.05)
+
+        # 5. Finalize config
         if 'finalize_config crc=%u' in mcu.cmds:
             mcu.send_cmd('finalize_config crc=%u', 0)
             time.sleep(0.05)
 
-        # 5. Register bulk data response handler.
-        # Klipper ≥ ~2022 uses 'sensor_bulk_data'; older builds used 'adxl345_data'.
+        # 6. Register adxl345_data response handler
         data_resp = next(
-            (k for k in mcu.resps if 'sensor_bulk_data' in k or 'adxl345_data' in k),
+            (k for k in mcu.resps if 'adxl345_data' in k or 'sensor_bulk_data' in k),
             None,
         )
         if data_resp is None:
@@ -390,19 +375,17 @@ class Adxl345Node(Node):
         self._data_q = mcu.register_resp(data_resp)
         threading.Thread(target=self._data_loop, daemon=True).start()
 
-        # 6. Start bulk query
+        # 7. Start bulk query — rest_ticks MUST be non-zero (0 = stop!)
+        # 500000 ticks @ 125 MHz ≈ 4 ms = ~250 Hz sample rate
         query_name = next(
             (k for k in mcu.cmds if k.startswith('query_adxl345')), None
         )
         if query_name is None:
             raise RuntimeError('[ADXL345] query_adxl345 not found in firmware')
-        # Newer firmware: 'query_adxl345 oid=%c clock=%u rest_ticks=%u'
-        # Older firmware: 'query_adxl345 oid=%c rest_ticks=%u'
-        # rest_ticks=0 → run continuously on both variants.
         if 'clock=%u' in query_name:
-            mcu.send_cmd(query_name, 1, 0, 0)
+            mcu.send_cmd(query_name, 1, 0, 500000)
         else:
-            mcu.send_cmd(query_name, 1, 0)
+            mcu.send_cmd(query_name, 1, 500000)
 
     def _data_loop(self):
         """Drain adxl345_data responses and cache latest sample."""
