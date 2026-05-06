@@ -40,6 +40,12 @@ Quick reference for all message formats used in rover-ground communication.
   - `a` = Actuator (position/heartbeat fault)
   - `d` = Depth camera (sensor error)
 
+**IMU Accelerometer:**
+- Marker: `I` (0x49)
+- Data: 12 bytes (3 × little-endian float32: x, y, z in m/s²)
+- Source: ADXL345 on `sensors/imu/accel`
+- Example: 0g idle → `I` + `\x00\x00\x00\x00` + `\x00\x00\x00\x00` + `\x1e\x85\x1c\x41` (z ≈ 9.81)
+
 ### Examples
 
 **Minimal telemetry (state only):**
@@ -236,6 +242,7 @@ Size: 3 bytes
 | severity_byte | uint8 | 1B | Fault severity (0-2) |
 | fault_char | uint8 | 1B | Fault type code (a-w) |
 | battery | float32 | 4B | Voltage in volts (little-endian) |
+| accel_x/y/z | float32 | 4B each | Acceleration in m/s² (little-endian) |
 
 ---
 

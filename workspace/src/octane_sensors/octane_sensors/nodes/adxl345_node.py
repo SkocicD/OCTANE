@@ -8,7 +8,7 @@ Linux i2c-dev kernel interface directly via fcntl/ioctl.
 Publishes sensor_msgs/Imu with linear_acceleration populated.
 Orientation and angular_velocity are marked unavailable (covariance[0] = -1).
 
-Topic: perception/imu/accel
+Topic: sensors/imu/accel
 Frame: imu_frame  (set imu_frame param to override)
 """
 
@@ -106,7 +106,7 @@ class Adxl345Node(Node):
         self._dev = _I2C(bus, addr)
         self._configure(range_g)
 
-        self._pub = self.create_publisher(Imu, 'perception/imu/accel', 10)
+        self._pub = self.create_publisher(Imu, 'sensors/imu/accel', 10)
         self.create_timer(1.0 / rate, self._cb)
         self.get_logger().info(f'[ADXL345] Publishing at {rate} Hz  frame={frame_id}')
 
