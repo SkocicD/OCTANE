@@ -59,19 +59,27 @@ def compute_loss(preds: dict, targets: dict):
     }
 
 
+def _safe_empty_cache():
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> int:
     if not torch.cuda.is_available():
         return start_bs
 
     total_mem  = torch.cuda.get_device_properties(device).total_memory
     target_max = total_mem * (1.0 - gpu_margin)
-    bs         = start_bs
+    # Cap starting probe at 4 — 12×224×224 images make this model very memory-heavy
+    bs = min(start_bs, 4)
 
     print(f"[train] Auto batch size — GPU: {total_mem/1e9:.1f}GB, target ≤{(1-gpu_margin)*100:.0f}% usage")
 
     while bs >= 1:
         try:
-            torch.cuda.empty_cache()
+            _safe_empty_cache()
             model.zero_grad()
             dummy_img = torch.randn(bs, 12, 3, 224, 224, device=device)
             dummy_rot = torch.randn(bs, 6, device=device)
@@ -89,7 +97,7 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
             if used <= target_max:
                 print(f"[train] Batch size {bs} — {used/1e9:.1f}GB / {total_mem/1e9:.1f}GB ({used/total_mem*100:.0f}%)")
                 model.zero_grad()
-                torch.cuda.empty_cache()
+                _safe_empty_cache()
                 return bs
             bs //= 2
 
@@ -98,7 +106,7 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
             if not any(s in str(e) for s in _oom_strings):
                 raise
             bs //= 2
-            torch.cuda.empty_cache()
+            _safe_empty_cache()
 
     return 1
 
