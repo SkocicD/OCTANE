@@ -105,7 +105,7 @@ class TerrainModel(nn.Module):
         )
         self.rot_to_feat = nn.Conv2d(self.ROT_EMBED, self.PROJ_S1, 1)
 
-        # Decoder: 7→14 (skip s2) → 28 (skip s3) → 56 (skip s4) → 100 → 200 → 400
+        # Decoder: 7→14 (skip s2) → 28 (skip s3) → 56 (skip s4) → 100 → 200
         self.dec1  = UpBlock(self.PROJ_S1, 192, 14)
         self.fuse2 = _proj(192 + self.PROJ_S2, 192)
         self.dec2  = UpBlock(192, 128, 28)
@@ -114,19 +114,18 @@ class TerrainModel(nn.Module):
         self.fuse4 = _proj(96 + self.PROJ_S4, 96)
         self.dec4  = UpBlock(96,  64, 100)
         self.dec5  = UpBlock(64,  48, 200)
-        self.dec6  = UpBlock(48,  32, 400)
 
         # Height gets a dedicated refinement pass for finer spatial output
         self.height_refine = nn.Sequential(
-            nn.Conv2d(32, 48, 3, padding=1, bias=False),
-            nn.BatchNorm2d(48),
+            nn.Conv2d(48, 64, 3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
-            nn.Conv2d(48, 1, 1),
+            nn.Conv2d(64, 1, 1),
         )
 
-        self.rocks_head   = nn.Conv2d(32, 1, 1)
-        self.craters_head = nn.Conv2d(32, 1, 1)
-        self.walls_head   = nn.Conv2d(32, 1, 1)
+        self.rocks_head   = nn.Conv2d(48, 1, 1)
+        self.craters_head = nn.Conv2d(48, 1, 1)
+        self.walls_head   = nn.Conv2d(48, 1, 1)
 
     def _fuse_cameras(self, images: torch.Tensor, B: int):
         imgs_flat = images.view(B * 12, 3, 224, 224)
@@ -176,7 +175,6 @@ class TerrainModel(nn.Module):
         x = self.fuse4(torch.cat([x, s4], dim=1))
         x = self.dec4(x)
         x = self.dec5(x)
-        x = self.dec6(x)
 
         return {
             'height':  self.height_refine(x).squeeze(1),

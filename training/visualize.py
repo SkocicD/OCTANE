@@ -98,9 +98,9 @@ def _load_gt(data_root: str, episode_id: str) -> dict:
 
 # ── plotting ──────────────────────────────────────────────────────────────────
 
-GRID      = 400
-CELL      = 0.05
-HALF      = GRID * CELL / 2  # 5.0 m  — BEV coverage
+GRID      = 200
+CELL      = 0.10
+HALF      = GRID * CELL / 2  # 10.0 m  — BEV coverage
 FLOOR_EXT = 15.0              # flat floor extends ±15 m around robot
 
 _xs = np.array([i * CELL - HALF for i in range(GRID)])

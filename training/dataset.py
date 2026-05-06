@@ -9,8 +9,8 @@ from torch.utils.data import Dataset
 from PIL import Image
 from torchvision import transforms
 
-GRID_SIZE = 400
-CELL_SIZE = 0.05
+GRID_SIZE = 200
+CELL_SIZE = 0.10
 BEV_HALF  = GRID_SIZE * CELL_SIZE / 2  # 10.0 m
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
