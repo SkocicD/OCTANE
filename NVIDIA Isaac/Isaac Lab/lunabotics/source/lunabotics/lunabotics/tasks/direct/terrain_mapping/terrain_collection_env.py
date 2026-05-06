@@ -210,16 +210,17 @@ _POLYHAVEN_SLUGS = [
 
 
 def _try_download_polyhaven(slug: str, dest_dir: str) -> bool:
-    """Download one Poly Haven 1k PBR texture set into dest_dir. Returns True on success."""
+    """Download one Poly Haven 1k PBR texture set into dest_dir via the API. Returns True on success."""
     import os
+    import json
     import urllib.request
 
     os.makedirs(dest_dir, exist_ok=True)
-    base = f"https://dl.polyhaven.org/file/ph-assets/Textures/{slug}/1k"
+    _HEADERS = {"User-Agent": "Mozilla/5.0"}
 
     def _get(url: str, path: str) -> bool:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(url, headers=_HEADERS)
             with urllib.request.urlopen(req, timeout=30) as resp:
                 with open(path, "wb") as f:
                     f.write(resp.read())
@@ -228,19 +229,43 @@ def _try_download_polyhaven(slug: str, dest_dir: str) -> bool:
             print(f"[PolyHaven] FAIL {url}: {e}")
             return False
 
-    albedo_path = os.path.join(dest_dir, "albedo.jpg")
-    downloaded = False
-    for suffix in ("_diff_1k.jpg", "_col_1k.jpg", "_diff_1k.png"):
-        if _get(f"{base}/{slug}{suffix}", albedo_path):
-            downloaded = True
-            break
-    if not downloaded:
+    # Query API for actual download URLs
+    try:
+        req = urllib.request.Request(
+            f"https://api.polyhaven.com/files/{slug}", headers=_HEADERS)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            files = json.loads(resp.read())
+    except Exception as e:
+        print(f"[PolyHaven] API lookup failed for {slug}: {e}")
         return False
 
-    if not _get(f"{base}/{slug}_nor_gl_1k.jpg", os.path.join(dest_dir, "normal.jpg")):
+    def _find_url(keys: list[str]) -> str | None:
+        for fmt in ("jpg", "png"):
+            if fmt not in files:
+                continue
+            for res in ("1k", "2k"):
+                if res not in files[fmt]:
+                    continue
+                for key in keys:
+                    if key in files[fmt][res]:
+                        return files[fmt][res][key]["url"]
+        return None
+
+    albedo_url = _find_url(["diffuse", "diff", "color", "col"])
+    normal_url = _find_url(["nor_gl", "normal_gl", "nor", "normal"])
+    rough_url  = _find_url(["rough", "roughness"])
+
+    if albedo_url is None:
+        print(f"[PolyHaven] No diffuse map found for {slug}")
         return False
-    if not _get(f"{base}/{slug}_rough_1k.jpg", os.path.join(dest_dir, "rough.jpg")):
+
+    ext = albedo_url.rsplit(".", 1)[-1]
+    if not _get(albedo_url, os.path.join(dest_dir, f"albedo.{ext}")):
         return False
+    if normal_url:
+        _get(normal_url, os.path.join(dest_dir, f"normal.{normal_url.rsplit('.', 1)[-1]}"))
+    if rough_url:
+        _get(rough_url, os.path.join(dest_dir, f"rough.{rough_url.rsplit('.', 1)[-1]}"))
 
     return True
 
