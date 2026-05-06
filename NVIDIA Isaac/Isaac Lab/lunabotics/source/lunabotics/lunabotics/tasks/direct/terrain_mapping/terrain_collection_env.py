@@ -827,7 +827,10 @@ class TerrainCollectionEnv(DirectRLEnv):
                 if os.path.isdir(os.path.join(biomes_dir, d))
                 and not d.endswith("_variants")
             )
-            if len(dirs) == len(BIOMES):
+            if len(dirs) == len(BIOMES) and all(
+                any(os.path.isfile(os.path.join(d, f"albedo.{e}")) for e in ("png", "jpg"))
+                for d in dirs
+            ):
                 return dirs
 
         S = 512
