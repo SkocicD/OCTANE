@@ -95,6 +95,14 @@ class CameraCapture:
             print(f"[CameraCapture] FATAL: omni.replicator not available: {e}")
             return
 
+        # Disable AA/DLSS — reduces internal render resolution below the housing
+        # near-clip threshold, causing depth_cam_rgb to go black intermittently.
+        try:
+            import carb.settings as _cs
+            _cs.get_settings().set("/rtx/post/aa/op", 0)
+        except Exception:
+            pass
+
         cam_prims = _find_camera_prims()
         print(f"[CameraCapture] stage scan: {len(cam_prims)}/{len(_CAM_MAP)} camera prims found")
         for k, p in cam_prims.items():
@@ -126,7 +134,7 @@ class CameraCapture:
                     # Orbbec sensor housings sit several cm in front of the lens.
                     # 0.01 m clips INTO the plastic and renders the black interior;
                     # 0.10 m clears it.  Standard cameras are fine at 0.01 m.
-                    near_target = 0.10 if "Orbbec" in key else 0.01
+                    near_target = 0.20 if "Orbbec" in key else 0.01
                     if near is None or near != near_target or (far is not None and far < 20.0):
                         clip_attr.Set(Gf.Vec2f(near_target, 150.0))
                         print(f"[CameraCapture]   {key}: clipping fixed {existing} → ({near_target}, 150)")
@@ -149,7 +157,7 @@ class CameraCapture:
                 )
                 annot.attach([rp])
                 self._cameras.append({
-                    "key": key, "serial": serial,
+                    "key": key, "serial": serial, "prim": prim,
                     "cam_type": cam_type, "w": w, "h": h,
                     "annotator": annot, "render_product": rp,
                 })
@@ -159,6 +167,21 @@ class CameraCapture:
 
         self._ready = bool(self._cameras)
         print(f"[CameraCapture] {len(self._cameras)}/{len(_CAM_MAP)} cameras ready")
+
+        # If RTX was requested via --/rtx/rendermode, the render products above
+        # captured their renderer context.  Push the *viewport* back to the
+        # interactive (Storm) renderer so the GUI stays fast to monitor.
+        try:
+            import carb.settings as _cs
+            _mode = _cs.get_settings().get("/rtx/rendermode") or ""
+            if "Ray" in _mode or "Path" in _mode:
+                import omni.kit.viewport.utility as _vpu
+                _vp = _vpu.get_active_viewport()
+                if _vp is not None:
+                    _vp.set_hd_engine("HdStormRendererPlugin")
+                    print("[CameraCapture] Viewport reset to Interactive (cameras use RTX)")
+        except Exception as _ve:
+            pass  # headless or viewport not available — no action needed
 
     # ──────────────────────────────────────────────────────────────────────
     def capture(self) -> dict[str, np.ndarray]:
@@ -179,6 +202,37 @@ class CameraCapture:
                 frames[cam["serial"]] = rgba[:, :, :3].copy()
 
         return frames
+
+    # ──────────────────────────────────────────────────────────────────────
+    def reinitialize_camera(self, serial: str) -> bool:
+        """Destroy and recreate the render product + annotator for one camera by serial."""
+        import omni.replicator.core as rep
+        for i, cam in enumerate(self._cameras):
+            if cam["serial"] != serial:
+                continue
+            print(f"[CameraCapture] Reinitializing {cam['key']} ({serial})...")
+            try:
+                cam["annotator"].detach([cam["render_product"]])
+            except Exception:
+                pass
+            try:
+                cam["render_product"].destroy()
+            except Exception:
+                pass
+            try:
+                rp    = rep.create.render_product(cam["prim"], resolution=(cam["w"], cam["h"]))
+                annot = rep.AnnotatorRegistry.get_annotator(
+                    "distance_to_image_plane" if cam["cam_type"] == "depth" else "rgb"
+                )
+                annot.attach([rp])
+                self._cameras[i]["render_product"] = rp
+                self._cameras[i]["annotator"]      = annot
+                print(f"[CameraCapture] Reinitialized: {cam['key']}")
+                return True
+            except Exception as e:
+                print(f"[CameraCapture] Reinitialize FAILED for {serial}: {e}")
+                return False
+        return False
 
     # ──────────────────────────────────────────────────────────────────────
     def destroy(self) -> None:

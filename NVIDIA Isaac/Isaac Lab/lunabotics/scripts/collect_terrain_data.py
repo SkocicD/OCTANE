@@ -10,10 +10,12 @@ import argparse
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Terrain data collection.")
-parser.add_argument("--task",     type=str, default="Template-TerrainCollection-v0")
-parser.add_argument("--num_envs", type=int, default=1)
-parser.add_argument("--gt_dir",   type=str, default=r"F:\terrain_data\gt")
-parser.add_argument("--episodes", type=int, default=100)
+parser.add_argument("--task",        type=str, default="Template-TerrainCollection-v0")
+parser.add_argument("--num_envs",    type=int, default=1)
+parser.add_argument("--gt_dir",      type=str, default=r"F:\terrain_data\gt")
+parser.add_argument("--episodes",    type=int, default=100)
+parser.add_argument("--ray_tracing", action="store_true", default=False,
+                    help="Use RTX RayTracedLighting for camera captures")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -28,6 +30,12 @@ from PIL import Image
 
 import lunabotics.tasks  # noqa: F401 — registers all envs, also sets up CUDA DLL paths
 import torch             # import torch AFTER isaaclab/lunabotics so CUDA paths are ready
+
+if args_cli.ray_tracing:
+    import carb.settings
+    carb.settings.get_settings().set("/rtx/rendermode", "RaytracedLighting")
+    carb.settings.get_settings().set("/rtx/post/aa/op", 0)
+    print("[TerrainCollect] RTX RaytracedLighting enabled")
 
 from lunabotics.tasks.direct.terrain_mapping.terrain_collection_env_cfg import TerrainCollectionEnvCfg
 
@@ -80,8 +88,8 @@ def main():
 
         # ── Adaptive warmup ──────────────────────────────────────────────────
         # Minimum 60 steps, then poll until all cameras return non-black frames
-        # (up to 300 steps total).  The render pipeline varies per launch.
-        for _ws in range(300):
+        # (up to 120 steps total).
+        for _ws in range(120):
             obs, _, terminated, truncated, _ = env.step(zero_actions)
             if _ws >= 59:
                 _wf = getattr(env.unwrapped, "_last_frames", {})
@@ -103,20 +111,22 @@ def main():
                   if (arr.mean() < 3.0 if arr.ndim == 3 else not np.any(arr > 0.0))]
 
         # ── Black-camera guard ───────────────────────────────────────────────
-        # If any camera is still black after full warmup, reset and try again.
-        # After _MAX_RETRIES failures for this episode slot we give up and move on.
+        # Reinitialize the failing render products and step more frames — do NOT
+        # reset the environment (that generates new terrain unnecessarily).
+        # Only after all reinit attempts fail do we save what we have.
         if black:
-            _need_reset = getattr(main, "_retry_count", 0) < _MAX_RETRIES - 1
             main._retry_count = getattr(main, "_retry_count", 0) + 1
             if main._retry_count < _MAX_RETRIES:
                 print(f"[TerrainCollect] ep {ep}: black cameras {black} "
-                      f"— retrying ({main._retry_count}/{_MAX_RETRIES})")
+                      f"— reinitializing ({main._retry_count}/{_MAX_RETRIES})")
+                for _serial in black:
+                    env.unwrapped._cam_capture.reinitialize_camera(_serial)
+                for _ in range(40):
+                    env.step(zero_actions)
+                _need_reset = False
                 continue
             print(f"[TerrainCollect] ep {ep}: black cameras {black} "
-                  f"after {_MAX_RETRIES} retries — skipping episode")
-            main._retry_count = 0
-            ep += 1
-            continue
+                  f"after {_MAX_RETRIES} reinit attempts — saving without them")
         main._retry_count = 0
 
         # ── Save ─────────────────────────────────────────────────────────────
@@ -131,7 +141,8 @@ def main():
             robot_roll  = np.array([gt.get("robot_roll",  0.0)]),
         )
         np.savez_compressed(gt_dir / f"{ep_id}_gt.npz", **save_kwargs)
-        _save_images(frames, img_dir, ep_id)
+        good_frames = {s: a for s, a in frames.items() if s not in black}
+        _save_images(good_frames, img_dir, ep_id)
         (gt_dir / f"{ep_id}.ready").touch()
 
         del frames, save_kwargs

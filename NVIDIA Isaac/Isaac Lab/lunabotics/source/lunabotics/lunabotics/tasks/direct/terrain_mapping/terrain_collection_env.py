@@ -133,7 +133,7 @@ def _sample_wall_panel_mat(rng: np.random.Generator) -> tuple:
     """
     _CLAMP = lambda x: float(np.clip(x, 0.0, 1.0))
 
-    if float(rng.random()) < 0.66:
+    if float(rng.random()) < 0.75:
         # ── Translucent / glass ───────────────────────────────────────────────
         t = int(rng.integers(6))
 
@@ -844,6 +844,9 @@ class TerrainCollectionEnv(DirectRLEnv):
         self._ep_rock_mat,   self._ep_rock_shader   = _make_ep_mat(f"{base}/EpRockMat")
         self._ep_wall_mat,   self._ep_wall_shader   = _make_ep_mat(f"{base}/EpWallMat")
         self._ep_footer_mat, self._ep_footer_shader = _make_ep_mat(f"{base}/EpFooterMat")
+        # OmniGlass wall material — created in _setup_wall_textures after MDL path is known
+        self._ep_wall_glass_mat    = None
+        self._ep_wall_glass_shader = None
 
         # ── rocks (jagged meshes) ──────────────────────────────────────────
         n_max_rocks = cfg.rock_count_range[1]
@@ -1129,7 +1132,7 @@ class TerrainCollectionEnv(DirectRLEnv):
                     continue
                 print(f"[TerrainCollectionEnv] Downloaded: {slug}")
 
-            dust = float(self._rng.uniform(0.35, 0.55)) if slug in _DUST_OVERLAY_SLUGS else 0.0
+            dust = float(self._rng.uniform(0.85, 0.95)) if slug in _DUST_OVERLAY_SLUGS else 0.0
             vdirs = _make_texture_variants(slug_dir, variants_dir, n=3, rng=self._rng, dust_strength=dust)
             self._ground_tex_sets.extend(vdirs)
 
@@ -1145,6 +1148,148 @@ class TerrainCollectionEnv(DirectRLEnv):
             self._ground_tex_sets.extend(vdirs if vdirs else [bdir])
 
         print(f"[TerrainCollectionEnv] Ground texture pool: {len(self._ground_tex_sets)} variants")
+
+    # ── wall panel textures (OmniGlass + procedural normal/roughness maps) ────
+
+    def _find_omniglass_mdl(self) -> str:
+        import os
+        try:
+            import carb
+            kit = carb.tokens.get_tokens_interface().resolve("${kit}")
+            p = os.path.join(kit, "mdl", "core", "Base", "OmniGlass.mdl")
+            if os.path.isfile(p):
+                return p.replace("\\", "/")
+        except Exception:
+            pass
+        for base in ("E:/IsaacLab/_isaac_sim", "F:/IsaacLab/_isaac_sim", "F:/isaacsim"):
+            p = os.path.join(base, "kit", "mdl", "core", "Base", "OmniGlass.mdl")
+            if os.path.isfile(p):
+                return p.replace("\\", "/")
+        print("[TerrainCollectionEnv] WARNING: OmniGlass.mdl not found — glass walls use UsdPreviewSurface")
+        return ""
+
+    def _generate_wall_textures(self, wall_tex_dir: str) -> list:
+        """Generate procedural normal + roughness map pairs for 6 glass panel types × 3 variants."""
+        import os
+        from PIL import Image as _Image
+
+        S = 512
+
+        def _fft_noise(rng, sigma_px: float) -> np.ndarray:
+            raw = rng.standard_normal((S, S)).astype(np.float32)
+            fx  = np.fft.fftfreq(S).reshape(1, S).astype(np.float32)
+            fy  = np.fft.fftfreq(S).reshape(S, 1).astype(np.float32)
+            k   = np.exp(-2.0 * np.pi ** 2 * sigma_px ** 2 * (fx ** 2 + fy ** 2))
+            return np.real(np.fft.ifft2(np.fft.fft2(raw) * k)).astype(np.float32)
+
+        def _normalise(h: np.ndarray) -> np.ndarray:
+            lo, hi = h.min(), h.max()
+            return (h - lo) / (hi - lo + 1e-8)
+
+        def _height_to_normal(h: np.ndarray, strength: float) -> np.ndarray:
+            dx = np.gradient(h, axis=1) * strength
+            dy = np.gradient(h, axis=0) * strength
+            nz = np.ones_like(dx)
+            L  = np.sqrt(dx ** 2 + dy ** 2 + nz ** 2) + 1e-8
+            n  = np.stack([-dx / L, -dy / L, nz / L], axis=-1)
+            return ((n * 0.5 + 0.5) * 255).clip(0, 255).astype(np.uint8)
+
+        def _splotch(rng, n: int, size_lo: float, size_hi: float) -> np.ndarray:
+            yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
+            b = np.zeros((S, S), dtype=np.float32)
+            for _ in range(n):
+                cx, cy = rng.uniform(0, S), rng.uniform(0, S)
+                sig    = rng.uniform(size_lo, size_hi)
+                b += float(rng.uniform(0.3, 1.0)) * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sig ** 2))
+            return _normalise(b)
+
+        # (name, n_variants, height_fn, roughness_fn)  — lambdas take (rng, variant_idx)
+        TYPES = [
+            ("frosted",  3,
+             lambda rng, _: _normalise(0.6 * _fft_noise(rng, 1.5) + 0.4 * _fft_noise(rng, 0.8)),
+             lambda rng, h: np.clip(float(rng.uniform(0.58, 0.80)) + _fft_noise(rng, 2.0) * 0.04, 0.0, 1.0)),
+            ("smudged",  3,
+             lambda rng, _: _normalise(0.7 * _splotch(rng, rng.integers(8, 20), 12, 55)
+                                       + 0.3 * _fft_noise(rng, 1.5)),
+             lambda rng, h: np.clip(0.06 + 0.50 * h + _fft_noise(rng, 3.0) * 0.03, 0.0, 1.0)),
+            ("wrinkled", 3,
+             lambda rng, _: _normalise(
+                 0.65 * np.sin(2 * np.pi * float(rng.uniform(0.006, 0.018))
+                               * (np.arange(S).reshape(1, S) * np.cos(float(rng.uniform(0, np.pi)))
+                                  + np.arange(S).reshape(S, 1) * np.sin(float(rng.uniform(0, np.pi)))))
+                 + 0.35 * _fft_noise(rng, 12.0)),
+             lambda rng, h: np.clip(0.12 + 0.22 * (1.0 - h), 0.0, 1.0)),
+            ("etched",   3,
+             lambda rng, _: _normalise(0.5 * _fft_noise(rng, 0.6) + 0.5 * _fft_noise(rng, 1.2)),
+             lambda rng, h: np.clip(float(rng.uniform(0.72, 0.92)) + _fft_noise(rng, 1.0) * 0.02, 0.0, 1.0)),
+            ("clear",    2,
+             lambda rng, _: _normalise(_fft_noise(rng, 3.0)) * 0.08,
+             lambda rng, h: np.clip(float(rng.uniform(0.02, 0.10)) + _fft_noise(rng, 4.0) * 0.01, 0.0, 1.0)),
+            ("dirty",    3,
+             lambda rng, _: _normalise(
+                 0.55 * _splotch(rng, rng.integers(5, 14), 30, 100)
+                 + 0.45 * _fft_noise(rng, 4.0)),
+             lambda rng, h: np.clip(0.18 + 0.48 * h, 0.0, 1.0)),
+        ]
+
+        dirs = []
+        for (name, n_variants, h_fn, r_fn) in TYPES:
+            for vi in range(n_variants):
+                rng  = np.random.default_rng(abs(hash(f"{name}_{vi}")) % (2 ** 32))
+                ddir = os.path.join(wall_tex_dir, f"{name}_{vi:02d}")
+                os.makedirs(ddir, exist_ok=True)
+                h    = h_fn(rng, vi)
+                norm = _height_to_normal(h, strength=float(rng.uniform(6.0, 14.0)))
+                _Image.fromarray(norm).save(os.path.join(ddir, "normal.png"))
+                rough = r_fn(rng, h)
+                _Image.fromarray((np.clip(rough, 0, 1) * 255).astype(np.uint8), mode="L").save(
+                    os.path.join(ddir, "roughness.png"))
+                dirs.append(ddir)
+                print(f"[TerrainCollectionEnv]   wall tex: {name}_{vi:02d}")
+
+        print(f"[TerrainCollectionEnv] Generated {len(dirs)} wall textures → {wall_tex_dir}")
+        return dirs
+
+    def _setup_wall_textures(self):
+        """Build wall texture pool and create the OmniGlass episode material."""
+        import os, omni.usd
+        from pxr import UsdShade, Sdf
+
+        assets_dir   = os.path.join(os.path.dirname(__file__), "assets")
+        wall_tex_dir = os.path.join(assets_dir, "wall_textures")
+        os.makedirs(wall_tex_dir, exist_ok=True)
+
+        existing = sorted(
+            os.path.join(wall_tex_dir, d)
+            for d in os.listdir(wall_tex_dir)
+            if os.path.isdir(os.path.join(wall_tex_dir, d))
+            and os.path.isfile(os.path.join(wall_tex_dir, d, "normal.png"))
+        )
+        self._wall_tex_sets = existing if existing else self._generate_wall_textures(wall_tex_dir)
+        print(f"[TerrainCollectionEnv] Wall texture pool: {len(self._wall_tex_sets)} variants")
+
+        mdl = self._find_omniglass_mdl()
+        if not mdl:
+            return
+
+        stage  = omni.usd.get_context().get_stage()
+        base   = "/World/collect_obstacles/Looks"
+        mat    = UsdShade.Material.Define(stage, f"{base}/EpWallGlassMat")
+        shader = UsdShade.Shader.Define(stage,  f"{base}/EpWallGlassMat/Shader")
+        shader.GetImplementationSourceAttr().Set("sourceAsset")
+        shader.SetSourceAsset(Sdf.AssetPath(mdl), "mdl")
+        shader.SetSourceAssetSubIdentifier("OmniGlass", "mdl")
+        shader.CreateInput("glass_color",        Sdf.ValueTypeNames.Color3f).Set((0.95, 0.97, 1.0))
+        shader.CreateInput("glass_ior",          Sdf.ValueTypeNames.Float  ).Set(1.49)
+        shader.CreateInput("frosting_roughness", Sdf.ValueTypeNames.Float  ).Set(0.05)
+        shader.CreateInput("depth",              Sdf.ValueTypeNames.Float  ).Set(0.01)
+        shader.CreateInput("thin_walled",        Sdf.ValueTypeNames.Bool   ).Set(True)
+        mat.CreateSurfaceOutput("mdl").ConnectToSource(shader.ConnectableAPI(), "out")
+        mat.CreateDisplacementOutput("mdl").ConnectToSource(shader.ConnectableAPI(), "out")
+        mat.CreateVolumeOutput("mdl").ConnectToSource(shader.ConnectableAPI(), "out")
+        self._ep_wall_glass_mat    = mat
+        self._ep_wall_glass_shader = shader
+        print(f"[TerrainCollectionEnv] OmniGlass wall material created")
 
     def _compute_bev_gt(
         self,
@@ -1308,7 +1453,7 @@ class TerrainCollectionEnv(DirectRLEnv):
         if cfg.randomize_materials:
             self._randomize_ground_material()
 
-        from pxr import Vt, UsdShade
+        from pxr import Vt, UsdShade, Sdf
         if cfg.randomize_materials and hasattr(self, "_ep_rock_shader"):
             ground_rgb = getattr(self, "_current_ground_avg_rgb", None)
             if ground_rgb is not None and float(rng.random()) < 0.85:
@@ -1322,11 +1467,25 @@ class TerrainCollectionEnv(DirectRLEnv):
             self._ep_rock_shader.GetInput("diffuseColor").Set(d)
             self._ep_rock_shader.GetInput("roughness").Set(r)
             self._ep_rock_shader.GetInput("metallic").Set(m)
+
             d, r, m, o = _sample_wall_panel_mat(rng)
-            self._ep_wall_shader.GetInput("diffuseColor").Set(d)
-            self._ep_wall_shader.GetInput("roughness").Set(r)
-            self._ep_wall_shader.GetInput("metallic").Set(m)
-            self._ep_wall_shader.GetInput("opacity").Set(o)
+            if o < 0.99 and self._ep_wall_glass_shader is not None:
+                # Translucent / glass panel — bind OmniGlass material to all wall slots
+                for _cube, *_ in self._wall_slots:
+                    UsdShade.MaterialBindingAPI(_cube.GetPrim()).Bind(self._ep_wall_glass_mat)
+                _ior = float(np.interp(r, [0.02, 0.85], [1.52, 1.47]))
+                self._ep_wall_glass_shader.GetInput("glass_color").Set(tuple(float(c) for c in d))
+                self._ep_wall_glass_shader.GetInput("frosting_roughness").Set(float(r))
+                self._ep_wall_glass_shader.GetInput("glass_ior").Set(_ior)
+            else:
+                # Opaque panel — bind UsdPreviewSurface material to all wall slots
+                for _cube, *_ in self._wall_slots:
+                    UsdShade.MaterialBindingAPI(_cube.GetPrim()).Bind(self._ep_wall_mat)
+                self._ep_wall_shader.GetInput("diffuseColor").Set(d)
+                self._ep_wall_shader.GetInput("roughness").Set(r)
+                self._ep_wall_shader.GetInput("metallic").Set(m)
+                self._ep_wall_shader.GetInput("opacity").Set(o)
+
             d, r, m, o = _sample_wall_footer_mat(rng)
             self._ep_footer_shader.GetInput("diffuseColor").Set(d)
             self._ep_footer_shader.GetInput("roughness").Set(r)
@@ -1446,6 +1605,7 @@ class TerrainCollectionEnv(DirectRLEnv):
 
         self._setup_obstacle_pool()
         self._setup_ground_textures()
+        self._setup_wall_textures()
 
         dome_cfg = sim_utils.DomeLightCfg(intensity=1500.0, color=(0.85, 0.88, 1.00))
         dome_cfg.func("/World/Light", dome_cfg)
