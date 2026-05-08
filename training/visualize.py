@@ -32,12 +32,14 @@ def _load_config(config_path: str) -> dict:
 
 
 def _all_episodes(data_root: str) -> list[str]:
+    from training.dataset import _valid_episodes
     gt_dir = os.path.join(data_root, 'gt')
-    return sorted(
+    all_ids = sorted(
         f.replace('_gt.npz', '')
         for f in os.listdir(gt_dir)
         if f.endswith('_gt.npz')
     )
+    return _valid_episodes(data_root, all_ids)
 
 
 def _resolve_episode(data_root: str, episode_id: str | None) -> str:

@@ -121,18 +121,23 @@ _FLIP_SWAP_PAIRS = [(0, 2), (1, 3), (6, 8), (7, 9)]
 
 
 def _valid_episodes(data_root: str, episode_ids: list) -> list:
-    """Return episode_ids with corrupted or missing NPZ files removed."""
+    """Return episode_ids where the NPZ and all 12 image files are present."""
     valid, bad = [], []
     for ep_id in episode_ids:
-        path = os.path.join(data_root, 'gt', f'{ep_id}_gt.npz')
+        npz_path = os.path.join(data_root, 'gt', f'{ep_id}_gt.npz')
         try:
-            with zipfile.ZipFile(path, 'r'):
+            with zipfile.ZipFile(npz_path, 'r'):
                 pass
-            valid.append(ep_id)
         except Exception:
             bad.append(ep_id)
+            continue
+        if any(not os.path.exists(os.path.join(data_root, rel, f'{ep_id}{ext}'))
+               for rel, ext in _SLOT_PATHS):
+            bad.append(ep_id)
+            continue
+        valid.append(ep_id)
     if bad:
-        print(f"[dataset] WARNING: skipping {len(bad)} corrupted/missing episode(s): "
+        print(f"[dataset] WARNING: skipping {len(bad)} incomplete/corrupted episode(s): "
               f"{bad[:5]}{'...' if len(bad) > 5 else ''}")
     return valid
 
@@ -175,8 +180,13 @@ class TerrainDataset(Dataset):
         for i, (rel_path, ext) in enumerate(_SLOT_PATHS):
             path = os.path.join(self.root, rel_path, f'{ep_id}{ext}')
             if i in _DEPTH_SLOTS:
-                # 16-bit PNG saved as millimetres (PIL mode 'I'); decode to metres then to RGB
-                raw = np.array(Image.open(path), dtype=np.float32) / 1000.0
+                pil_img = Image.open(path)
+                if pil_img.mode == 'I':
+                    # 32-bit int depth in mm (saved by collect_terrain_data.py)
+                    raw = np.array(pil_img, dtype=np.float32) / 1000.0
+                else:
+                    # RGB/grayscale depth map (e.g. from Jetson processing) — treat as 0–20 m
+                    raw = np.array(pil_img.convert('L'), dtype=np.float32) / 255.0 * 20.0
                 raw = np.clip(raw / 20.0, 0.0, 1.0)  # normalise 0–20m → 0–1
                 arr = (raw * 255).astype(np.uint8)
                 img = Image.fromarray(np.stack([arr, arr, arr], axis=-1), mode='RGB')
