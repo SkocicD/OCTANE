@@ -96,6 +96,8 @@ def compute_depth_stats(data_root: str, episode_ids: list,
     }
 
 
+HEIGHT_SCALE = 0.5  # metres — height_gt divided by this before training, multiply back for display
+
 # Image file paths for each of the 12 input slots.
 # (relative_path_under_root, extension)
 _SLOT_PATHS = [
@@ -207,7 +209,7 @@ class TerrainDataset(Dataset):
         ], dtype=torch.float32)
 
     def _load_gt(self, npz) -> dict:
-        height  = torch.from_numpy(npz['height_gt'])
+        height  = torch.from_numpy(npz['height_gt']).float() / HEIGHT_SCALE
         objects = npz['objects_gt']
         walls   = npz['walls_gt']
         rocks   = torch.from_numpy(build_object_heatmap(objects, class_id=0))

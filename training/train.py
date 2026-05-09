@@ -45,8 +45,20 @@ def create_splits(data_root: str, splits_file: str,
     return train_ids, val_ids
 
 
+def _height_grad_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """L1 loss on Sobel gradients — penalises wrong terrain slope, not just wrong absolute height."""
+    kx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+                      dtype=pred.dtype, device=pred.device).view(1, 1, 3, 3) / 8.0
+    ky = kx.transpose(-1, -2)
+    p, t = pred.unsqueeze(1), target.unsqueeze(1)
+    return (F.l1_loss(F.conv2d(p, kx, padding=1), F.conv2d(t, kx, padding=1)) +
+            F.l1_loss(F.conv2d(p, ky, padding=1), F.conv2d(t, ky, padding=1)))
+
+
 def compute_loss(preds: dict, targets: dict):
-    height_loss  = F.l1_loss(preds['height'],  targets['height'])
+    height_l1   = F.l1_loss(preds['height'],  targets['height'])
+    height_grad = _height_grad_loss(preds['height'], targets['height'])
+    height_loss  = 10.0 * height_l1 + 5.0 * height_grad
     rocks_loss   = F.mse_loss(preds['rocks'],   targets['rocks'])
     craters_loss = F.mse_loss(preds['craters'], targets['craters'])
     walls_loss   = F.binary_cross_entropy(preds['walls'], targets['walls'])

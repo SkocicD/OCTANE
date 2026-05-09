@@ -77,7 +77,10 @@ def _run_inference(checkpoint_path: str, data_root: str, episode_id: str,
         preds = model(images.unsqueeze(0).to(device),
                       rotation.unsqueeze(0).to(device))
 
-    return {k: v.squeeze(0).cpu().numpy() for k, v in preds.items()}, ckpt_info
+    from training.dataset import HEIGHT_SCALE
+    out = {k: v.squeeze(0).cpu().numpy() for k, v in preds.items()}
+    out['height'] = out['height'] * HEIGHT_SCALE  # convert back to metres for display
+    return out, ckpt_info
 
 
 def _load_gt(data_root: str, episode_id: str) -> dict:
