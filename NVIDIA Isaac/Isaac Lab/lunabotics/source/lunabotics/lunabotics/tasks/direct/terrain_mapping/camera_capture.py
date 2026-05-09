@@ -6,13 +6,15 @@ A separate offline ROS node can replay them later.
 
 Outputs per capture() call:
     {
-        "left_front":    (360, 480, 3)  uint8  RGB
-        "left_side":     (360, 480, 3)  uint8  RGB
-        "right_front":   (360, 480, 3)  uint8  RGB
-        "right_side":    (360, 480, 3)  uint8  RGB
-        "back_rear":     (360, 480, 3)  uint8  RGB
-        "depth_cam_rgb": (480, 640, 3)  uint8  RGB
-        "depth_cam_d":   (480, 640)     float32  metres
+        env_idx: {
+            "left_front":    (360, 480, 3)  uint8  RGB
+            "left_side":     (360, 480, 3)  uint8  RGB
+            "right_front":   (360, 480, 3)  uint8  RGB
+            "right_side":    (360, 480, 3)  uint8  RGB
+            "back_rear":     (360, 480, 3)  uint8  RGB
+            "depth_cam_rgb": (480, 640, 3)  uint8  RGB
+            "depth_cam_d":   (480, 640)     float32  metres
+        }
     }
 """
 
@@ -30,20 +32,22 @@ _CAM_MAP: dict[str, tuple] = {
     "Orbbec_Astra_Pro_D":   ("depth_cam_d",   "depth", 640, 480),
 }
 
-# Known-good prim paths (fallback if stage traversal misses a camera).
-_KNOWN_PATHS: dict[str, str] = {
-    "LEFT_FRONT":           "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_LEFT_FRONT",
-    "LEFT_SIDE":            "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_LEFT_SIDE",
-    "RIGHT_FRONT":          "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_RIGHT_FRONT",
-    "RIGHT_SIDE":           "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_RIGHT_SIDE",
-    "BACK_REAR":            "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Innomaker_RGB_130_BACK_REAR",
-    "Orbbec_Astra_Pro_RGB": "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Orbbec_Astra_Pro_RGB",
-    "Orbbec_Astra_Pro_D":   "/World/envs/env_0/Robot/tn__base_link1_wJ/tn__Cameras1_XG/Orbbec_Astra_Pro_D",
-}
+
+def _known_paths(env_idx: int) -> dict[str, str]:
+    base = f"/World/envs/env_{env_idx}/Robot/tn__base_link1_wJ/tn__Cameras1_XG"
+    return {
+        "LEFT_FRONT":           f"{base}/Innomaker_RGB_130_LEFT_FRONT",
+        "LEFT_SIDE":            f"{base}/Innomaker_RGB_130_LEFT_SIDE",
+        "RIGHT_FRONT":          f"{base}/Innomaker_RGB_130_RIGHT_FRONT",
+        "RIGHT_SIDE":           f"{base}/Innomaker_RGB_130_RIGHT_SIDE",
+        "BACK_REAR":            f"{base}/Innomaker_RGB_130_BACK_REAR",
+        "Orbbec_Astra_Pro_RGB": f"{base}/Orbbec_Astra_Pro_RGB",
+        "Orbbec_Astra_Pro_D":   f"{base}/Orbbec_Astra_Pro_D",
+    }
 
 
-def _find_camera_prims() -> dict[str, str]:
-    """Traverse the USD stage and return {key: prim_path} for known cameras."""
+def _find_camera_prims(env_idx: int = 0) -> dict[str, str]:
+    """Traverse the USD stage and return {key: prim_path} for env_idx's cameras."""
     try:
         import omni.usd
         from pxr import UsdGeom
@@ -54,11 +58,14 @@ def _find_camera_prims() -> dict[str, str]:
     if stage is None:
         return {}
 
+    env_prefix = f"/World/envs/env_{env_idx}/"
     found: dict[str, str] = {}
     for prim in stage.Traverse():
         if not prim.IsA(UsdGeom.Camera):
             continue
         path      = str(prim.GetPath())
+        if env_prefix not in path:
+            continue
         prim_name = prim.GetName()
         for key in _CAM_MAP:
             if key in prim_name or key in path:
@@ -67,12 +74,12 @@ def _find_camera_prims() -> dict[str, str]:
                 break
 
     # Fallback: use known static paths for any camera the traversal missed.
-    for key, path in _KNOWN_PATHS.items():
+    for key, path in _known_paths(env_idx).items():
         if key not in found:
             prim = stage.GetPrimAtPath(path)
             if prim.IsValid():
                 found[key] = path
-                print(f"[CameraCapture] fallback path used for {key}: {path}")
+                print(f"[CameraCapture] env_{env_idx} fallback path used for {key}: {path}")
 
     return found
 
@@ -80,14 +87,15 @@ def _find_camera_prims() -> dict[str, str]:
 class CameraCapture:
     """Attaches omni.replicator annotators to all robot cameras and captures frames."""
 
-    def __init__(self):
-        self._ready   = False
-        self._cameras: list[dict] = []
+    def __init__(self, num_envs: int = 1):
+        self._ready            = False
+        self._num_envs         = num_envs
+        self._cameras_per_env: list[list[dict]] = [[] for _ in range(num_envs)]
 
     # ──────────────────────────────────────────────────────────────────────
     def setup(self) -> None:
         """Create render products and attach annotators.  Call once after scene loads."""
-        print("[CameraCapture] setup() starting...")
+        print(f"[CameraCapture] setup() starting for {self._num_envs} env(s)...")
 
         try:
             import omni.replicator.core as rep
@@ -103,13 +111,6 @@ class CameraCapture:
         except Exception:
             pass
 
-        cam_prims = _find_camera_prims()
-        print(f"[CameraCapture] stage scan: {len(cam_prims)}/{len(_CAM_MAP)} camera prims found")
-        for k, p in cam_prims.items():
-            print(f"  {k:30s} → {p}")
-        if not cam_prims:
-            print("[CameraCapture] WARNING: no camera prims found in stage")
-
         try:
             import omni.usd
             from pxr import UsdGeom, Gf
@@ -117,56 +118,65 @@ class CameraCapture:
         except Exception:
             _stage = None
 
-        for key, (serial, cam_type, w, h) in _CAM_MAP.items():
-            prim = cam_prims.get(key)
-            if prim is None:
-                print(f"[CameraCapture] SKIP {key}: not in stage")
-                continue
+        total_attached = 0
+        for env_idx in range(self._num_envs):
+            cam_prims = _find_camera_prims(env_idx)
+            print(f"[CameraCapture] env_{env_idx}: {len(cam_prims)}/{len(_CAM_MAP)} camera prims found")
+            for k, p in cam_prims.items():
+                print(f"  env_{env_idx}  {k:30s} → {p}")
+            if not cam_prims:
+                print(f"[CameraCapture] WARNING: no camera prims found for env_{env_idx}")
 
-            if _stage is not None:
+            for key, (serial, cam_type, w, h) in _CAM_MAP.items():
+                prim = cam_prims.get(key)
+                if prim is None:
+                    print(f"[CameraCapture] SKIP env_{env_idx}/{key}: not in stage")
+                    continue
+
+                if _stage is not None:
+                    try:
+                        cam_prim  = UsdGeom.Camera(_stage.GetPrimAtPath(prim))
+                        clip_attr = cam_prim.GetClippingRangeAttr()
+                        existing  = clip_attr.Get() if clip_attr else None
+                        near = float(existing[0]) if existing else None
+                        far  = float(existing[1]) if existing else None
+
+                        near_target = 0.20 if "Orbbec" in key else 0.01
+                        if near is None or near != near_target or (far is not None and far < 20.0):
+                            clip_attr.Set(Gf.Vec2f(near_target, 150.0))
+                            print(f"[CameraCapture]   env_{env_idx}/{key}: clipping fixed → ({near_target}, 150)")
+                        else:
+                            print(f"[CameraCapture]   env_{env_idx}/{key}: clipping OK near={near:.4f} far={far:.1f}")
+
+                        xf  = UsdGeom.Xformable(_stage.GetPrimAtPath(prim))
+                        mat = xf.ComputeLocalToWorldTransform(0)
+                        fwd = mat.TransformDir(Gf.Vec3d(0, 0, -1))
+                        fwd = fwd.GetNormalized()
+                        print(f"[CameraCapture]   env_{env_idx}/{key}: world forward "
+                              f"({fwd[0]:+.2f}, {fwd[1]:+.2f}, {fwd[2]:+.2f})"
+                              f"  {'*** pointing UP ***' if fwd[2] > 0.7 else ''}")
+                    except Exception as ce:
+                        print(f"[CameraCapture]   env_{env_idx}/{key}: could not inspect clipping — {ce}")
+
                 try:
-                    cam_prim  = UsdGeom.Camera(_stage.GetPrimAtPath(prim))
-                    clip_attr = cam_prim.GetClippingRangeAttr()
-                    existing  = clip_attr.Get() if clip_attr else None
-                    near = float(existing[0]) if existing else None
-                    far  = float(existing[1]) if existing else None
+                    rp    = rep.create.render_product(prim, resolution=(w, h))
+                    annot = rep.AnnotatorRegistry.get_annotator(
+                        "distance_to_image_plane" if cam_type == "depth" else "rgb"
+                    )
+                    annot.attach([rp])
+                    self._cameras_per_env[env_idx].append({
+                        "key": key, "serial": serial, "prim": prim,
+                        "cam_type": cam_type, "w": w, "h": h,
+                        "annotator": annot, "render_product": rp,
+                    })
+                    total_attached += 1
+                    print(f"[CameraCapture] attached: env_{env_idx}/{key}")
+                except Exception as e:
+                    print(f"[CameraCapture] WARNING: could not attach env_{env_idx}/{key}: {e}")
 
-                    # Orbbec sensor housings sit several cm in front of the lens.
-                    # 0.01 m clips INTO the plastic and renders the black interior;
-                    # 0.10 m clears it.  Standard cameras are fine at 0.01 m.
-                    near_target = 0.20 if "Orbbec" in key else 0.01
-                    if near is None or near != near_target or (far is not None and far < 20.0):
-                        clip_attr.Set(Gf.Vec2f(near_target, 150.0))
-                        print(f"[CameraCapture]   {key}: clipping fixed {existing} → ({near_target}, 150)")
-                    else:
-                        print(f"[CameraCapture]   {key}: clipping OK near={near:.4f} far={far:.1f}")
-
-                    xf  = UsdGeom.Xformable(_stage.GetPrimAtPath(prim))
-                    mat = xf.ComputeLocalToWorldTransform(0)
-                    fwd = mat.TransformDir(Gf.Vec3d(0, 0, -1))
-                    fwd = fwd.GetNormalized()
-                    print(f"[CameraCapture]   {key}: world forward ({fwd[0]:+.2f}, {fwd[1]:+.2f}, {fwd[2]:+.2f})"
-                          f"  {'*** pointing UP ***' if fwd[2] > 0.7 else ''}")
-                except Exception as ce:
-                    print(f"[CameraCapture]   {key}: could not inspect clipping — {ce}")
-
-            try:
-                rp    = rep.create.render_product(prim, resolution=(w, h))
-                annot = rep.AnnotatorRegistry.get_annotator(
-                    "distance_to_image_plane" if cam_type == "depth" else "rgb"
-                )
-                annot.attach([rp])
-                self._cameras.append({
-                    "key": key, "serial": serial, "prim": prim,
-                    "cam_type": cam_type, "w": w, "h": h,
-                    "annotator": annot, "render_product": rp,
-                })
-                print(f"[CameraCapture] attached: {key}")
-            except Exception as e:
-                print(f"[CameraCapture] WARNING: could not attach {key}: {e}")
-
-        self._ready = bool(self._cameras)
-        print(f"[CameraCapture] {len(self._cameras)}/{len(_CAM_MAP)} cameras ready")
+        self._ready = any(len(c) > 0 for c in self._cameras_per_env)
+        print(f"[CameraCapture] {total_attached}/{len(_CAM_MAP) * self._num_envs} cameras ready "
+              f"across {self._num_envs} env(s)")
 
         # If RTX was requested via --/rtx/rendermode, the render products above
         # captured their renderer context.  Push the *viewport* back to the
@@ -180,37 +190,40 @@ class CameraCapture:
                 if _vp is not None:
                     _vp.set_hd_engine("HdStormRendererPlugin")
                     print("[CameraCapture] Viewport reset to Interactive (cameras use RTX)")
-        except Exception as _ve:
+        except Exception:
             pass  # headless or viewport not available — no action needed
 
     # ──────────────────────────────────────────────────────────────────────
-    def capture(self) -> dict[str, np.ndarray]:
-        """Read latest rendered frames.  Returns {serial: ndarray}, skips empty."""
+    def capture(self) -> dict[int, dict[str, np.ndarray]]:
+        """Read latest rendered frames.  Returns {env_idx: {serial: ndarray}}, skips empty."""
         if not self._ready:
             return {}
 
-        frames: dict[str, np.ndarray] = {}
-        for cam in self._cameras:
-            data = cam["annotator"].get_data()
-            if data is None or data.size == 0:
-                continue
-            w, h = cam["w"], cam["h"]
-            if cam["cam_type"] == "depth":
-                frames[cam["serial"]] = data.reshape(h, w).astype(np.float32)
-            else:
-                rgba = data.reshape(h, w, 4)
-                frames[cam["serial"]] = rgba[:, :, :3].copy()
-
-        return frames
+        result: dict[int, dict[str, np.ndarray]] = {}
+        for env_idx, cameras in enumerate(self._cameras_per_env):
+            frames: dict[str, np.ndarray] = {}
+            for cam in cameras:
+                data = cam["annotator"].get_data()
+                if data is None or data.size == 0:
+                    continue
+                w, h = cam["w"], cam["h"]
+                if cam["cam_type"] == "depth":
+                    frames[cam["serial"]] = data.reshape(h, w).astype(np.float32)
+                else:
+                    rgba = data.reshape(h, w, 4)
+                    frames[cam["serial"]] = rgba[:, :, :3].copy()
+            result[env_idx] = frames
+        return result
 
     # ──────────────────────────────────────────────────────────────────────
-    def reinitialize_camera(self, serial: str) -> bool:
-        """Destroy and recreate the render product + annotator for one camera by serial."""
+    def reinitialize_camera(self, env_idx: int, serial: str) -> bool:
+        """Destroy and recreate the render product + annotator for one camera by env and serial."""
         import omni.replicator.core as rep
-        for i, cam in enumerate(self._cameras):
+        cameras = self._cameras_per_env[env_idx]
+        for i, cam in enumerate(cameras):
             if cam["serial"] != serial:
                 continue
-            print(f"[CameraCapture] Reinitializing {cam['key']} ({serial})...")
+            print(f"[CameraCapture] Reinitializing env_{env_idx}/{cam['key']} ({serial})...")
             try:
                 cam["annotator"].detach([cam["render_product"]])
             except Exception:
@@ -225,25 +238,26 @@ class CameraCapture:
                     "distance_to_image_plane" if cam["cam_type"] == "depth" else "rgb"
                 )
                 annot.attach([rp])
-                self._cameras[i]["render_product"] = rp
-                self._cameras[i]["annotator"]      = annot
-                print(f"[CameraCapture] Reinitialized: {cam['key']}")
+                cameras[i]["render_product"] = rp
+                cameras[i]["annotator"]      = annot
+                print(f"[CameraCapture] Reinitialized: env_{env_idx}/{cam['key']}")
                 return True
             except Exception as e:
-                print(f"[CameraCapture] Reinitialize FAILED for {serial}: {e}")
+                print(f"[CameraCapture] Reinitialize FAILED for env_{env_idx}/{serial}: {e}")
                 return False
         return False
 
     # ──────────────────────────────────────────────────────────────────────
     def destroy(self) -> None:
-        for cam in self._cameras:
-            try:
-                cam["annotator"].detach()
-            except Exception:
-                pass
-            try:
-                cam["render_product"].destroy()
-            except Exception:
-                pass
-        self._ready   = False
-        self._cameras = []
+        for cameras in self._cameras_per_env:
+            for cam in cameras:
+                try:
+                    cam["annotator"].detach()
+                except Exception:
+                    pass
+                try:
+                    cam["render_product"].destroy()
+                except Exception:
+                    pass
+        self._ready            = False
+        self._cameras_per_env  = [[] for _ in range(self._num_envs)]

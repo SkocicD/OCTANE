@@ -503,7 +503,7 @@ class TerrainCollectionEnv(DirectRLEnv):
     cfg: TerrainCollectionEnvCfg
 
     def __init__(self, cfg: TerrainCollectionEnvCfg, render_mode: str | None = None, **kwargs):
-        self._current_gt = None
+        self._current_gts: list = []   # list[dict | None], one per env
         self._rng = np.random.default_rng()
         super().__init__(cfg, render_mode, **kwargs)
 
@@ -848,67 +848,69 @@ class TerrainCollectionEnv(DirectRLEnv):
         self._ep_wall_glass_mat    = None
         self._ep_wall_glass_shader = None
 
-        # ── rocks (jagged meshes) ──────────────────────────────────────────
+        # ── rocks, walls, footers — one pool per env ──────────────────────
         n_max_rocks = cfg.rock_count_range[1]
-        self._rock_slots: list[tuple] = []          # (UsdGeom.Mesh, translate_op)
-        for i in range(n_max_rocks):
-            path      = f"/World/collect_obstacles/rock_{i:03d}"
-            rock_geom = UsdGeom.Mesh.Define(stage, path)
-            pts, fc, fi = _jagged_sphere_mesh(self._rng, cfg.rock_diameter_range[1] / 2.0)
-            rock_geom.CreatePointsAttr().Set(Vt.Vec3fArray([Gf.Vec3f(*p) for p in pts]))
-            rock_geom.CreateFaceVertexCountsAttr().Set(fc)
-            rock_geom.CreateFaceVertexIndicesAttr().Set(fi)
-            rock_geom.CreateSubdivisionSchemeAttr().Set("none")
-            rock_geom.CreateDoubleSidedAttr().Set(True)
-            xf   = UsdGeom.Xformable(rock_geom)
-            xf.ClearXformOpOrder()
-            t_op = xf.AddTranslateOp()
-            t_op.Set(PARK)
-            UsdPhysics.CollisionAPI.Apply(rock_geom.GetPrim())
-            mesh_col = UsdPhysics.MeshCollisionAPI.Apply(rock_geom.GetPrim())
-            mesh_col.CreateApproximationAttr().Set("convexHull")
-            UsdShade.MaterialBindingAPI.Apply(rock_geom.GetPrim()).Bind(self._ep_rock_mat)
-            self._rock_slots.append((rock_geom, t_op))
-
-        # ── walls (thin panels) ────────────────────────────────────────────
-        n_max_walls  = cfg.wall_count_range[1]
+        n_max_walls = cfg.wall_count_range[1]
         self._wall_width = 0.06
-        self._wall_slots: list[tuple] = []          # (cube_prim, translate_op, rotate_op, scale_op)
-        for i in range(n_max_walls):
-            path = f"/World/collect_obstacles/wall_{i:03d}"
-            cube = UsdGeom.Cube.Define(stage, path)
-            xf    = UsdGeom.Xformable(cube)
-            xf.ClearXformOpOrder()
-            t_op  = xf.AddTranslateOp()
-            r_op  = xf.AddRotateZOp()
-            s_op  = xf.AddScaleOp()
-            t_op.Set(PARK)
-            r_op.Set(0.0)
-            s_op.Set(Gf.Vec3d(cfg.wall_length_range[1] / 2.0,
-                               self._wall_width / 2.0,
-                               cfg.wall_height / 2.0))
-            UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
-            UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(self._ep_wall_mat)
-            self._wall_slots.append((cube, t_op, r_op, s_op))
+        self._rock_slots_per_env:   list[list[tuple]] = [[] for _ in range(self.num_envs)]
+        self._wall_slots_per_env:   list[list[tuple]] = [[] for _ in range(self.num_envs)]
+        self._footer_slots_per_env: list[list[tuple]] = [[] for _ in range(self.num_envs)]
 
-        # ── wall footers (thicker base trim) ───────────────────────────────
-        self._footer_slots: list[tuple] = []
-        for i in range(n_max_walls):
-            path  = f"/World/collect_obstacles/footer_{i:03d}"
-            cube  = UsdGeom.Cube.Define(stage, path)
-            xf    = UsdGeom.Xformable(cube)
-            xf.ClearXformOpOrder()
-            t_op  = xf.AddTranslateOp()
-            r_op  = xf.AddRotateZOp()
-            s_op  = xf.AddScaleOp()
-            t_op.Set(PARK)
-            r_op.Set(0.0)
-            s_op.Set(Gf.Vec3d(cfg.wall_length_range[1] / 2.0, 0.15, 0.20))
-            UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
-            UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(self._ep_footer_mat)
-            self._footer_slots.append((cube, t_op, r_op, s_op))
+        for e in range(self.num_envs):
+            stage.DefinePrim(f"/World/collect_obstacles/env_{e}", "Xform")
 
-        print(f"[TerrainCollectionEnv] Obstacle pool: {n_max_rocks} rock slots, {n_max_walls} wall slots")
+            for i in range(n_max_rocks):
+                path      = f"/World/collect_obstacles/env_{e}/rock_{i:03d}"
+                rock_geom = UsdGeom.Mesh.Define(stage, path)
+                pts, fc, fi = _jagged_sphere_mesh(self._rng, cfg.rock_diameter_range[1] / 2.0)
+                rock_geom.CreatePointsAttr().Set(Vt.Vec3fArray([Gf.Vec3f(*p) for p in pts]))
+                rock_geom.CreateFaceVertexCountsAttr().Set(fc)
+                rock_geom.CreateFaceVertexIndicesAttr().Set(fi)
+                rock_geom.CreateSubdivisionSchemeAttr().Set("none")
+                rock_geom.CreateDoubleSidedAttr().Set(True)
+                xf   = UsdGeom.Xformable(rock_geom)
+                xf.ClearXformOpOrder()
+                t_op = xf.AddTranslateOp()
+                t_op.Set(PARK)
+                UsdPhysics.CollisionAPI.Apply(rock_geom.GetPrim())
+                mesh_col = UsdPhysics.MeshCollisionAPI.Apply(rock_geom.GetPrim())
+                mesh_col.CreateApproximationAttr().Set("convexHull")
+                UsdShade.MaterialBindingAPI.Apply(rock_geom.GetPrim()).Bind(self._ep_rock_mat)
+                self._rock_slots_per_env[e].append((rock_geom, t_op))
+
+            for i in range(n_max_walls):
+                path = f"/World/collect_obstacles/env_{e}/wall_{i:03d}"
+                cube = UsdGeom.Cube.Define(stage, path)
+                xf    = UsdGeom.Xformable(cube)
+                xf.ClearXformOpOrder()
+                t_op  = xf.AddTranslateOp()
+                r_op  = xf.AddRotateZOp()
+                s_op  = xf.AddScaleOp()
+                t_op.Set(PARK)
+                r_op.Set(0.0)
+                s_op.Set(Gf.Vec3d(cfg.wall_length_range[1] / 2.0,
+                                   self._wall_width / 2.0,
+                                   cfg.wall_height / 2.0))
+                UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+                UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(self._ep_wall_mat)
+                self._wall_slots_per_env[e].append((cube, t_op, r_op, s_op))
+
+                path  = f"/World/collect_obstacles/env_{e}/footer_{i:03d}"
+                cube  = UsdGeom.Cube.Define(stage, path)
+                xf    = UsdGeom.Xformable(cube)
+                xf.ClearXformOpOrder()
+                t_op  = xf.AddTranslateOp()
+                r_op  = xf.AddRotateZOp()
+                s_op  = xf.AddScaleOp()
+                t_op.Set(PARK)
+                r_op.Set(0.0)
+                s_op.Set(Gf.Vec3d(cfg.wall_length_range[1] / 2.0, 0.15, 0.20))
+                UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+                UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(self._ep_footer_mat)
+                self._footer_slots_per_env[e].append((cube, t_op, r_op, s_op))
+
+        print(f"[TerrainCollectionEnv] Obstacle pool: {n_max_rocks} rock slots, "
+              f"{n_max_walls} wall slots × {self.num_envs} env(s)")
 
     def _randomize_ground_material(self):
         """Switch the OmniPBR ground shader to a random cached texture set with random UV scale."""
@@ -1400,7 +1402,7 @@ class TerrainCollectionEnv(DirectRLEnv):
             "robot_yaw":   np.float32(robot_yaw),
         }
 
-    def _randomize_obstacles(self, env_ox: float, env_oy: float,
+    def _randomize_obstacles(self, env_idx: int, env_ox: float, env_oy: float,
                               robot_wx: float, robot_wy: float, robot_yaw: float):
         """Teleport pooled obstacle prims to new random positions."""
         from pxr import Gf
@@ -1470,16 +1472,16 @@ class TerrainCollectionEnv(DirectRLEnv):
 
             d, r, m, o = _sample_wall_panel_mat(rng)
             if o < 0.99 and self._ep_wall_glass_shader is not None:
-                # Translucent / glass panel — bind OmniGlass material to all wall slots
-                for _cube, *_ in self._wall_slots:
+                # Translucent / glass panel — bind OmniGlass material to this env's wall slots
+                for _cube, *_ in self._wall_slots_per_env[env_idx]:
                     UsdShade.MaterialBindingAPI(_cube.GetPrim()).Bind(self._ep_wall_glass_mat)
                 _ior = float(np.interp(r, [0.02, 0.85], [1.52, 1.47]))
                 self._ep_wall_glass_shader.GetInput("glass_color").Set(tuple(float(c) for c in d))
                 self._ep_wall_glass_shader.GetInput("frosting_roughness").Set(float(r))
                 self._ep_wall_glass_shader.GetInput("glass_ior").Set(_ior)
             else:
-                # Opaque panel — bind UsdPreviewSurface material to all wall slots
-                for _cube, *_ in self._wall_slots:
+                # Opaque panel — bind UsdPreviewSurface material to this env's wall slots
+                for _cube, *_ in self._wall_slots_per_env[env_idx]:
                     UsdShade.MaterialBindingAPI(_cube.GetPrim()).Bind(self._ep_wall_mat)
                 self._ep_wall_shader.GetInput("diffuseColor").Set(d)
                 self._ep_wall_shader.GetInput("roughness").Set(r)
@@ -1495,7 +1497,7 @@ class TerrainCollectionEnv(DirectRLEnv):
         # ── rocks (jagged meshes — shape regenerated each episode) ─────────────
         n_rocks = int(rng.integers(cfg.rock_count_range[0], cfg.rock_count_range[1] + 1))
         rocks: list[list[float]] = []
-        for i, (rock_geom, t_op) in enumerate(self._rock_slots):
+        for i, (rock_geom, t_op) in enumerate(self._rock_slots_per_env[env_idx]):
             if i < n_rocks:
                 lx, ly = _sample_pos()
                 radius = float(rng.uniform(cfg.rock_diameter_range[0] / 2.0,
@@ -1515,8 +1517,8 @@ class TerrainCollectionEnv(DirectRLEnv):
         n_walls = int(rng.integers(cfg.wall_count_range[0], cfg.wall_count_range[1] + 1))
         walls: list[list[float]] = []
         placed_segs: list[tuple] = []  # (cx1, cy1, cx2, cy2) of accepted walls
-        for i, (cube, t_op, r_op, s_op) in enumerate(self._wall_slots):
-            _, ft_op, fr_op, fs_op = self._footer_slots[i]
+        for i, (cube, t_op, r_op, s_op) in enumerate(self._wall_slots_per_env[env_idx]):
+            _, ft_op, fr_op, fs_op = self._footer_slots_per_env[env_idx][i]
             if i < n_walls:
                 placed = False
                 for _attempt in range(30):
@@ -1559,11 +1561,13 @@ class TerrainCollectionEnv(DirectRLEnv):
                 t_op.Set(PARK)
                 ft_op.Set(PARK)
 
-        crater_params = getattr(self, "_episode_craters_per_env", [[]])[0]
+        crater_params = getattr(self, "_episode_craters_per_env", [[]] * self.num_envs)[env_idx]
         robot_lx = robot_wx - env_ox
         robot_ly = robot_wy - env_oy
-        self._current_gt = self._compute_bev_gt(
-            hf_m=self._episode_hf_m[0],
+        while len(self._current_gts) <= env_idx:
+            self._current_gts.append(None)
+        self._current_gts[env_idx] = self._compute_bev_gt(
+            hf_m=self._episode_hf_m[env_idx],
             robot_lx=robot_lx,
             robot_ly=robot_ly,
             robot_yaw=robot_yaw,
@@ -1611,7 +1615,7 @@ class TerrainCollectionEnv(DirectRLEnv):
         dome_cfg.func("/World/Light", dome_cfg)
 
         from .camera_capture import CameraCapture
-        self._cam_capture = CameraCapture()
+        self._cam_capture = CameraCapture(self.num_envs)
         # setup() is called lazily on first capture() so the render pipeline
         # is guaranteed active — calling it here caused random black cameras.
 
@@ -1684,26 +1688,28 @@ class TerrainCollectionEnv(DirectRLEnv):
             default_root_state[:, 5] = 0.0
             default_root_state[:, 6] = torch.sin(yaw * 0.5)
 
-        if len(env_ids) == self.num_envs and hasattr(self, "_rock_slots"):
+        if len(env_ids) == self.num_envs and hasattr(self, "_rock_slots_per_env"):
             self._randomize_per_env_terrain()
-            env_o = self._env_origins[env_ids[0]]
-            quat  = default_root_state[0, 3:7]
-            w, x, y, z = (float(quat[i]) for i in range(4))
-            _ryaw = float(torch.atan2(
-                2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
-                1.0 - 2.0 * (quat[2] ** 2 + quat[3] ** 2)
-            ).item())
-            self._randomize_obstacles(
-                float(env_o[0]), float(env_o[1]),
-                float(default_root_state[0, 0]), float(default_root_state[0, 1]),
-                _ryaw,
-            )
-            # Append roll/pitch to GT after _randomize_obstacles populates _current_gt
-            if self._current_gt is not None:
-                _roll  = float(np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y)))
-                _pitch = float(np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0)))
-                self._current_gt["robot_roll"]  = np.float32(_roll)
-                self._current_gt["robot_pitch"] = np.float32(_pitch)
+            self._current_gts = [None] * self.num_envs
+            for i, env_id in enumerate(env_ids.tolist()):
+                env_o = self._env_origins[env_id]
+                quat  = default_root_state[i, 3:7]
+                w, x, y, z = (float(quat[j]) for j in range(4))
+                _ryaw = float(torch.atan2(
+                    2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
+                    1.0 - 2.0 * (quat[2] ** 2 + quat[3] ** 2)
+                ).item())
+                self._randomize_obstacles(
+                    env_id,
+                    float(env_o[0]), float(env_o[1]),
+                    float(default_root_state[i, 0]), float(default_root_state[i, 1]),
+                    _ryaw,
+                )
+                if self._current_gts[env_id] is not None:
+                    _roll  = float(np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y)))
+                    _pitch = float(np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0)))
+                    self._current_gts[env_id]["robot_roll"]  = np.float32(_roll)
+                    self._current_gts[env_id]["robot_pitch"] = np.float32(_pitch)
 
         self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
