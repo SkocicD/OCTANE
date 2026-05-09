@@ -45,11 +45,15 @@ def create_splits(data_root: str, splits_file: str,
     return train_ids, val_ids
 
 
+_SOBEL_X = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+                        dtype=torch.float32).view(1, 1, 3, 3) / 8.0
+_SOBEL_Y = _SOBEL_X.transpose(-1, -2).contiguous()
+
+
 def _height_grad_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """L1 loss on Sobel gradients — penalises wrong terrain slope, not just wrong absolute height."""
-    kx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
-                      dtype=pred.dtype, device=pred.device).view(1, 1, 3, 3) / 8.0
-    ky = kx.transpose(-1, -2)
+    kx = _SOBEL_X.to(pred.device)
+    ky = _SOBEL_Y.to(pred.device)
     p, t = pred.unsqueeze(1), target.unsqueeze(1)
     return (F.l1_loss(F.conv2d(p, kx, padding=1), F.conv2d(t, kx, padding=1)) +
             F.l1_loss(F.conv2d(p, ky, padding=1), F.conv2d(t, ky, padding=1)))
@@ -320,7 +324,13 @@ def main():
     resume_path = _find_latest_checkpoint(ckpt_dir)
     if resume_path:
         ckpt = torch.load(resume_path, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt['model'])
+        sd = ckpt['model']
+        sd = {k: v for k, v in sd.items()
+              if k in model.state_dict() and v.shape == model.state_dict()[k].shape}
+        missing = [k for k in model.state_dict() if k not in sd]
+        model.load_state_dict(sd, strict=False)
+        if missing:
+            print(f"[train] New params (random init): {len(missing)} keys")
         if 'optimizer' in ckpt:
             optimizer.load_state_dict(ckpt['optimizer'])
         if 'scheduler' in ckpt:
@@ -389,6 +399,9 @@ def main():
             'best_val': best_val, 'epochs_no_improve': epochs_no_improve,
             'global_step': global_step,
         }, os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+
+        import gc; gc.collect()
+        _safe_empty_cache()
 
     writer.close()
     print("[train] Done.")

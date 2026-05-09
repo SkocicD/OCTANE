@@ -115,9 +115,25 @@ class TerrainModel(nn.Module):
         self.dec4  = UpBlock(96,  64, 100)
         self.dec5  = UpBlock(64,  48, 200)
 
-        # Height gets a dedicated refinement pass for finer spatial output
+        # Dedicated depth encoder — lightweight CNN, no pretrained weights.
+        # Processes only depth camera slots (6-11) whose pixel values encode
+        # actual distance rather than appearance.  EfficientNet's ImageNet
+        # filters destroy depth gradients; this branch preserves them.
+        self.depth_enc = nn.Sequential(
+            nn.Conv2d(3,   32, 7, stride=2, padding=3, bias=False), nn.BatchNorm2d(32),  nn.ReLU(inplace=True),
+            nn.Dropout2d(0.1),
+            nn.Conv2d(32,  64, 3, stride=2, padding=1, bias=False), nn.BatchNorm2d(64),  nn.ReLU(inplace=True),
+            nn.Dropout2d(0.1),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1, bias=False), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.Dropout2d(0.15),
+            nn.Conv2d(128, 64, 3, stride=2, padding=1, bias=False), nn.BatchNorm2d(64),  nn.ReLU(inplace=True),
+        )  # → (B*6, 64, 14, 14)
+        self.depth_up1 = UpBlock(64, 48, 56)
+        self.depth_up2 = UpBlock(48, 48, 200)
+
+        # Height head fuses shared decoder features + dedicated depth features
         self.height_refine = nn.Sequential(
-            nn.Conv2d(48, 64, 3, padding=1, bias=False),
+            nn.Conv2d(48 + 48, 64, 3, padding=1, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 1, 1),
@@ -176,8 +192,14 @@ class TerrainModel(nn.Module):
         x = self.dec4(x)
         x = self.dec5(x)
 
+        # Depth branch: slots 6-11 only, through dedicated depth-preserving CNN
+        depth_flat = images[:, 6:].reshape(B * 6, 3, 224, 224)
+        depth_feat = self.depth_enc(depth_flat)                    # (B*6, 64, 14, 14)
+        depth_feat = depth_feat.view(B, 6, 64, 14, 14).mean(1)    # (B,   64, 14, 14)
+        depth_feat = self.depth_up2(self.depth_up1(depth_feat))    # (B,   48, 200, 200)
+
         return {
-            'height':  self.height_refine(x).squeeze(1),
+            'height':  self.height_refine(torch.cat([x, depth_feat], dim=1)).squeeze(1),
             'rocks':   torch.sigmoid(self.rocks_head(x)).squeeze(1),
             'craters': torch.sigmoid(self.craters_head(x)).squeeze(1),
             'walls':   torch.sigmoid(self.walls_head(x)).squeeze(1),

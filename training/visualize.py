@@ -65,7 +65,10 @@ def _run_inference(checkpoint_path: str, data_root: str, episode_id: str,
     device = torch.device(device_str)
     model  = TerrainModel().to(device)
     ckpt   = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(ckpt['model'])
+    sd = ckpt['model']
+    sd = {k: v for k, v in sd.items()
+          if k in model.state_dict() and v.shape == model.state_dict()[k].shape}
+    model.load_state_dict(sd, strict=False)
     model.eval()
 
     ckpt_info = {'epoch': ckpt.get('epoch', '?'), 'val_loss': ckpt.get('val_loss', None)}

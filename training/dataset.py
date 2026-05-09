@@ -195,6 +195,8 @@ class TerrainDataset(Dataset):
             else:
                 img = Image.open(path).convert('RGB')
             t = self._rgb_transform(img) if i in _RGB_SLOTS else self._depth_transform(img)
+            if self.augment and i in _DEPTH_SLOTS:
+                t = t + torch.randn_like(t) * 0.02
             tensors.append(t)
         return torch.stack(tensors, dim=0)  # (12, 3, 224, 224)
 
