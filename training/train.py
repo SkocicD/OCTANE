@@ -71,6 +71,12 @@ def compute_loss(preds: dict, targets: dict):
     }
 
 
+def _find_latest_checkpoint(ckpt_dir: str):
+    import glob
+    paths = sorted(glob.glob(os.path.join(ckpt_dir, 'epoch_*.pt')))
+    return paths[-1] if paths else None
+
+
 def _safe_empty_cache():
     try:
         torch.cuda.empty_cache()
@@ -309,9 +315,26 @@ def main():
     best_val          = float('inf')
     epochs_no_improve = 0
     global_step       = 0
+    start_epoch       = 1
+
+    resume_path = _find_latest_checkpoint(ckpt_dir)
+    if resume_path:
+        ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt['model'])
+        if 'optimizer' in ckpt:
+            optimizer.load_state_dict(ckpt['optimizer'])
+        if 'scheduler' in ckpt:
+            scheduler.load_state_dict(ckpt['scheduler'])
+        start_epoch       = ckpt['epoch'] + 1
+        best_val          = ckpt.get('best_val', float('inf'))
+        epochs_no_improve = ckpt.get('epochs_no_improve', 0)
+        global_step       = ckpt.get('global_step', 0)
+        print(f"[train] Resuming from {os.path.basename(resume_path)} "
+              f"— epoch {ckpt['epoch']}, best_val={best_val:.4f}, "
+              f"continuing from epoch {start_epoch}")
 
     import time
-    for epoch in range(1, max_epochs + 1):
+    for epoch in range(start_epoch, max_epochs + 1):
         t0 = time.time()
         train_loss, train_heads, global_step = train_epoch(
             model, train_loader, optimizer, device,
@@ -348,8 +371,11 @@ def main():
         if val_loss < best_val:
             best_val = val_loss
             epochs_no_improve = 0
-            torch.save({'epoch': epoch, 'model': model.state_dict(), 'val_loss': val_loss},
-                       os.path.join(ckpt_dir, 'best.pt'))
+            torch.save({
+                'epoch': epoch, 'model': model.state_dict(), 'val_loss': val_loss,
+                'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict(),
+                'best_val': best_val, 'epochs_no_improve': 0, 'global_step': global_step,
+            }, os.path.join(ckpt_dir, 'best.pt'))
             print(f"  -> saved best.pt (val={val_loss:.4f})")
         else:
             epochs_no_improve += 1
@@ -357,8 +383,12 @@ def main():
                 print(f"[train] Early stopping — no improvement for {patience} epochs")
                 break
 
-        torch.save({'epoch': epoch, 'model': model.state_dict()},
-                   os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+        torch.save({
+            'epoch': epoch, 'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict(),
+            'best_val': best_val, 'epochs_no_improve': epochs_no_improve,
+            'global_step': global_step,
+        }, os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
 
     writer.close()
     print("[train] Done.")
