@@ -1,24 +1,28 @@
 import os
+import gc
 import json
+import math
 import random
 import argparse
 import subprocess
+import sys
 import yaml
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from training.model import TerrainModel
 from training.dataset import TerrainDataset, compute_depth_stats
 
 
-def create_splits(data_root: str, splits_file: str,
-                  val_ratio: float = 0.2, seed: int = 42):
+# ── Splits ────────────────────────────────────────────────────────────────────
+
+def create_splits(data_root, splits_file, val_ratio=0.2, seed=42):
     if os.path.exists(splits_file):
         with open(splits_file) as f:
             splits = json.load(f)
@@ -45,13 +49,14 @@ def create_splits(data_root: str, splits_file: str,
     return train_ids, val_ids
 
 
+# ── Loss ──────────────────────────────────────────────────────────────────────
+
 _SOBEL_X = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
                         dtype=torch.float32).view(1, 1, 3, 3) / 8.0
 _SOBEL_Y = _SOBEL_X.transpose(-1, -2).contiguous()
 
 
-def _height_grad_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """L1 loss on Sobel gradients — penalises wrong terrain slope, not just wrong absolute height."""
+def _height_grad_loss(pred, target):
     kx = _SOBEL_X.to(pred.device)
     ky = _SOBEL_Y.to(pred.device)
     p, t = pred.unsqueeze(1), target.unsqueeze(1)
@@ -59,23 +64,137 @@ def _height_grad_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
             F.l1_loss(F.conv2d(p, ky, padding=1), F.conv2d(t, ky, padding=1)))
 
 
-def compute_loss(preds: dict, targets: dict):
-    height_l1   = F.l1_loss(preds['height'],  targets['height'])
-    height_grad = _height_grad_loss(preds['height'], targets['height'])
-    height_loss  = 10.0 * height_l1 + 5.0 * height_grad
-    rocks_loss   = F.mse_loss(preds['rocks'],   targets['rocks'])
-    craters_loss = F.mse_loss(preds['craters'], targets['craters'])
-    walls_loss   = F.binary_cross_entropy(preds['walls'], targets['walls'])
-    total = height_loss + rocks_loss + craters_loss + walls_loss
-    return total, {
-        'height':  height_loss.item(),
-        'rocks':   rocks_loss.item(),
-        'craters': craters_loss.item(),
-        'walls':   walls_loss.item(),
-    }
+class UncertaintyWeightedLoss(nn.Module):
+    """Per-task learned uncertainty weights (Kendall et al. 2018).
+
+    L_total = sum_i [ exp(-s_i) * L_i + s_i ]
+    where s_i = log(sigma_i^2) are learned parameters.
+    High sigma → low weight on that task (model is uncertain about it).
+    Avoids hand-tuning fixed loss weights across tasks.
+    """
+
+    TASKS = ('height', 'rocks', 'craters', 'walls')
+
+    def __init__(self):
+        super().__init__()
+        self.log_vars = nn.ParameterDict({
+            t: nn.Parameter(torch.zeros(1)) for t in self.TASKS
+        })
+
+    def forward(self, preds, targets):
+        height_l1   = F.l1_loss(preds['height'],  targets['height'])
+        height_grad = _height_grad_loss(preds['height'], targets['height'])
+        raw = {
+            'height':  height_l1 + 0.5 * height_grad,
+            'rocks':   F.mse_loss(preds['rocks'],   targets['rocks']),
+            'craters': F.mse_loss(preds['craters'], targets['craters']),
+            'walls':   F.binary_cross_entropy(preds['walls'], targets['walls']),
+        }
+        total = torch.zeros(1, device=preds['height'].device)
+        head_losses = {}
+        for task, loss in raw.items():
+            lv    = self.log_vars[task]
+            total = total + torch.exp(-lv) * loss + lv
+            head_losses[task] = loss.item()
+        return total.squeeze(), head_losses
+
+    def weights(self):
+        return {t: float(torch.exp(-lv).item()) for t, lv in self.log_vars.items()}
 
 
-def _find_latest_checkpoint(ckpt_dir: str):
+# ── Curriculum ────────────────────────────────────────────────────────────────
+
+class CurriculumPool:
+    """Progressive episode pool expansion sorted by height variance.
+
+    Starts with high-variance episodes (strongest height gradient signal),
+    expands when height val loss plateaus, until the full training set is active.
+    Early stopping is suppressed while the pool is still expanding.
+    """
+
+    def __init__(self, train_ids, data_root, cfg):
+        self.all_ids          = list(train_ids)
+        self._expand_by       = cfg.get('expand_by', 20)
+        self._plateau_patience = cfg.get('plateau_patience', 5)
+        self._min_improvement  = cfg.get('min_improvement', 0.005)
+
+        print("[curriculum] Computing height variances...", end='', flush=True)
+        variances = {}
+        for ep_id in train_ids:
+            try:
+                h = np.load(os.path.join(data_root, 'gt', f'{ep_id}_gt.npz'))['height_gt']
+                variances[ep_id] = float(h.std())
+            except Exception:
+                variances[ep_id] = 0.0
+        self._sorted_ids = sorted(train_ids, key=lambda e: variances.get(e, 0), reverse=True)
+        vmin, vmax = min(variances.values()), max(variances.values())
+        print(f" done. Variance range: {vmin:.4f}–{vmax:.4f}")
+
+        start = cfg.get('start_size', 20)
+        self._pool_size   = min(start, len(self.all_ids))
+        self._no_improve  = 0
+        self._best_height = float('inf')
+        print(f"[curriculum] Starting with {self._pool_size} / {len(self.all_ids)} episodes")
+
+    @property
+    def current_ids(self):
+        return self._sorted_ids[:self._pool_size]
+
+    @property
+    def is_full(self):
+        return self._pool_size >= len(self.all_ids)
+
+    @property
+    def pool_size(self):
+        return self._pool_size
+
+    def step(self, height_val_loss):
+        """Call after each epoch with height val loss. Returns True if pool expanded."""
+        if self.is_full:
+            return False
+
+        if height_val_loss < self._best_height * (1.0 - self._min_improvement):
+            self._best_height = height_val_loss
+            self._no_improve  = 0
+        else:
+            self._no_improve += 1
+
+        if self._no_improve >= self._plateau_patience:
+            old               = self._pool_size
+            self._pool_size   = min(self._pool_size + self._expand_by, len(self.all_ids))
+            self._no_improve  = 0
+            self._best_height = float('inf')
+            print(f"[curriculum] Pool expanded: {old} → {self._pool_size} / {len(self.all_ids)}")
+            return True
+        return False
+
+    def state_dict(self):
+        return {
+            'pool_size':   self._pool_size,
+            'best_height': self._best_height,
+            'no_improve':  self._no_improve,
+        }
+
+    def load_state_dict(self, d):
+        self._pool_size   = d['pool_size']
+        self._best_height = d['best_height']
+        self._no_improve  = d['no_improve']
+
+
+# ── DataLoader helpers ────────────────────────────────────────────────────────
+
+def _make_train_loader(ids, data_root, depth_stats, bs, target_steps, pin):
+    """Build a training DataLoader, repeating episode IDs to reach target_steps."""
+    n_needed = target_steps * bs
+    ids = list(ids)
+    if len(ids) < n_needed:
+        repeats = math.ceil(n_needed / len(ids))
+        ids = (ids * repeats)[:n_needed]
+    ds = TerrainDataset(data_root, ids, depth_stats, augment=True)
+    return DataLoader(ds, batch_size=bs, shuffle=True, num_workers=4, pin_memory=pin)
+
+
+def _find_latest_checkpoint(ckpt_dir):
     import glob
     paths = sorted(glob.glob(os.path.join(ckpt_dir, 'epoch_*.pt')))
     return paths[-1] if paths else None
@@ -88,15 +207,15 @@ def _safe_empty_cache():
         pass
 
 
-def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> int:
+# ── Batch size finder ─────────────────────────────────────────────────────────
+
+def find_batch_size(model, loss_fn, device, start_bs, gpu_margin=0.20):
     if not torch.cuda.is_available():
         return start_bs
 
     total_mem  = torch.cuda.get_device_properties(device).total_memory
     target_max = total_mem * (1.0 - gpu_margin)
-    # Cap starting probe at 8 — auto-tuner steps down by halves if OOM
-    bs = min(start_bs, 8)
-
+    bs         = min(start_bs, 8)
     print(f"[train] Auto batch size — GPU: {total_mem/1e9:.1f}GB, target ≤{(1-gpu_margin)*100:.0f}% usage")
 
     while bs >= 1:
@@ -111,8 +230,8 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
                 'craters': torch.rand(bs, 200, 200, device=device),
                 'walls':   (torch.rand(bs, 200, 200, device=device) > 0.8).float(),
             }
-            preds      = model(dummy_img, dummy_rot)
-            loss, _    = compute_loss(preds, dummy_gt)
+            preds     = model(dummy_img, dummy_rot)
+            loss, _   = loss_fn(preds, dummy_gt)
             loss.backward()
 
             used = torch.cuda.memory_allocated(device)
@@ -124,14 +243,15 @@ def find_batch_size(model, device, start_bs: int, gpu_margin: float = 0.20) -> i
             bs //= 2
 
         except Exception as e:
-            _oom_strings = ('out of memory', 'cudaErrorMemoryAllocation', 'CUDA error: out of memory')
-            if not any(s in str(e) for s in _oom_strings):
+            if not any(s in str(e) for s in ('out of memory', 'cudaErrorMemory', 'CUDA error')):
                 raise
             bs //= 2
             _safe_empty_cache()
 
     return 1
 
+
+# ── Training / val loops ──────────────────────────────────────────────────────
 
 def _to_device(obj, device):
     if isinstance(obj, torch.Tensor):
@@ -141,11 +261,11 @@ def _to_device(obj, device):
     return obj
 
 
-def train_epoch(model, loader, optimizer, device, writer: SummaryWriter,
-                global_step: int, grad_clip: float = 0.0, log_every: int = 10):
+def train_epoch(model, loss_fn, loader, optimizer, device,
+                writer, global_step, grad_clip=0.0, log_every=10):
     model.train()
-    total      = 0.0
-    head_sums  = {'height': 0.0, 'rocks': 0.0, 'craters': 0.0, 'walls': 0.0}
+    total     = 0.0
+    head_sums = {t: 0.0 for t in UncertaintyWeightedLoss.TASKS}
     running_sum, running_n = 0.0, 0
 
     bar = tqdm(loader, desc='train', leave=False,
@@ -157,23 +277,23 @@ def train_epoch(model, loader, optimizer, device, writer: SummaryWriter,
         gt       = _to_device(gt, device)
 
         preds             = model(images, rotation)
-        loss, head_losses = compute_loss(preds, gt)
+        loss, head_losses = loss_fn(preds, gt)
         optimizer.zero_grad()
         loss.backward()
         if grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            all_params = list(model.parameters()) + list(loss_fn.parameters())
+            torch.nn.utils.clip_grad_norm_(all_params, grad_clip)
         optimizer.step()
 
-        loss_val     = loss.item()
-        total       += loss_val
-        running_sum += loss_val
+        lv           = loss.item()
+        total       += lv
+        running_sum += lv
         running_n   += 1
         global_step += 1
 
         for k, v in head_losses.items():
             head_sums[k] += v
-
-        bar.set_postfix_str(f"{loss_val:.4f}")
+        bar.set_postfix_str(f"{lv:.4f}")
 
         if global_step % log_every == 0:
             writer.add_scalar('Loss/train_running', running_sum / running_n, global_step)
@@ -183,17 +303,17 @@ def train_epoch(model, loader, optimizer, device, writer: SummaryWriter,
     return total / n, {k: v / n for k, v in head_sums.items()}, global_step
 
 
-def val_epoch(model, loader, device):
+def val_epoch(model, loss_fn, loader, device):
     model.eval()
     total     = 0.0
-    head_sums = {'height': 0.0, 'rocks': 0.0, 'craters': 0.0, 'walls': 0.0}
+    head_sums = {t: 0.0 for t in UncertaintyWeightedLoss.TASKS}
     with torch.no_grad():
         for images, rotation, gt in tqdm(loader, desc='val  ', leave=False):
             images   = _to_device(images, device)
             rotation = _to_device(rotation, device)
             gt       = _to_device(gt, device)
             preds             = model(images, rotation)
-            loss, head_losses = compute_loss(preds, gt)
+            loss, head_losses = loss_fn(preds, gt)
             total            += loss.item()
             for k, v in head_losses.items():
                 head_sums[k] += v
@@ -201,13 +321,13 @@ def val_epoch(model, loader, device):
     return total / n, {k: v / n for k, v in head_sums.items()}
 
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default='training/config.yaml')
-    parser.add_argument('--epochs', type=int, default=None,
-                        help='Override number of epochs from config')
-    parser.add_argument('--view',   action='store_true',
-                        help='Auto-launch TensorBoard in browser')
+    parser.add_argument('--epochs', type=int, default=None)
+    parser.add_argument('--view',   action='store_true')
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -217,7 +337,6 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[train] Device: {device}")
 
-    # Interactive epoch prompt if not passed as argument
     max_epochs = args.epochs
     if max_epochs is None:
         default_epochs = cfg['training']['epochs']
@@ -248,28 +367,39 @@ def main():
             json.dump(depth_stats, f, indent=2)
         print(f"[train] Depth stats saved to {stats_file}")
 
-    train_ds = TerrainDataset(data_root, train_ids, depth_stats, augment=True)
-    val_ds   = TerrainDataset(data_root, val_ids,   depth_stats, augment=False)
+    # ── Curriculum ────────────────────────────────────────────────────────────
+    cur_cfg      = cfg.get('curriculum', {})
+    use_cur      = cur_cfg.get('enabled', False)
+    target_steps = cur_cfg.get('target_steps_per_epoch', 200)
+    curriculum   = CurriculumPool(train_ids, data_root, cur_cfg) if use_cur else None
 
     warmup_epochs = cfg['training'].get('warmup_epochs', 5)
     grad_clip     = cfg['training'].get('grad_clip', 1.0)
     patience      = cfg['training'].get('early_stop_patience', 15)
     gpu_margin    = cfg['training'].get('gpu_memory_margin', 0.20)
 
-    model = TerrainModel().to(device)
+    model   = TerrainModel().to(device)
+    loss_fn = UncertaintyWeightedLoss().to(device)
 
-    bs = find_batch_size(model, device,
+    bs = find_batch_size(model, loss_fn, device,
                          start_bs=cfg['training']['batch_size'],
                          gpu_margin=gpu_margin)
 
     pin = torch.cuda.is_available()
-    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True,
-                              num_workers=4, pin_memory=pin)
-    val_loader   = DataLoader(val_ds,   batch_size=bs, shuffle=False,
-                              num_workers=4, pin_memory=pin)
+    val_ds     = TerrainDataset(data_root, val_ids, depth_stats, augment=False)
+    val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False, num_workers=4, pin_memory=pin)
+
+    def _rebuild_train_loader():
+        active = curriculum.current_ids if curriculum else train_ids
+        if curriculum and not curriculum.is_full:
+            return _make_train_loader(active, data_root, depth_stats, bs, target_steps, pin)
+        ds = TerrainDataset(data_root, list(active), depth_stats, augment=True)
+        return DataLoader(ds, batch_size=bs, shuffle=True, num_workers=4, pin_memory=pin)
+
+    train_loader = _rebuild_train_loader()
 
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        list(model.parameters()) + list(loss_fn.parameters()),
         lr=cfg['training']['learning_rate'],
         weight_decay=cfg['training']['weight_decay'],
     )
@@ -284,7 +414,6 @@ def main():
     )
 
     ckpt_dir   = cfg['checkpoints']['dir']
-    save_every = cfg['checkpoints']['save_every']
     os.makedirs(ckpt_dir, exist_ok=True)
 
     runs_dir = os.path.abspath('training/runs')
@@ -292,7 +421,6 @@ def main():
 
     if args.view:
         import time, webbrowser, sysconfig
-        # Find tensorboard executable — may be in user scripts, not system scripts
         tb_exe = None
         for scripts_dir in [
             sysconfig.get_path('scripts'),
@@ -303,14 +431,11 @@ def main():
             if os.path.exists(candidate):
                 tb_exe = candidate
                 break
-
         if tb_exe is None:
             print("[train] TensorBoard not found — run: pip install tensorboard")
         else:
-            subprocess.Popen(
-                [tb_exe, '--logdir', runs_dir, '--port', '6006'],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
+            subprocess.Popen([tb_exe, '--logdir', runs_dir, '--port', '6006'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("[train] Starting TensorBoard...", end='', flush=True)
             time.sleep(4)
             print(" opening http://localhost:6006")
@@ -331,31 +456,41 @@ def main():
         model.load_state_dict(sd, strict=False)
         if missing:
             print(f"[train] New params (random init): {len(missing)} keys")
+        if 'loss_fn' in ckpt:
+            loss_fn.load_state_dict(ckpt['loss_fn'])
         if 'optimizer' in ckpt:
             optimizer.load_state_dict(ckpt['optimizer'])
         if 'scheduler' in ckpt:
             scheduler.load_state_dict(ckpt['scheduler'])
+        if curriculum and 'curriculum' in ckpt:
+            curriculum.load_state_dict(ckpt['curriculum'])
+            train_loader = _rebuild_train_loader()
         start_epoch       = ckpt['epoch'] + 1
         best_val          = ckpt.get('best_val', float('inf'))
         epochs_no_improve = ckpt.get('epochs_no_improve', 0)
         global_step       = ckpt.get('global_step', 0)
         print(f"[train] Resuming from {os.path.basename(resume_path)} "
-              f"— epoch {ckpt['epoch']}, best_val={best_val:.4f}, "
-              f"continuing from epoch {start_epoch}")
+              f"— epoch {ckpt['epoch']}, best_val={best_val:.4f}")
+        if curriculum:
+            print(f"[curriculum] Pool restored: {curriculum.pool_size}/{len(train_ids)} episodes")
 
-    import time
+    import time as _time
     for epoch in range(start_epoch, max_epochs + 1):
-        t0 = time.time()
+        t0 = _time.time()
+        pool_info = (f"  pool={curriculum.pool_size}/{len(train_ids)}"
+                     if curriculum and not curriculum.is_full else "")
+
         train_loss, train_heads, global_step = train_epoch(
-            model, train_loader, optimizer, device,
+            model, loss_fn, train_loader, optimizer, device,
             writer, global_step, grad_clip,
         )
-        val_loss, val_heads = val_epoch(model, val_loader, device)
+        val_loss, val_heads = val_epoch(model, loss_fn, val_loader, device)
         scheduler.step()
-        elapsed = time.time() - t0
+        elapsed = _time.time() - t0
 
-        lr_now = optimizer.param_groups[0]['lr']
-        mem_gb = torch.cuda.memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
+        lr_now  = optimizer.param_groups[0]['lr']
+        mem_gb  = torch.cuda.memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
+        weights = loss_fn.weights()
 
         writer.add_scalar('Loss/train_epoch', train_loss, epoch)
         writer.add_scalar('Loss/val',         val_loss,   epoch)
@@ -363,44 +498,57 @@ def main():
         for k in train_heads:
             writer.add_scalar(f'Heads/train_{k}', train_heads[k], epoch)
             writer.add_scalar(f'Heads/val_{k}',   val_heads[k],   epoch)
+        for k, w in weights.items():
+            writer.add_scalar(f'Weights/{k}', w, epoch)
+        if curriculum:
+            writer.add_scalar('Curriculum/pool_size', curriculum.pool_size, epoch)
         writer.flush()
 
         flag = ' *' if val_loss < best_val else ''
         print(
             f"\n[epoch {epoch:03d}/{max_epochs}]  {elapsed/60:.1f}min  "
-            f"gpu={mem_gb:.1f}GB  lr={lr_now:.2e}"
+            f"gpu={mem_gb:.1f}GB  lr={lr_now:.2e}{pool_info}"
             f"\n  train  total={train_loss:.4f}  "
             f"height={train_heads['height']:.4f}  rocks={train_heads['rocks']:.4f}  "
             f"craters={train_heads['craters']:.4f}  walls={train_heads['walls']:.4f}"
             f"\n  val    total={val_loss:.4f}  "
             f"height={val_heads['height']:.4f}  rocks={val_heads['rocks']:.4f}  "
             f"craters={val_heads['craters']:.4f}  walls={val_heads['walls']:.4f}"
-            f"{flag}"
+            f"\n  weights  " + "  ".join(f"{k}={w:.2f}" for k, w in weights.items())
+            + flag
         )
 
-        if val_loss < best_val:
-            best_val = val_loss
-            epochs_no_improve = 0
-            torch.save({
-                'epoch': epoch, 'model': model.state_dict(), 'val_loss': val_loss,
-                'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict(),
-                'best_val': best_val, 'epochs_no_improve': 0, 'global_step': global_step,
-            }, os.path.join(ckpt_dir, 'best.pt'))
-            print(f"  -> saved best.pt (val={val_loss:.4f})")
-        else:
-            epochs_no_improve += 1
-            if epochs_no_improve >= patience:
-                print(f"[train] Early stopping — no improvement for {patience} epochs")
-                break
+        # Curriculum expansion — must happen before checkpoint so state is saved
+        if curriculum and not curriculum.is_full:
+            if curriculum.step(val_heads['height']):
+                train_loader = _rebuild_train_loader()
 
-        torch.save({
+        ckpt_data = {
             'epoch': epoch, 'model': model.state_dict(),
+            'loss_fn': loss_fn.state_dict(),
             'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict(),
             'best_val': best_val, 'epochs_no_improve': epochs_no_improve,
             'global_step': global_step,
-        }, os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+        }
+        if curriculum:
+            ckpt_data['curriculum'] = curriculum.state_dict()
 
-        import gc; gc.collect()
+        if val_loss < best_val:
+            best_val          = val_loss
+            epochs_no_improve = 0
+            torch.save({**ckpt_data, 'val_loss': val_loss},
+                       os.path.join(ckpt_dir, 'best.pt'))
+            print(f"  -> saved best.pt (val={val_loss:.4f})")
+        else:
+            epochs_no_improve += 1
+            # Suppress early stopping while curriculum is still expanding
+            if epochs_no_improve >= patience and (curriculum is None or curriculum.is_full):
+                print(f"[train] Early stopping — no improvement for {patience} epochs")
+                break
+
+        torch.save(ckpt_data, os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+
+        gc.collect()
         _safe_empty_cache()
 
     writer.close()
