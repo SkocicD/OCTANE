@@ -7,7 +7,22 @@ __pycache__/
 
 # Training artifacts
 training/checkpoints/
+training/runs/
 training/splits.json
 training/depth_stats.json
 training/*.onnx
 training/*.engine
+
+# Texture caches
+**/assets/polyhaven_textures/
+**/assets/biome_textures/
+**/assets/regolith_textures/
+
+# Stray pip/CUDA artifacts
+2.7.0+cu128/
+
+# Claude internal
+.claude/scheduled_tasks.lock
+
+# Separate projects dropped in repo root
+NASA_Lunabotics_Control_Hub/

@@ -1,0 +1,422 @@
+<?xml version="1.0" ?>
+<robot name="CSU_Lunabotics_2026" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+<xacro:include filename="$(find CSU_Lunabotics_2026_description)/urdf/materials.xacro" />
+<xacro:include filename="$(find CSU_Lunabotics_2026_description)/urdf/CSU_Lunabotics_2026.trans" />
+<xacro:include filename="$(find CSU_Lunabotics_2026_description)/urdf/CSU_Lunabotics_2026.gazebo" />
+<link name="base_link">
+  <inertial>
+    <origin xyz="0.0004153304728844507 -0.09433149352098004 0.13322697031079847" rpy="0 0 0"/>
+    <mass value="66.97969656411462"/>
+    <inertia ixx="9.125828" iyy="1.867324" izz="8.48153" ixy="0.008656" iyz="-0.444389" ixz="-0.000627"/>
+  </inertial>
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Carriage_Linear_1">
+  <inertial>
+    <origin xyz="0.09563279911211783 -0.014501963204365309 -0.11052677805555589" rpy="0 0 0"/>
+    <mass value="0.4084465904836315"/>
+    <inertia ixx="0.002052" iyy="0.004309" izz="0.002347" ixy="3e-06" iyz="-0.000262" ixz="2.4e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.096161 -0.469932 -0.375274" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Linear_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.096161 -0.469932 -0.375274" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Linear_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Carriage_Rotate_1">
+  <inertial>
+    <origin xyz="-0.3961764430454787 0.11068166615675518 0.12406681455946889" rpy="0 0 0"/>
+    <mass value="2.467671819412222"/>
+    <inertia ixx="0.016102" iyy="0.028947" izz="0.01552" ixy="2e-06" iyz="-0.000214" ixz="-1.1e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.396136 -0.346691 -0.013038" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Rotate_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.396136 -0.346691 -0.013038" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Rotate_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Carriage_Util_1">
+  <inertial>
+    <origin xyz="0.07267265417871115 0.5241478417876573 0.04640684392577274" rpy="0 0 0"/>
+    <mass value="4.953124684327823"/>
+    <inertia ixx="0.414244" iyy="0.046911" izz="0.424421" ixy="-5.2e-05" iyz="-0.024006" ixz="-4.3e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.072628 0.355346 -0.141224" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Util_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.072628 0.355346 -0.141224" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Util_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Carriage_Rotate_1">
+  <inertial>
+    <origin xyz="0.0634595569545213 0.03182366615675519 0.10009281455946888" rpy="0 0 0"/>
+    <mass value="2.467671819412222"/>
+    <inertia ixx="0.016102" iyy="0.028947" izz="0.01552" ixy="2e-06" iyz="-0.000214" ixz="-1.1e-05"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.0635 -0.425549 -0.037012" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Rotate_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.0635 -0.425549 -0.037012" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Carriage_Rotate_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Pitch_Rotate_1">
+  <inertial>
+    <origin xyz="0.012396519988603128 0.04932050074428851 -0.07645032497286264" rpy="0 0 0"/>
+    <mass value="1.1399086789399064"/>
+    <inertia ixx="0.004857" iyy="0.002141" izz="0.00298" ixy="-5e-06" iyz="0.001718" ixz="1e-06"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.0127 -0.469932 -0.375274" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Pitch_Rotate_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.0127 -0.469932 -0.375274" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Pitch_Rotate_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Pitch_Linear_1">
+  <inertial>
+    <origin xyz="-0.2020262132697139 0.5897223559553213 -0.5144605670772633" rpy="0 0 0"/>
+    <mass value="0.15916128512262778"/>
+    <inertia ixx="0.000487" iyy="0.000241" izz="0.000254" ixy="-0.0" iyz="0.00024" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.201774 -0.011137 -0.762413" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Pitch_Linear_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.201774 -0.011137 -0.762413" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Pitch_Linear_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Bucket_1">
+  <inertial>
+    <origin xyz="0.010667999998887439 0.04159856596652667 -0.1427845965607868" rpy="0 0 0"/>
+    <mass value="2.9509363792323673"/>
+    <inertia ixx="0.020383" iyy="0.065733" izz="0.062799" ixy="0.0" iyz="0.005705" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.010668 -0.663716 -0.186884" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Bucket_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.010668 -0.663716 -0.186884" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Bucket_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Bucket_1">
+  <inertial>
+    <origin xyz="0.09616099999888743 0.06878956596652663 0.0370074034392132" rpy="0 0 0"/>
+    <mass value="2.9509363792323673"/>
+    <inertia ixx="0.020383" iyy="0.065733" izz="0.062799" ixy="0.0" iyz="0.005705" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.096161 -0.636525 -0.007092" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Bucket_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.096161 -0.636525 -0.007092" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Bucket_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Wheel_4_1">
+  <inertial>
+    <origin xyz="-0.04485286807789729 -2.968312222684233e-06 1.0035099740415832e-06" rpy="0 0 0"/>
+    <mass value="4.007003391959881"/>
+    <inertia ixx="0.076637" iyy="0.046422" izz="0.04642" ixy="-0.0" iyz="-0.0" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.193515 -0.368554 -0.058991" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_4_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.193515 -0.368554 -0.058991" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_4_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Wheel_6_1">
+  <inertial>
+    <origin xyz="-0.04485286808249897 -1.9202289320147115e-06 -2.8183375000156996e-06" rpy="0 0 0"/>
+    <mass value="4.007003392925282"/>
+    <inertia ixx="0.076637" iyy="0.046421" izz="0.046421" ixy="-0.0" iyz="1e-06" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.193515 -0.012954 -0.058992" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_6_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.193515 -0.012954 -0.058992" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_6_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Wheel_1_1">
+  <inertial>
+    <origin xyz="-0.04485286815124423 -3.141301108122718e-10 -2.510269298761081e-06" rpy="0 0 0"/>
+    <mass value="4.007003383095189"/>
+    <inertia ixx="0.076637" iyy="0.04642" izz="0.046422" ixy="-0.0" iyz="-0.0" ixz="-0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="0.193515 0.342646 -0.058991" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="0.193515 0.342646 -0.058991" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Wheel_2_1">
+  <inertial>
+    <origin xyz="0.04485286847595926 2.889610363432382e-06 -3.40898558458258e-07" rpy="0 0 0"/>
+    <mass value="4.0070033840022745"/>
+    <inertia ixx="0.076637" iyy="0.046421" izz="0.04642" ixy="-0.0" iyz="-0.0" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.193515 0.342646 -0.058951" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.193515 0.342646 -0.058951" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Wheel_3_1">
+  <inertial>
+    <origin xyz="0.044852868475971974 2.8897659316920454e-06 -1.340897539635344e-06" rpy="0 0 0"/>
+    <mass value="4.00700338400013"/>
+    <inertia ixx="0.076637" iyy="0.046421" izz="0.04642" ixy="-0.0" iyz="-0.0" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.193515 -0.012954 -0.058992" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_3_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.193515 -0.012954 -0.058992" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_3_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<link name="Wheel_5_1">
+  <inertial>
+    <origin xyz="0.04485286847597608 2.8907126661259497e-06 -1.3416290821771648e-06" rpy="0 0 0"/>
+    <mass value="4.007003383999713"/>
+    <inertia ixx="0.076637" iyy="0.046421" izz="0.04642" ixy="-0.0" iyz="-0.0" ixz="0.0"/>
+  </inertial>
+  <visual>
+    <origin xyz="-0.193515 -0.368554 -0.058992" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_5_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver"/>
+  </visual>
+  <collision>
+    <origin xyz="-0.193515 -0.368554 -0.058992" rpy="0 0 0"/>
+    <geometry>
+      <mesh filename="package://CSU_Lunabotics_2026_description/meshes/Wheel_5_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+
+<joint name="Revolute 20" type="continuous">
+  <origin xyz="-0.023533 0.825278 0.23405" rpy="0 0 0"/>
+  <parent link="Carriage_Util_1"/>
+  <child link="Carriage_Linear_1"/>
+  <axis xyz="1.0 -0.0 -0.0"/>
+</joint>
+
+<joint name="Slider 21" type="prismatic">
+  <origin xyz="0.032661 -0.044383 -0.338262" rpy="0 0 0"/>
+  <parent link="Carriage_Linear_1"/>
+  <child link="Carriage_Rotate_1"/>
+  <axis xyz="-0.0 -0.130096 -0.991501"/>
+  <limit upper="0.1905" lower="0.0" effort="100" velocity="100"/>
+</joint>
+
+<joint name="Revolute 22" type="continuous">
+  <origin xyz="-0.072628 -0.355346 0.141224" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Carriage_Util_1"/>
+  <axis xyz="-1.0 0.0 0.0"/>
+</joint>
+
+<joint name="Revolute 23" type="continuous">
+  <origin xyz="-0.0635 0.425549 0.037012" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Carriage_Rotate_1"/>
+  <axis xyz="-1.0 -0.0 -0.0"/>
+</joint>
+
+<joint name="Revolute 24" type="continuous">
+  <origin xyz="0.059928 0.825278 0.23405" rpy="0 0 0"/>
+  <parent link="Carriage_Util_1"/>
+  <child link="Pitch_Rotate_1"/>
+  <axis xyz="-1.0 0.0 0.0"/>
+</joint>
+
+<joint name="Slider 25" type="prismatic">
+  <origin xyz="0.214474 -0.458795 0.387139" rpy="0 0 0"/>
+  <parent link="Pitch_Rotate_1"/>
+  <child link="Pitch_Linear_1"/>
+  <axis xyz="0.0 -0.716911 0.697165"/>
+  <limit upper="0.0" lower="-0.1397" effort="100" velocity="100"/>
+</joint>
+
+<joint name="Revolute 26" type="continuous">
+  <origin xyz="-0.297935 0.625388 -0.755321" rpy="0 0 0"/>
+  <parent link="Pitch_Linear_1"/>
+  <child link="Bucket_1"/>
+  <axis xyz="1.0 -0.0 0.0"/>
+</joint>
+
+<joint name="Revolute 27" type="continuous">
+  <origin xyz="-0.023533 0.991871 -0.134132" rpy="0 0 0"/>
+  <parent link="Carriage_Util_1"/>
+  <child link="Bucket_1"/>
+  <axis xyz="1.0 -0.0 -0.0"/>
+</joint>
+
+<joint name="Revolute 28" type="continuous">
+  <origin xyz="-0.193515 0.368554 0.058991" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Wheel_4_1"/>
+  <axis xyz="1.0 -0.0 -0.0"/>
+</joint>
+
+<joint name="Revolute 29" type="continuous">
+  <origin xyz="-0.193515 0.012954 0.058992" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Wheel_6_1"/>
+  <axis xyz="-1.0 0.0 0.0"/>
+</joint>
+
+<joint name="Revolute 30" type="continuous">
+  <origin xyz="-0.193515 -0.342646 0.058991" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Wheel_1_1"/>
+  <axis xyz="-1.0 0.0 0.0"/>
+</joint>
+
+<joint name="Revolute 31" type="continuous">
+  <origin xyz="0.193515 -0.342646 0.058951" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Wheel_2_1"/>
+  <axis xyz="1.0 -0.0 -0.0"/>
+</joint>
+
+<joint name="Revolute 32" type="continuous">
+  <origin xyz="0.193515 0.012954 0.058992" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Wheel_3_1"/>
+  <axis xyz="1.0 -0.0 -0.0"/>
+</joint>
+
+<joint name="Revolute 33" type="continuous">
+  <origin xyz="0.193515 0.368554 0.058992" rpy="0 0 0"/>
+  <parent link="base_link"/>
+  <child link="Wheel_5_1"/>
+  <axis xyz="1.0 -0.0 -0.0"/>
+</joint>
+
+</robot>

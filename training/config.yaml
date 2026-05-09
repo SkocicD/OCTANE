@@ -23,3 +23,11 @@ model:
   feat_proj_dim: 128
   pose_embed_dim: 32
   fusion_dim: 512
+
+curriculum:
+  enabled: true
+  start_size: 20            # episodes in first pool (high-variance ones picked first)
+  expand_by: 20             # add this many per expansion
+  plateau_patience: 5       # epochs without height improvement before expanding
+  min_improvement: 0.005    # relative improvement threshold to reset patience
+  target_steps_per_epoch: 200  # repeat small pools to maintain this many steps/epoch

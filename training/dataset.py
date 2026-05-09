@@ -1,6 +1,7 @@
 import os
 import json
 import math
+import zipfile
 import numpy as np
 import cv2
 import torch
@@ -9,8 +10,8 @@ from PIL import Image
 from torchvision import transforms
 
 GRID_SIZE = 200
-CELL_SIZE = 0.05
-BEV_HALF  = GRID_SIZE * CELL_SIZE / 2  # 5.0 m
+CELL_SIZE = 0.10
+BEV_HALF  = GRID_SIZE * CELL_SIZE / 2  # 10.0 m
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD  = [0.229, 0.224, 0.225]
@@ -95,6 +96,8 @@ def compute_depth_stats(data_root: str, episode_ids: list,
     }
 
 
+HEIGHT_SCALE = 0.5  # metres — height_gt divided by this before training, multiply back for display
+
 # Image file paths for each of the 12 input slots.
 # (relative_path_under_root, extension)
 _SLOT_PATHS = [
@@ -119,11 +122,33 @@ _DEPTH_SLOTS = set(range(6, 12))
 _FLIP_SWAP_PAIRS = [(0, 2), (1, 3), (6, 8), (7, 9)]
 
 
+def _valid_episodes(data_root: str, episode_ids: list) -> list:
+    """Return episode_ids where the NPZ and all 12 image files are present."""
+    valid, bad = [], []
+    for ep_id in episode_ids:
+        npz_path = os.path.join(data_root, 'gt', f'{ep_id}_gt.npz')
+        try:
+            with zipfile.ZipFile(npz_path, 'r'):
+                pass
+        except Exception:
+            bad.append(ep_id)
+            continue
+        if any(not os.path.exists(os.path.join(data_root, rel, f'{ep_id}{ext}'))
+               for rel, ext in _SLOT_PATHS):
+            bad.append(ep_id)
+            continue
+        valid.append(ep_id)
+    if bad:
+        print(f"[dataset] WARNING: skipping {len(bad)} incomplete/corrupted episode(s): "
+              f"{bad[:5]}{'...' if len(bad) > 5 else ''}")
+    return valid
+
+
 class TerrainDataset(Dataset):
     def __init__(self, data_root: str, episode_ids: list,
                  depth_stats: dict, augment: bool = False):
         self.root        = data_root
-        self.episode_ids = episode_ids
+        self.episode_ids = _valid_episodes(data_root, episode_ids)
         self.augment     = augment
 
         self._rgb_transform = transforms.Compose([
@@ -156,8 +181,22 @@ class TerrainDataset(Dataset):
         tensors = []
         for i, (rel_path, ext) in enumerate(_SLOT_PATHS):
             path = os.path.join(self.root, rel_path, f'{ep_id}{ext}')
-            img  = Image.open(path).convert('RGB')
-            t    = self._rgb_transform(img) if i in _RGB_SLOTS else self._depth_transform(img)
+            if i in _DEPTH_SLOTS:
+                pil_img = Image.open(path)
+                if pil_img.mode == 'I':
+                    # 32-bit int depth in mm (saved by collect_terrain_data.py)
+                    raw = np.array(pil_img, dtype=np.float32) / 1000.0
+                else:
+                    # RGB/grayscale depth map (e.g. from Jetson processing) — treat as 0–20 m
+                    raw = np.array(pil_img.convert('L'), dtype=np.float32) / 255.0 * 20.0
+                raw = np.clip(raw / 20.0, 0.0, 1.0)  # normalise 0–20m → 0–1
+                arr = (raw * 255).astype(np.uint8)
+                img = Image.fromarray(np.stack([arr, arr, arr], axis=-1), mode='RGB')
+            else:
+                img = Image.open(path).convert('RGB')
+            t = self._rgb_transform(img) if i in _RGB_SLOTS else self._depth_transform(img)
+            if self.augment and i in _DEPTH_SLOTS:
+                t = t + torch.randn_like(t) * 0.02
             tensors.append(t)
         return torch.stack(tensors, dim=0)  # (12, 3, 224, 224)
 
@@ -172,7 +211,7 @@ class TerrainDataset(Dataset):
         ], dtype=torch.float32)
 
     def _load_gt(self, npz) -> dict:
-        height  = torch.from_numpy(npz['height_gt'])
+        height  = torch.from_numpy(npz['height_gt']).float() / HEIGHT_SCALE
         objects = npz['objects_gt']
         walls   = npz['walls_gt']
         rocks   = torch.from_numpy(build_object_heatmap(objects, class_id=0))

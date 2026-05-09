@@ -1,0 +1,9 @@
+# Isaac Lab installation path — copy this file to isaaclab_path.cfg and set your local path.
+# isaaclab_path.cfg is gitignored so every machine keeps its own pointer.
+#
+# Windows example:
+#   ISAACLAB_PATH=C:\IsaacLab
+# Linux example:
+#   ISAACLAB_PATH=/home/user/IsaacLab
+
+ISAACLAB_PATH=C:\path\to\IsaacLab
