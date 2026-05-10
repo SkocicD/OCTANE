@@ -82,7 +82,15 @@ class UncertaintyWeightedLoss(nn.Module):
         })
 
     def forward(self, preds, targets):
-        height_l1   = F.l1_loss(preds['height'],  targets['height'])
+        # Slope-weighted L1: pixels near steep features (crater edges) get 3x more weight
+        # so the model can't ignore extreme depth values by averaging them away
+        kx = _SOBEL_X.to(targets['height'].device)
+        ky = _SOBEL_Y.to(targets['height'].device)
+        t_h = targets['height'].unsqueeze(1)
+        slope = (F.conv2d(t_h, kx, padding=1).abs() +
+                 F.conv2d(t_h, ky, padding=1).abs()).squeeze(1).detach()
+        weight_map = (1.0 + 3.0 * slope)
+        height_l1   = (weight_map * (preds['height'] - targets['height']).abs()).mean()
         height_grad = _height_grad_loss(preds['height'], targets['height'])
         raw = {
             'height':  height_l1 + 0.5 * height_grad,
