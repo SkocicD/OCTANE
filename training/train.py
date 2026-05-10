@@ -93,7 +93,7 @@ class UncertaintyWeightedLoss(nn.Module):
         total = torch.zeros(1, device=preds['height'].device)
         head_losses = {}
         for task, loss in raw.items():
-            lv    = self.log_vars[task]
+            lv    = self.log_vars[task].clamp(-3.0, 3.0)  # weight range ~[0.05, 20]
             total = total + torch.exp(-lv) * loss + lv
             head_losses[task] = loss.item()
         return total.squeeze(), head_losses
@@ -519,8 +519,9 @@ def main():
         )
 
         # Curriculum expansion — must happen before checkpoint so state is saved
+        # Use train height (not val) — val is always high because it tests unseen episodes
         if curriculum and not curriculum.is_full:
-            if curriculum.step(val_heads['height']):
+            if curriculum.step(train_heads['height']):
                 train_loader = _rebuild_train_loader()
 
         ckpt_data = {
