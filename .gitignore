@@ -1,0 +1,11 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Training artifacts
+training_nav/checkpoints/
+training_nav/__pycache__/
+
+# Stray artifacts
+*.onnx
+*.engine

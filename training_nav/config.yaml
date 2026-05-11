@@ -1,0 +1,60 @@
+arena:
+  # KSC Artemis base dimensions (metres) — variations are scaled from this
+  base_width: 6.88
+  base_length: 6.5
+  # Zone layout as fractions of base dimensions
+  excavation_width_frac: 0.363   # 2.5 / 6.88
+  start_length_frac:     0.308   # 2.0 / 6.5
+  deposit_length_frac:   0.231   # 1.5 / 6.5
+  # Berm target size (metres, fixed regardless of scale)
+  berm_w: 1.7
+  berm_h: 0.8
+  # Obstacle counts per arena (randomised ± 30%)
+  rocks_mean:   8
+  craters_mean: 6
+  rock_diameter:   0.35   # metres
+  crater_diameter: 0.45   # metres
+
+terrain:
+  grid_size: 60          # cells — model always receives grid_size × grid_size
+  # Real-world view extents: calibrate these once you know what the robot
+  # actually sees from its sensors. The crop is resampled to grid_size × grid_size
+  # so the model input shape never changes.
+  view_width: 6.0        # metres the robot can see left/right (X axis)
+  view_height: 6.0       # metres the robot can see forward/back (Y axis)
+  height_noise_std: 0.04 # background terrain roughness (metres)
+  height_scale: 0.5      # normalisation divisor (matches terrain model)
+
+planner:
+  # A* cost weights
+  slope_weight:  2.0
+  crater_weight: 8.0
+  rock_weight:   6.0
+  wall_weight:   50.0    # effectively impassable
+  # Lookahead for action extraction (cells ahead on path)
+  lookahead: 8
+
+model:
+  cnn_channels: [32, 64, 128]
+  fc_dims: [256, 128]
+  heading_embed_dim: 16
+
+training:
+  epochs: 200
+  batch_size: 256
+  learning_rate: 3.0e-4
+  weight_decay: 1.0e-4
+  val_ratio: 0.1
+  seed: 42
+  # Samples generated per epoch
+  arenas_per_epoch: 500       # random arenas generated each epoch
+  samples_per_arena: 20       # robot positions sampled per arena
+  # Arena scale range (fraction of base KSC size)
+  scale_min: 0.45
+  scale_max: 1.0
+  grad_clip: 1.0
+  early_stop_patience: 20
+
+checkpoints:
+  dir: "training_nav/checkpoints"
+  save_every: 5
