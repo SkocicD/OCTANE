@@ -141,10 +141,11 @@ class CurriculumPool:
     """
 
     def __init__(self, train_ids, data_root, cfg):
-        self.all_ids          = list(train_ids)
-        self._expand_by       = cfg.get('expand_by', 20)
-        self._plateau_patience = cfg.get('plateau_patience', 5)
-        self._min_improvement  = cfg.get('min_improvement', 0.005)
+        self.all_ids           = list(train_ids)
+        self._expand_by        = cfg.get('expand_by', 20)
+        self._plateau_patience = cfg.get('plateau_patience', 8)
+        self._min_improvement  = cfg.get('min_improvement', 0.02)
+        self._max_epochs_per_pool = cfg.get('max_epochs_per_pool', 40)
 
         print("[curriculum] Computing height variances...", end='', flush=True)
         variances = {}
@@ -161,6 +162,7 @@ class CurriculumPool:
         start = cfg.get('start_size', 20)
         self._pool_size   = min(start, len(self.all_ids))
         self._no_improve  = 0
+        self._epochs_in_pool = 0
         self._best_height = float('inf')
         print(f"[curriculum] Starting with {self._pool_size} / {len(self.all_ids)} episodes")
 
@@ -177,9 +179,11 @@ class CurriculumPool:
         return self._pool_size
 
     def step(self, height_val_loss):
-        """Call after each epoch with height val loss. Returns True if pool expanded."""
+        """Call after each epoch with train height loss. Returns True if pool expanded."""
         if self.is_full:
             return False
+
+        self._epochs_in_pool += 1
 
         if height_val_loss < self._best_height * (1.0 - self._min_improvement):
             self._best_height = height_val_loss
@@ -187,26 +191,34 @@ class CurriculumPool:
         else:
             self._no_improve += 1
 
-        if self._no_improve >= self._plateau_patience:
-            old               = self._pool_size
-            self._pool_size   = min(self._pool_size + self._expand_by, len(self.all_ids))
-            self._no_improve  = 0
-            self._best_height = float('inf')
-            print(f"[curriculum] Pool expanded: {old} → {self._pool_size} / {len(self.all_ids)}")
+        plateau = self._no_improve >= self._plateau_patience
+        timeout = self._epochs_in_pool >= self._max_epochs_per_pool
+
+        if plateau or timeout:
+            reason = "plateau" if plateau else "timeout"
+            old                  = self._pool_size
+            self._pool_size      = min(self._pool_size + self._expand_by, len(self.all_ids))
+            self._no_improve     = 0
+            self._epochs_in_pool = 0
+            self._best_height    = float('inf')
+            print(f"[curriculum] Pool expanded ({reason}): {old} → {self._pool_size} / {len(self.all_ids)}")
             return True
         return False
 
     def state_dict(self):
         return {
-            'pool_size':   self._pool_size,
-            'best_height': self._best_height,
-            'no_improve':  self._no_improve,
+            'pool_size':      self._pool_size,
+            'best_height':    self._best_height,
+            'no_improve':     self._no_improve,
+            'epochs_in_pool': self._epochs_in_pool,
         }
 
     def load_state_dict(self, d):
-        self._pool_size   = d['pool_size']
-        self._best_height = d['best_height']
-        self._no_improve  = d['no_improve']
+        self._pool_size      = d['pool_size']
+        self._epochs_in_pool = d.get('epochs_in_pool', 0)
+        # Reset best_height so stale values from a prior loss function don't block expansion
+        self._best_height = float('inf')
+        self._no_improve  = 0
 
 
 # ── DataLoader helpers ────────────────────────────────────────────────────────
