@@ -64,6 +64,19 @@ def _height_grad_loss(pred, target):
             F.l1_loss(F.conv2d(p, ky, padding=1), F.conv2d(t, ky, padding=1)))
 
 
+def _log_transform(h: torch.Tensor) -> torch.Tensor:
+    """Map height to log-scale: log(1 + |h|) * sign(h). Compresses extreme values."""
+    return torch.log1p(h.abs()) * h.sign()
+
+
+def _berhu_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Reverse Huber: L1 for small errors, L2 for large ones.
+    Threshold c = 20% of max error in the batch (adaptive per-batch)."""
+    diff = (pred - target).abs()
+    c = 0.2 * diff.detach().max()
+    return torch.where(diff <= c, diff, (diff ** 2 + c ** 2) / (2 * c)).mean()
+
+
 class UncertaintyWeightedLoss(nn.Module):
     """Per-task learned uncertainty weights (Kendall et al. 2018).
 
@@ -82,18 +95,25 @@ class UncertaintyWeightedLoss(nn.Module):
         })
 
     def forward(self, preds, targets):
-        # Slope-weighted L1: pixels near steep features (crater edges) get 3x more weight
-        # so the model can't ignore extreme depth values by averaging them away
-        kx = _SOBEL_X.to(targets['height'].device)
-        ky = _SOBEL_Y.to(targets['height'].device)
-        t_h = targets['height'].unsqueeze(1)
+        # Log-transform: compresses extreme heights so craters don't overwhelm gradients
+        pred_h = _log_transform(preds['height'])
+        tgt_h  = _log_transform(targets['height'])
+
+        # Element-wise BerHu: L1 for small errors, L2 for large ones
+        diff = (pred_h - tgt_h).abs()
+        c    = (0.2 * diff.detach().max()).clamp(min=1e-6)
+        berhu_map = torch.where(diff <= c, diff, (diff ** 2 + c ** 2) / (2 * c))
+
+        # Slope weighting: crater-edge pixels get up to 4x the loss signal
+        kx    = _SOBEL_X.to(tgt_h.device)
+        ky    = _SOBEL_Y.to(tgt_h.device)
+        t_h   = tgt_h.unsqueeze(1)
         slope = (F.conv2d(t_h, kx, padding=1).abs() +
                  F.conv2d(t_h, ky, padding=1).abs()).squeeze(1).detach()
-        weight_map = (1.0 + 3.0 * slope)
-        height_l1   = (weight_map * (preds['height'] - targets['height']).abs()).mean()
-        height_grad = _height_grad_loss(preds['height'], targets['height'])
+        height_main = (berhu_map * (1.0 + 3.0 * slope)).mean()
+        height_grad = _height_grad_loss(pred_h, tgt_h)
         raw = {
-            'height':  height_l1 + 0.5 * height_grad,
+            'height':  height_main + 0.5 * height_grad,
             'rocks':   F.mse_loss(preds['rocks'],   targets['rocks']),
             'craters': F.mse_loss(preds['craters'], targets['craters']),
             'walls':   F.binary_cross_entropy(preds['walls'], targets['walls']),
