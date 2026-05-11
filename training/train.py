@@ -506,7 +506,7 @@ def main():
             curriculum.load_state_dict(ckpt['curriculum'])
             train_loader = _rebuild_train_loader()
         start_epoch       = ckpt['epoch'] + 1
-        best_val          = ckpt.get('best_val', float('inf'))
+        best_val          = float('inf')   # reset — stale across loss function changes
         epochs_no_improve = ckpt.get('epochs_no_improve', 0)
         global_step       = ckpt.get('global_step', 0)
         print(f"[train] Resuming from {os.path.basename(resume_path)} "
