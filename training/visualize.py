@@ -204,7 +204,7 @@ def _wall_meshes(walls_gt: np.ndarray, height_map: np.ndarray, floor_z: float):
         cxs    = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
         cys    = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
         base_z = np.where(inside, height_map[cxs, cys], floor_z)
-        top_z  = base_z + WALL_H
+        top_z  = np.full(N, base_z.max() + WALL_H)
 
         # Vertices: bottom row (0..N-1), top row (N..2N-1)
         x_v = np.concatenate([rxs, rxs])
