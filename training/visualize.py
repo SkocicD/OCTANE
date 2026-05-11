@@ -181,7 +181,7 @@ def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
         ys  = ry + r * np.sin(theta)
         cxs = np.clip(((xs + HALF) / CELL).astype(int), 0, GRID - 1)
         cys = np.clip(((ys + HALF) / CELL).astype(int), 0, GRID - 1)
-        zs  = height_map[cxs, cys] - 0.05
+        zs  = height_map[cxs, cys] + 0.08   # sit on surface like rocks
         traces.append(go.Scatter3d(
             x=xs, y=ys, z=zs, mode='lines',
             line=dict(color='#ef5350', width=3),
@@ -190,22 +190,40 @@ def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
     return traces
 
 
-def _wall_lines(walls_gt: np.ndarray, height_map: np.ndarray, floor_z: float):
+def _wall_meshes(walls_gt: np.ndarray, height_map: np.ndarray, floor_z: float):
+    """Rectangular wall ribbons: terrain-following base, fixed height above it."""
     import plotly.graph_objects as go
+    WALL_H = 0.50  # wall height in metres
+    N      = 25    # segments per wall
     traces = []
     for i, wall in enumerate(walls_gt):
-        rx1, ry1, rx2, ry2 = wall
-        n   = 40
-        rxs = np.linspace(rx1, rx2, n)
-        rys = np.linspace(ry1, ry2, n)
+        rx1, ry1, rx2, ry2 = map(float, wall)
+        rxs = np.linspace(rx1, rx2, N)
+        rys = np.linspace(ry1, ry2, N)
         inside = (rxs >= -HALF) & (rxs <= HALF) & (rys >= -HALF) & (rys <= HALF)
-        cxs = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
-        cys = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
-        zs  = np.where(inside, height_map[cxs, cys], floor_z) + 0.20
-        traces.append(go.Scatter3d(
-            x=rxs, y=rys, z=zs, mode='lines',
-            line=dict(color='#ff9800', width=6),
+        cxs    = np.clip(((rxs + HALF) / CELL).astype(int), 0, GRID - 1)
+        cys    = np.clip(((rys + HALF) / CELL).astype(int), 0, GRID - 1)
+        base_z = np.where(inside, height_map[cxs, cys], floor_z)
+        top_z  = base_z + WALL_H
+
+        # Vertices: bottom row (0..N-1), top row (N..2N-1)
+        x_v = np.concatenate([rxs, rxs])
+        y_v = np.concatenate([rys, rys])
+        z_v = np.concatenate([base_z, top_z])
+
+        # Two triangles per segment quad
+        ii, jj, kk = [], [], []
+        for j in range(N - 1):
+            ii += [j,     j + 1]
+            jj += [j + 1, N + j + 1]
+            kk += [N + j, N + j]
+
+        traces.append(go.Mesh3d(
+            x=x_v, y=y_v, z=z_v,
+            i=ii, j=jj, k=kk,
+            color='#ff9800', opacity=0.80,
             name='walls (GT)', showlegend=(i == 0), legendgroup='walls',
+            hoverinfo='skip',
         ))
     return traces
 
@@ -296,7 +314,7 @@ def build_figure(pred: dict | None, gt: dict) -> 'plotly.graph_objects.Figure':
             fig.add_trace(t, row=1, col=col)
         for t in _crater_circles(objects, height):
             fig.add_trace(t, row=1, col=col)
-        for w in _wall_lines(walls, height, floor_z):
+        for w in _wall_meshes(walls, height, floor_z):
             fig.add_trace(w, row=1, col=col)
         if show_rover:
             for t in _rover_box(height, roll, pitch):
