@@ -4,7 +4,8 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
-from launch.actions import LogInfo
+from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
 
@@ -14,6 +15,10 @@ from launch_ros.descriptions import ComposableNode
 
 def generate_launch_description():
     nodes = [
+        DeclareLaunchArgument('model_path',       default_value='',     description='Path to terrain model .pt checkpoint'),
+        DeclareLaunchArgument('depth_stats_path', default_value='',     description='Path to depth_stats.json'),
+        DeclareLaunchArgument('inference_rate',   default_value='5.0',  description='Terrain inference Hz'),
+        DeclareLaunchArgument('device',           default_value='auto', description='auto | cuda | cpu'),
         LogInfo(msg='Starting mapping subsystem'),
         # Stub identity odom→base_link until octane_localization is ready
         # (April tags + IMU fusion).  Replace this node with the real source then.
@@ -143,6 +148,22 @@ def generate_launch_description():
             name='point_cloud_mux_node',
             output='log',
             parameters=[{'config_file': config_file, 'publish_rate': 5.0}],
+        )
+    )
+
+    # ── Terrain model inference ───────────────────────────────────────────────
+    nodes.append(
+        Node(
+            package='octane_mapping',
+            executable='terrain_inference_node',
+            name='terrain_inference_node',
+            output='screen',
+            parameters=[{
+                'model_path':       LaunchConfiguration('model_path'),
+                'depth_stats_path': LaunchConfiguration('depth_stats_path'),
+                'inference_rate':   LaunchConfiguration('inference_rate'),
+                'device':           LaunchConfiguration('device'),
+            }],
         )
     )
 
