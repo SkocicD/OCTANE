@@ -99,7 +99,7 @@ def generate_launch_description():
                 'modbus_address': 1,
                 'max_rpm':        12,    # sensorless duty ceiling: 0-12 is the effective range
                 'pole_pairs':     4,
-                'reverse':        True,
+                'reverse':        False,
                 'open_loop':      True,   # Hall sensors not connected → sensorless duty-cycle mode
             },
         ],
