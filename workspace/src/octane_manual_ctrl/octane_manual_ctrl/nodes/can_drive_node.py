@@ -35,9 +35,10 @@ class CANDriveNode(Node):
 
     def __init__(self):
         super().__init__('can_drive_node')
-        self.declare_parameter('bitrate',    1_000_000)
-        self.declare_parameter('ramp_rate',  3.0)
-        self.declare_parameter('dead_band',  0.02)
+        self.declare_parameter('bitrate',         1_000_000)
+        self.declare_parameter('ramp_time_up',   0.33)
+        self.declare_parameter('ramp_time_down', 0.33)
+        self.declare_parameter('dead_band',      0.02)
 
         self._manual = False
         self._motors: list[MotorController] = []
@@ -48,7 +49,8 @@ class CANDriveNode(Node):
         self._current_r = 0.0
         self._sent_l    = None   # last value actually written to CAN (None = force first send)
         self._sent_r    = None
-        self._ramp_rate      = self.get_parameter('ramp_rate').value
+        self._ramp_time_up   = self.get_parameter('ramp_time_up').value
+        self._ramp_time_down = self.get_parameter('ramp_time_down').value
         self._dead_band      = self.get_parameter('dead_band').value
         self._watchdog_ticks = 0
         self._watchdog_every = max(1, int(CONTROL_HZ / PDO_WATCHDOG_HZ))
@@ -104,10 +106,10 @@ class CANDriveNode(Node):
         self._target_r = max(-1.0, min(1.0, msg.right_velocity))
 
     def _control_loop(self):
-        step = self._ramp_rate / CONTROL_HZ
-
         def ramp(current, target):
             diff = target - current
+            t = self._ramp_time_up if diff > 0 else self._ramp_time_down
+            step = 1.0 / (t * CONTROL_HZ)
             if abs(diff) <= step:
                 return target
             return current + step * (1 if diff > 0 else -1)

@@ -82,15 +82,17 @@ class RS485DriveNode(Node):
         self.declare_parameter('max_rpm',        3000)
         self.declare_parameter('pole_pairs',     4)    # factory default for BLD-510B
         self.declare_parameter('reverse',        False) # flip direction if motor wired backwards
-        self.declare_parameter('ramp_rate',      3.0)
+        self.declare_parameter('ramp_time_up',   0.33)
+        self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
         self._pole_pairs = self.get_parameter('pole_pairs').value
         self._reverse    = self.get_parameter('reverse').value
-        self._ramp_rate  = self.get_parameter('ramp_rate').value
-        self._dead_band  = self.get_parameter('dead_band').value
+        self._ramp_time_up   = self.get_parameter('ramp_time_up').value
+        self._ramp_time_down = self.get_parameter('ramp_time_down').value
+        self._dead_band      = self.get_parameter('dead_band').value
 
         self._manual  = False
         self._target  = 0.0
@@ -179,9 +181,10 @@ class RS485DriveNode(Node):
     # ── control loop (ramp + watchdog) ──────────────────────────────────────────
 
     def _control_loop(self):
-        step = self._ramp_rate / CONTROL_HZ
-
         diff = self._target - self._current
+        t    = self._ramp_time_up if diff > 0 else self._ramp_time_down
+        step = 1.0 / (t * CONTROL_HZ)
+
         if abs(diff) <= step:
             self._current = self._target
         else:
