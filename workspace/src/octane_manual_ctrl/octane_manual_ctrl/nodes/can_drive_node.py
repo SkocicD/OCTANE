@@ -33,7 +33,7 @@ PDO_WATCHDOG_HZ = 2    # always re-send at least this often even when steady
 
 class CANDriveNode(Node):
 
-    def __init__(self):
+    def __init__(self, transceiver: 'CANTransceiver | None' = None):
         super().__init__('can_drive_node')
         self.declare_parameter('bitrate',         1_000_000)
         self.declare_parameter('ramp_time_up',   0.33)
@@ -66,7 +66,10 @@ class CANDriveNode(Node):
         self._status_pub = self.create_publisher(String, '/manual_ctrl/can_status', status_qos)
 
         try:
-            tx = CANTransceiver(bitrate=self.get_parameter('bitrate').value)
+            tx = transceiver if transceiver is not None else CANTransceiver(
+                bitrate=self.get_parameter('bitrate').value)
+            if tx is None:
+                raise RuntimeError('no CAN transceiver available')
             for nid in ALL_IDS:
                 m = MotorController(nid, tx)
                 m.turn_on()

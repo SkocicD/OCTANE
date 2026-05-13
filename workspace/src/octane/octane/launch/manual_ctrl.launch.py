@@ -3,7 +3,7 @@
 
 Launches:
   - manual_drive_node:    WASD key state -> DriveCommand (left/right velocity)
-  - can_drive_node:       DriveCommand -> CANOpen PDO motor commands
+  - can_worker:           combined process — can_drain_node (RX drain) + can_drive_node (PDO TX)
   - can_debug_node:       purple xterm live view (transceiver status, keys, velocity bars)
   - rs485_drive_node:     left_velocity -> Modbus RTU BLD-510B (replaces broken CAN motor #2)
   - rs485_debug_node:     violet xterm live view for RS485 motor
@@ -44,10 +44,9 @@ def generate_launch_description():
         ],
     )
 
-    can_drive_node = Node(
+    can_worker_node = Node(
         package='octane_manual_ctrl',
-        executable='can_drive_node',
-        name='can_drive_node',
+        executable='can_worker',
         output='log',
         parameters=[robot_params],
     )
@@ -122,7 +121,7 @@ def generate_launch_description():
         rs485_debug_terminal,
         # background nodes
         drive_node,
-        can_drive_node,
+        can_worker_node,
         rs485_drive_node,
         manual_actuator_node,
         serial_actuator_node,

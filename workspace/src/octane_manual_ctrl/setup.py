@@ -22,6 +22,8 @@ setup(
             'manual_drive_node = octane_manual_ctrl.nodes.manual_drive_node:main',
             'manual_actuator_node = octane_manual_ctrl.nodes.manual_actuator_node:main',
             'can_drive_node = octane_manual_ctrl.nodes.can_drive_node:main',
+            'can_drain_node = octane_manual_ctrl.nodes.can_drain_node:main',
+            'can_worker = octane_manual_ctrl.nodes.can_worker:main',
             'can_debug_node = octane_manual_ctrl.nodes.can_debug_node:main',
             'actuator_debug_node = octane_manual_ctrl.nodes.actuator_debug_node:main',
         ],
