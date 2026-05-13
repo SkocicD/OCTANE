@@ -43,6 +43,8 @@ class RS485DebugNode(Node):
         self._keys       = 0
         self._left_vel   = 0.0   # target  (from /drive/command)
         self._sent       = 0.0   # actual sent (ramped, from TX log)
+        self._raw_speed  = '---' # rpm=XXX or duty=XX/255 as sent to driver
+        self._scale      = 0.0
         self._speed_modifier = 100
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
@@ -87,7 +89,14 @@ class RS485DebugNode(Node):
                 if '=' in part:
                     k, v = part.split('=', 1)
                     try:
-                        if k == 'L': self._sent = float(v)
+                        if k == 'L':
+                            self._sent = float(v)
+                        elif k == 'rpm':
+                            self._raw_speed = f'{v} RPM'
+                        elif k == 'duty':
+                            self._raw_speed = f'duty {v}'
+                        elif k == 'scale':
+                            self._scale = float(v)
                     except ValueError:
                         pass
         self._tx_log.append(entry)
@@ -139,6 +148,7 @@ class RS485DebugNode(Node):
         print()
         print(f'  Target  L   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
         print(f'  Sent    L   : {self._vel_bar(self._sent)}  {self._sent:+.3f}')
+        print(f'  Raw to drv  : {BOLD}{YELLOW}{self._raw_speed}{RESET}  {DIM}(scale={self._scale:.2f}){RESET}')
         print(f'  Speed mod   : {self._speed_bar(self._speed_modifier)}')
         print(f'  {DIM}Last /drive/command: {cmd_age}{RESET}')
         print()
