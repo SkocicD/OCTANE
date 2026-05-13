@@ -5,8 +5,9 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ Ground Station GUI (50ms tick, Manual mode active)              │
-│ Operator holds W + D                                            │
+│ Operator holds W + D, speed dial at 80%                        │
 │ GetKeyBitfield() → 0b00001001 (bits 0,3 = W,D)                 │
+│ speed_modifier → 80                                             │
 └──────────────────────┬──────────────────────────────────────────┘
                        │  M frame [4F][4D][01][bitfield][CRC]
                        │  TCP → octane.local:5000
@@ -29,27 +30,32 @@
 │                  │    │                           │
 │ left  = 1.0-0.6  │    │ Publishes stop (no input) │
 │       = 0.4      │    └──────────────────────────┘
-│ right = 1.0+0.6  │
-│       = clamped  │
+│ right = clamped  │
 │       = 1.0      │
+│ speed_modifier   │
+│       = 80       │  ← GUI sets this (default 100)
 │                  │
 │ Publishes:       │
 │ left_vel=0.4     │
 │ right_vel=1.0    │
+│ speed_mod=80     │
 └──────────┬───────┘
            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ /drive/command (DriveCommand)                                   │
-│ left_velocity: 0.4   right_velocity: 1.0                       │
+│ left_velocity: 0.4   right_velocity: 1.0   speed_modifier: 80  │
 └──────────────────────┬──────────────────────────────────────────┘
                        │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ can_drive_node  [TODO: implement]                               │
-│ Scales to motor units, sends CAN frames to 6 motors            │
-│ left side (FL, ML, RL): 0.4 * MAX_RPM                          │
-│ right side (FR, MR, RR): 1.0 * MAX_RPM                         │
-└─────────────────────────────────────────────────────────────────┘
+          ┌────────────┴────────────┐
+          ▼                         ▼
+┌──────────────────────┐  ┌──────────────────────────────────────┐
+│ can_drive_node       │  │ rs485_drive_node                     │
+│ Ramps to target      │  │ Ramps left_velocity to target        │
+│ effective =          │  │ effective =                          │
+│  vel × 0.2 × 0.80   │  │  vel × 0.2 × 0.80                   │
+│ Sends PDO to 5 CAN  │  │ Sends Modbus RTU to BLD-510B         │
+│ motors (1,3,4,5,6)  │  │ motor #2 (mid-left, /dev/rs485_drive)│
+└──────────────────────┘  └──────────────────────────────────────┘
 ```
 
 ## Supervisor Gate
@@ -79,7 +85,7 @@ Operator clicks Standby
   → publishes /supervisor/state = "STANDBY"
   → manual_drive_node: was_active=True, now False → publish stop (0.0, 0.0)
   → manual_actuator_node: was_active=True, now False → publish stop (0, 0)
-  → CAN/GPIO nodes receive stop before any further key state arrives
+  → CAN/RS485/GPIO nodes receive stop before any further key state arrives
 ```
 
 ## Topic Map
@@ -91,6 +97,19 @@ Operator clicks Standby
 /supervisor/state        ──→  manual_drive_node  (gate)
                          └─→  manual_actuator_node (gate)
 
-/drive/command           ──→  can_drive_node     [TODO]
-/actuator/command        ──→  gpio_actuator_node [TODO]
+/drive/command           ──→  can_drive_node     → CAN motors 1,3,4,5,6
+                         └─→  rs485_drive_node   → motor 2 (BLD-510B, RS485)
+
+/actuator/command        ──→  serial_actuator_node → Arduino relay board
 ```
+
+## Drive Config (robot_params.yaml)
+
+Shared parameters loaded by both `can_drive_node` and `rs485_drive_node`:
+
+| Parameter        | Default | Description                               |
+|------------------|---------|-------------------------------------------|
+| `ramp_time_up`   | 0.33 s  | Time to ramp from 0% to 100% throttle    |
+| `ramp_time_down` | 0.33 s  | Time to ramp from 100% to 0% throttle    |
+| `dead_band`      | 0.02    | Min speed change before re-sending        |
+| `speed_scale`    | 0.2     | Global speed cap (1.0 = full motor RPM)  |

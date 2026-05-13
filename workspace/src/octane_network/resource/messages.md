@@ -211,6 +211,52 @@ Size: 3 bytes
 
 ---
 
+## Manipulator (Ground → Rover)
+
+**Purpose:** Deliver key state bitfield and GUI speed dial value on every manual control tick.
+
+**Trigger:** GUI manual control timer (e.g. 50ms tick) while in Manual mode.
+
+**Type code:** `M` (0x4D)
+
+**Wire format:** `M + bitfield + speed_hi + speed_lo`
+
+### Key Bitfield
+| Bit | Mask | Key | Action       |
+|-----|------|-----|--------------|
+| 0   | 0x01 | W   | Forward      |
+| 1   | 0x02 | A   | Turn left    |
+| 2   | 0x04 | S   | Backward     |
+| 3   | 0x08 | D   | Turn right   |
+| 4   | 0x10 | ↑   | Arm up       |
+| 5   | 0x20 | ↓   | Arm down     |
+| 6   | 0x40 | ←   | Bucket dir-A |
+| 7   | 0x80 | →   | Bucket dir-B |
+
+### Speed Modifier
+`speed_modifier` is a big-endian uint16 (2 bytes). Range 0–500 (integer percentage).
+`100` = 1.0× (baseline). `500` = 5.0× (full motor RPM). GUI should cap at 100 for safe operation.
+
+Effective speed = `velocity × speed_scale × (speed_modifier / 100.0)`, clamped to [0.0, 1.0].
+
+### Examples
+
+**W+D held, speed dial at 100%:**
+```
+Bytes: [M][0x09][0x00][0x64]
+Decoded: W=1 D=1, speed_modifier=100
+```
+
+**No keys, speed dial at 50%:**
+```
+Bytes: [M][0x00][0x00][0x32]
+Decoded: (no keys), speed_modifier=50
+```
+
+**Fixed size:** Always 3 bytes payload, 7 bytes total on wire.
+
+---
+
 ## Complete Frame Layout (All Types)
 
 ```

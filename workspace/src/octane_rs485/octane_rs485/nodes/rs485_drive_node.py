@@ -82,20 +82,25 @@ class RS485DriveNode(Node):
         self.declare_parameter('max_rpm',        3000)
         self.declare_parameter('pole_pairs',     4)    # factory default for BLD-510B
         self.declare_parameter('reverse',        False) # flip direction if motor wired backwards
-        self.declare_parameter('ramp_rate',      3.0)
+        self.declare_parameter('ramp_time_up',   0.33)
+        self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
+        self.declare_parameter('speed_scale',    0.2)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
         self._pole_pairs = self.get_parameter('pole_pairs').value
         self._reverse    = self.get_parameter('reverse').value
-        self._ramp_rate  = self.get_parameter('ramp_rate').value
-        self._dead_band  = self.get_parameter('dead_band').value
+        self._ramp_time_up   = self.get_parameter('ramp_time_up').value
+        self._ramp_time_down = self.get_parameter('ramp_time_down').value
+        self._dead_band      = self.get_parameter('dead_band').value
+        self._speed_scale    = self.get_parameter('speed_scale').value
 
-        self._manual  = False
-        self._target  = 0.0
-        self._current = 0.0
-        self._sent    = None
+        self._manual         = False
+        self._target         = 0.0
+        self._current        = 0.0
+        self._sent           = None
+        self._speed_modifier = 1.0    # from msg.speed_modifier / 100.0; default 100 → 1.0x
         self._watchdog_ticks  = 0
         self._watchdog_every  = max(1, int(CONTROL_HZ / PDO_WATCHDOG_HZ))
         self._port: serial.Serial | None = None
@@ -174,14 +179,16 @@ class RS485DriveNode(Node):
             status.data = f'GATED:STANDBY  L={msg.left_velocity:+.2f}'
             self._tx_pub.publish(status)
             return
-        self._target = max(-1.0, min(1.0, msg.left_velocity))
+        self._target         = max(-1.0, min(1.0, msg.left_velocity))
+        self._speed_modifier = max(0, min(500, msg.speed_modifier)) / 100.0
 
     # ── control loop (ramp + watchdog) ──────────────────────────────────────────
 
     def _control_loop(self):
-        step = self._ramp_rate / CONTROL_HZ
-
         diff = self._target - self._current
+        t    = self._ramp_time_up if diff > 0 else self._ramp_time_down
+        step = 1.0 / (t * CONTROL_HZ)
+
         if abs(diff) <= step:
             self._current = self._target
         else:
@@ -216,7 +223,8 @@ class RS485DriveNode(Node):
         if abs(v) < self._dead_band:
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
-            rpm  = int(abs(v) * self._max_rpm)
+            effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
+            rpm  = int(abs(v) * effective_scale * self._max_rpm)
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)
             self._write_reg(REG_SPEED,   rpm)

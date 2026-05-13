@@ -12,15 +12,15 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import Imu
-from std_msgs.msg import String, Empty, UInt8
+from std_msgs.msg import String, Empty, UInt8, UInt16
 import socket
 import threading
 from typing import Optional, List
 
 from octane_network.classes.protocol import (
     encode_command, encode_telemetry, encode_ack, encode_fault, encode_heartbeat,
-    decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK, TYPE_FAULT,
-    TYPE_MANIPULATOR, TYPE_VIDEO_REQUEST,
+    encode_manipulator, decode_message, TYPE_TELEMETRY, TYPE_COMMAND, TYPE_ACK,
+    TYPE_FAULT, TYPE_MANIPULATOR, TYPE_VIDEO_REQUEST,
 )
 from octane_network.classes.network_guard import NetworkGuard
 
@@ -67,7 +67,8 @@ class NetworkCommNode(Node):
         # ROS2 publishers
         self.mode_command_pub    = self.create_publisher(String, '/supervisor/mode_command',  qos)
         self.fault_reset_pub     = self.create_publisher(Empty,  '/supervisor/fault_reset',   qos)
-        self.key_state_pub       = self.create_publisher(UInt8,  '/manual_ctrl/key_state',    qos)
+        self.key_state_pub       = self.create_publisher(UInt8,   '/manual_ctrl/key_state',    qos)
+        self.speed_modifier_pub  = self.create_publisher(UInt16,  '/manual_ctrl/speed_modifier', qos)
         self._hb_status_pub      = self.create_publisher(String, '/network/heartbeat_tx',     qos)
         self._client_ip_pub      = self.create_publisher(String, '/network/client_ip',        latched_qos)
         self._stream_request_pub = self.create_publisher(String, '/network/stream_request',   qos)
@@ -220,6 +221,10 @@ class NetworkCommNode(Node):
             key_msg = UInt8()
             key_msg.data = msg.get('bitfield', 0)
             self.key_state_pub.publish(key_msg)
+
+            spd_msg = UInt16()
+            spd_msg.data = msg.get('speed_modifier', 100)
+            self.speed_modifier_pub.publish(spd_msg)
 
         elif msg_type == 'command':
             mode = msg.get('mode', '')
