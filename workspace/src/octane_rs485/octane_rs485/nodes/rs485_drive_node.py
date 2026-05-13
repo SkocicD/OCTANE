@@ -213,8 +213,10 @@ class RS485DriveNode(Node):
         self._send_velocity(self._current)
         self._sent = self._current
 
+        effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
+        rpm = int(abs(self._current) * effective_scale * self._max_rpm) if abs(self._current) >= self._dead_band else 0
         status = String()
-        status.data = f'TX  L={self._current:+.3f}'
+        status.data = f'TX  L={self._current:+.3f}  rpm={rpm}  scale={effective_scale:.2f}'
         self._tx_pub.publish(status)
 
     def _send_velocity(self, v: float):
