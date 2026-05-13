@@ -36,19 +36,37 @@ class CANDrainNode(Node):
         self._status_pub = self.create_publisher(
             String, '/manual_ctrl/can_drain_status', status_qos)
 
+        qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.RELIABLE)
+        self._rx_pub = self.create_publisher(String, '/can/rx', qos)
+        self._tx_pub = self.create_publisher(String, '/can/tx_raw', qos)
+
         if transceiver is not None:
-            self._tx = transceiver
+            self._transceiver = transceiver
             self._publish_status('OK — drain active (shared transceiver)')
             self.get_logger().info('CAN drain node ready (shared transceiver)')
         else:
             try:
-                self._tx = CANTransceiver()
+                self._transceiver = CANTransceiver()
                 self._publish_status('OK — drain active (standalone)')
                 self.get_logger().info('CAN drain node ready (standalone)')
             except Exception as e:
-                self._tx = None
+                self._transceiver = None
                 self._publish_status(f'ERROR: {e}')
                 self.get_logger().error(f'CAN drain init failed: {e}')
+
+        if self._transceiver is not None:
+            self._transceiver.set_rx_callback(self._on_rx)
+            self._transceiver.set_tx_callback(self._on_tx)
+
+    def _on_rx(self, can_id: int, data: bytes) -> None:
+        msg = String()
+        msg.data = f'RX  0x{can_id:03X}  [{len(data)}]  {data.hex(" ").upper()}'
+        self._rx_pub.publish(msg)
+
+    def _on_tx(self, can_id: int, data: bytes) -> None:
+        msg = String()
+        msg.data = f'TX  0x{can_id:03X}  [{len(data)}]  {data.hex(" ").upper()}'
+        self._tx_pub.publish(msg)
 
     def _publish_status(self, text: str):
         msg = String()
