@@ -96,10 +96,11 @@ class RS485DriveNode(Node):
         self._dead_band      = self.get_parameter('dead_band').value
         self._speed_scale    = self.get_parameter('speed_scale').value
 
-        self._manual  = False
-        self._target  = 0.0
-        self._current = 0.0
-        self._sent    = None
+        self._manual         = False
+        self._target         = 0.0
+        self._current        = 0.0
+        self._sent           = None
+        self._speed_modifier = 1.0    # from msg.speed_modifier / 100.0; default 100 → 1.0x
         self._watchdog_ticks  = 0
         self._watchdog_every  = max(1, int(CONTROL_HZ / PDO_WATCHDOG_HZ))
         self._port: serial.Serial | None = None
@@ -178,7 +179,8 @@ class RS485DriveNode(Node):
             status.data = f'GATED:STANDBY  L={msg.left_velocity:+.2f}'
             self._tx_pub.publish(status)
             return
-        self._target = max(-1.0, min(1.0, msg.left_velocity))
+        self._target         = max(-1.0, min(1.0, msg.left_velocity))
+        self._speed_modifier = max(0, min(500, msg.speed_modifier)) / 100.0
 
     # ── control loop (ramp + watchdog) ──────────────────────────────────────────
 
@@ -221,7 +223,8 @@ class RS485DriveNode(Node):
         if abs(v) < self._dead_band:
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
-            rpm  = int(abs(v) * self._speed_scale * self._max_rpm)
+            effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
+            rpm  = int(abs(v) * effective_scale * self._max_rpm)
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)
             self._write_reg(REG_SPEED,   rpm)
