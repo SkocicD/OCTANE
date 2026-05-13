@@ -40,7 +40,6 @@ CTRL_REVERSE = 0x0B   # NW=1 EN=1 FR=1 BK=0
 CTRL_STOP    = 0x08   # NW=1 EN=0 FR=0 BK=0
 
 CONTROL_HZ      = 20
-RAMP_RATE       = 3.0   # velocity units / second
 DEAD_BAND       = 0.02
 PDO_WATCHDOG_HZ = 2
 
@@ -91,7 +90,6 @@ class RS485DriveNode(Node):
         self._reverse    = self.get_parameter('reverse').value
 
         self._manual  = False
-        self._target  = 0.0
         self._current = 0.0
         self._sent    = None
         self._watchdog_ticks  = 0
@@ -172,37 +170,33 @@ class RS485DriveNode(Node):
             status.data = f'GATED:STANDBY  L={msg.left_velocity:+.2f}'
             self._tx_pub.publish(status)
             return
-        self._target = max(-1.0, min(1.0, msg.left_velocity))
 
-    # ── control loop ─────────────────────────────────────────────────────────
-
-    def _control_loop(self):
-        step = RAMP_RATE / CONTROL_HZ
-        diff = self._target - self._current
-        self._current = self._target if abs(diff) <= step else self._current + step * (1 if diff > 0 else -1)
-
-        if not self._manual:
-            if self._current == 0.0:
-                return
-            self._target = 0.0
+        v = max(-1.0, min(1.0, msg.left_velocity))
 
         if self._port is None:
             return
 
-        self._watchdog_ticks += 1
-        force = self._watchdog_ticks >= self._watchdog_every
-        if force:
-            self._watchdog_ticks = 0
-
-        if not force and self._sent is not None and abs(self._current - self._sent) <= DEAD_BAND:
+        if self._sent is not None and abs(v - self._sent) <= DEAD_BAND:
             return
 
-        self._send_velocity(self._current)
-        self._sent = self._current
+        self._send_velocity(v)
+        self._current = v
+        self._sent    = v
 
         status = String()
-        status.data = f'TX  L={self._current:+.3f}'
+        status.data = f'TX  L={v:+.3f}'
         self._tx_pub.publish(status)
+
+    # ── control loop (watchdog only — keeps motor alive when velocity is steady) ─
+
+    def _control_loop(self):
+        if not self._manual or self._port is None or self._sent is None:
+            return
+
+        self._watchdog_ticks += 1
+        if self._watchdog_ticks >= self._watchdog_every:
+            self._watchdog_ticks = 0
+            self._send_velocity(self._current)
 
     def _send_velocity(self, v: float):
         if self._reverse:
@@ -216,7 +210,6 @@ class RS485DriveNode(Node):
             self._write_reg(REG_SPEED,   rpm)
 
     def _stop(self):
-        self._target  = 0.0
         self._current = 0.0
         self._sent    = None
         if self._port:
