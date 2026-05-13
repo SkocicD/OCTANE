@@ -79,7 +79,7 @@ class RS485DriveNode(Node):
         self.declare_parameter('port',           '/dev/rs485_drive')
         self.declare_parameter('baud_rate',      9600)
         self.declare_parameter('modbus_address', 1)
-        self.declare_parameter('max_rpm',        2000)
+        self.declare_parameter('max_rpm',        400)
         self.declare_parameter('pole_pairs',     4)    # factory default for BLD-510B
         self.declare_parameter('reverse',        False) # flip direction if motor wired backwards
         self.declare_parameter('ramp_time_up',   0.33)
@@ -233,7 +233,7 @@ class RS485DriveNode(Node):
         self._sent = self._current
 
         if self._open_loop:
-            speed_val = min(255, int(abs(self._current) * effective_scale * 255)) \
+            speed_val = min(255, int(abs(self._current) * effective_scale * self._max_rpm)) \
                         if abs(self._current) >= self._dead_band else 0
             speed_label = f'duty={speed_val}/255'
         else:
@@ -254,8 +254,8 @@ class RS485DriveNode(Node):
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
             if self._open_loop:
-                # 0-255 duty cycle; writing RPM values overflows the 8-bit range and saturates at max
-                speed_val = min(255, int(abs(v) * effective_scale * 255))
+                # max_rpm is the duty ceiling (0-255); scaled the same way as closed-loop RPM
+                speed_val = min(255, int(abs(v) * effective_scale * self._max_rpm))
             else:
                 speed_val = int(abs(v) * effective_scale * self._max_rpm)
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD

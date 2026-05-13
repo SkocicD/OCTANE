@@ -97,12 +97,10 @@ def generate_launch_description():
                 'port':           '/dev/rs485_drive',  # udev symlink for CH340 (VID 1a86:7523)
                 'baud_rate':      9600,
                 'modbus_address': 1,
-                'max_rpm':        2000,
+                'max_rpm':        3500,  # 100:1 gearbox * 35 RPM wheel = 3500 motor RPM at 1x
                 'pole_pairs':     4,
                 'reverse':        True,
-                # Set open_loop=True if driver jumpers are all removed (0000 = open-loop mode).
-                # Set open_loop=False (closed-loop) once Hall sensors confirmed and jumpers set.
-                'open_loop':      True,
+                'open_loop':      False,  # closed-loop (Hall sensors); set True if jumpers removed
             },
         ],
     )
