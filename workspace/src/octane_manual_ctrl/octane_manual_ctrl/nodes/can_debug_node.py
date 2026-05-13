@@ -36,6 +36,7 @@ class CANDebugNode(Node):
         self._right_vel  = 0.0
         self._sent_l     = 0.0   # actual sent (ramped, from TX log)
         self._sent_r     = 0.0
+        self._speed_modifier = 100
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
         self._log: deque = deque(maxlen=10)
@@ -87,12 +88,13 @@ class CANDebugNode(Node):
         self._last_key_t = time.time()
 
     def _on_drive(self, msg: DriveCommand):
-        self._left_vel  = msg.left_velocity
-        self._right_vel = msg.right_velocity
-        self._last_cmd_t = time.time()
+        self._left_vel       = msg.left_velocity
+        self._right_vel      = msg.right_velocity
+        self._speed_modifier = msg.speed_modifier
+        self._last_cmd_t     = time.time()
         self._log.append(
             f'{DIM}[{time.strftime("%H:%M:%S")}]{RESET}  '
-            f'L={self._left_vel:+.2f}  R={self._right_vel:+.2f}'
+            f'L={self._left_vel:+.2f}  R={self._right_vel:+.2f}  spd={self._speed_modifier}%'
         )
 
     def _vel_bar(self, v: float) -> str:
@@ -101,6 +103,12 @@ class CANDebugNode(Node):
         color  = GREEN if v > 0 else (RED if v < 0 else DIM)
         sign   = '+' if v >= 0 else '-'
         return f'{color}{sign}[{bar}]{RESET}'
+
+    def _speed_bar(self, pct: int) -> str:
+        filled = min(10, pct // 50)
+        bar    = ('█' * filled).ljust(10)
+        color  = GREEN if pct <= 100 else (YELLOW if pct <= 300 else RED)
+        return f'{color}[{bar}]{RESET}  {pct}%'
 
     def _render(self):
         held      = [KEY_NAMES[i] for i in range(8) if self._keys & (1 << i)]
@@ -120,6 +128,7 @@ class CANDebugNode(Node):
         print()
         print(f'  Target  L   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}   R : {self._vel_bar(self._right_vel)}  {self._right_vel:+.3f}')
         print(f'  Sent    L   : {self._vel_bar(self._sent_l)}  {self._sent_l:+.3f}   R : {self._vel_bar(self._sent_r)}  {self._sent_r:+.3f}')
+        print(f'  Speed mod   : {self._speed_bar(self._speed_modifier)}')
         print(f'  {DIM}Last /drive/command: {cmd_age}{RESET}')
         print()
         print(f'{BOLD}  DRIVE COMMAND LOG{RESET}')
