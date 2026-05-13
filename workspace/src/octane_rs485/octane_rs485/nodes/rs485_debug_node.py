@@ -41,7 +41,8 @@ class RS485DebugNode(Node):
         self._state      = '---'
         self._rs485_status = f'{DIM}waiting for rs485_drive_node...{RESET}'
         self._keys       = 0
-        self._left_vel   = 0.0
+        self._left_vel   = 0.0   # target  (from /drive/command)
+        self._sent       = 0.0   # actual sent (ramped, from TX log)
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
         self._log: deque  = deque(maxlen=20)
@@ -81,6 +82,13 @@ class RS485DebugNode(Node):
             entry = f'{DIM}[{ts}]{RESET}  {RED}{msg.data}{RESET}'
         else:
             entry = f'{DIM}[{ts}]{RESET}  {GREEN}{msg.data}{RESET}'
+            for part in msg.data.split():
+                if '=' in part:
+                    k, v = part.split('=', 1)
+                    try:
+                        if k == 'L': self._sent = float(v)
+                    except ValueError:
+                        pass
         self._tx_log.append(entry)
 
     def _on_keys(self, msg):
@@ -121,7 +129,8 @@ class RS485DebugNode(Node):
         print()
         print(f'  Keys held   : {key_str}  {DIM}({key_age}){RESET}')
         print()
-        print(f'  Left vel    : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
+        print(f'  Target      : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
+        print(f'  Sent        : {self._vel_bar(self._sent)}  {self._sent:+.3f}')
         print(f'  {DIM}Last /drive/command: {cmd_age}{RESET}')
         print()
         print(f'{BOLD}  DRIVE COMMAND LOG{RESET}')

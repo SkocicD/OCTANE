@@ -32,8 +32,10 @@ class CANDebugNode(Node):
         self._state      = '---'
         self._can_status = f'{DIM}waiting for can_drive_node...{RESET}'
         self._keys       = 0
-        self._left_vel   = 0.0
+        self._left_vel   = 0.0   # target  (from /drive/command)
         self._right_vel  = 0.0
+        self._sent_l     = 0.0   # actual sent (ramped, from TX log)
+        self._sent_r     = 0.0
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
         self._log: deque = deque(maxlen=20)
@@ -70,6 +72,14 @@ class CANDebugNode(Node):
             entry = f'{DIM}[{ts}]{RESET}  {RED}{msg.data}{RESET}'
         else:
             entry = f'{DIM}[{ts}]{RESET}  {GREEN}{msg.data}{RESET}'
+            for part in msg.data.split():
+                if '=' in part:
+                    k, v = part.split('=', 1)
+                    try:
+                        if k == 'L': self._sent_l = float(v)
+                        elif k == 'R': self._sent_r = float(v)
+                    except ValueError:
+                        pass
         self._tx_log.append(entry)
 
     def _on_keys(self, msg: UInt8):
@@ -108,8 +118,8 @@ class CANDebugNode(Node):
         print()
         print(f'  Keys held   : {key_str}  {DIM}({key_age}){RESET}')
         print()
-        print(f'  Left  vel   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
-        print(f'  Right vel   : {self._vel_bar(self._right_vel)}  {self._right_vel:+.3f}')
+        print(f'  Target  L   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}   R : {self._vel_bar(self._right_vel)}  {self._right_vel:+.3f}')
+        print(f'  Sent    L   : {self._vel_bar(self._sent_l)}  {self._sent_l:+.3f}   R : {self._vel_bar(self._sent_r)}  {self._sent_r:+.3f}')
         print(f'  {DIM}Last /drive/command: {cmd_age}{RESET}')
         print()
         print(f'{BOLD}  DRIVE COMMAND LOG{RESET}')
