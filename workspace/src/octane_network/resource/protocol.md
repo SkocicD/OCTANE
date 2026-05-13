@@ -31,6 +31,7 @@ Every message on the wire has this structure:
 - `C` (0x43) = **Command** - Ground sends mode change to rover
 - `A` (0x41) = **ACK** - Rover confirms command received
 - `F` (0x46) = **Fault Alert** - Rover immediately reports critical fault
+- `M` (0x4D) = **Manipulator** - Ground sends key state + speed dial (manual control tick)
 - `V` (0x56) = **Video Request** - Ground requests camera/map stream (see `video_streaming.md`)
 
 ---
@@ -143,6 +144,41 @@ Wire: [O][F][2][2][c][crc] = Critical CAN bus dead
 ```
 
 **Fixed size:** Always 6 bytes on wire (5 + CRC).
+
+---
+
+### 5. Manipulator (M) - Ground → Rover
+
+**Purpose:** Deliver key state bitfield and GUI speed dial value on every manual control tick.
+Sent repeatedly (e.g. 50ms GUI tick) while the operator is in Manual mode.
+
+**Wire format:** `M + bitfield + speed_hi + speed_lo`
+
+**Bitfield (1 byte):**
+| Bit | Mask | Key | Action       |
+|-----|------|-----|--------------|
+| 0   | 0x01 | W   | Forward      |
+| 1   | 0x02 | A   | Turn left    |
+| 2   | 0x04 | S   | Backward     |
+| 3   | 0x08 | D   | Turn right   |
+| 4   | 0x10 | ↑   | Arm up       |
+| 5   | 0x20 | ↓   | Arm down     |
+| 6   | 0x40 | ←   | Bucket dir-A |
+| 7   | 0x80 | →   | Bucket dir-B |
+
+**`speed_modifier` (uint16, big-endian, 2 bytes):** GUI speed dial value, 0–500 (integer percentage).
+`100` = 1.0× (baseline, normal operation). `500` = 5.0× (full motor RPM). GUI should cap at 100 for safe operation.
+
+**Examples:**
+```
+Wire: [O][M][3][0x09][0x00][0x64][crc]  = W+D held, speed 100% (0x64=100)
+Wire: [O][M][3][0x00][0x00][0x32][crc]  = no keys, speed 50%  (0x32=50)
+Wire: [O][M][3][0x01][0x00][0x64][crc]  = W only,  speed 100%
+```
+
+**Fixed size:** Always 7 bytes on wire.
+
+**Backward compatibility:** Old 1-byte payloads (legacy GUI) are accepted; `speed_modifier` defaults to 100.
 
 ---
 

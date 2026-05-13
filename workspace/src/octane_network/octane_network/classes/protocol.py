@@ -190,6 +190,21 @@ def encode_heartbeat(state: str, seq: int) -> bytes:
     return frame + bytes([crc8(frame)])
 
 
+def encode_manipulator(bitfield: int, speed_modifier: int = 100) -> bytes:
+    """Encode a manipulator (key state + speed dial) frame.
+
+    Wire format: [O][M][3][bitfield][speed_hi][speed_lo][CRC]  — 7 bytes total.
+
+    bitfield:      8-bit key state (W=bit0, A=bit1, S=bit2, D=bit3, arrows=bits4-7)
+    speed_modifier: 0-500 integer percentage (100 = 1.0x, default; 500 = 5.0x max)
+    """
+    speed_modifier = max(0, min(500, speed_modifier))
+    payload = bytes([bitfield & 0xFF, (speed_modifier >> 8) & 0xFF, speed_modifier & 0xFF])
+    header = struct.pack('!BBB', MAGIC, TYPE_MANIPULATOR, len(payload))
+    frame = header + payload
+    return frame + bytes([crc8(frame)])
+
+
 def encode_video_request(source_id: int, variant: str, quality: int, fps: int) -> bytes:
     """Encode a video stream request.
 
@@ -275,7 +290,12 @@ def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
 
     elif msg_type == TYPE_MANIPULATOR:
         if len(payload) >= 1:
-            return {'type': 'manipulator', 'bitfield': payload[0]}
+            bitfield = payload[0]
+            speed_modifier = 100  # default: 1.0x — preserves old single-byte frames
+            if len(payload) >= 3:
+                speed_modifier = (payload[1] << 8) | payload[2]
+                speed_modifier = max(0, min(500, speed_modifier))
+            return {'type': 'manipulator', 'bitfield': bitfield, 'speed_modifier': speed_modifier}
 
     elif msg_type == TYPE_COMMAND:
         if len(payload) >= 2:
