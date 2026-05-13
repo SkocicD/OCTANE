@@ -30,9 +30,12 @@ from std_msgs.msg import String
 from octane_msgs.msg import DriveCommand
 
 REG_CONTROL     = 0x8000
+REG_MODEL       = 0x8004
 REG_SPEED       = 0x8005
 REG_ACTUAL_SPD  = 0x8018
 REG_FAULT       = 0x801B
+
+MODEL_SENSORLESS = 0x10
 
 # High-byte control values (NW=1 = RS485 mode active)
 CTRL_FORWARD = 0x09   # NW=1 EN=1 FR=0 BK=0
@@ -85,11 +88,10 @@ class RS485DriveNode(Node):
         self.declare_parameter('ramp_time_up',   0.33)
         self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
-        self.declare_parameter('speed_scale',    0.2)
+        self.declare_parameter('speed_scale',    0.002)
+        # open_loop=True: REG_SPEED accepts 0-255 duty cycle (jumpers all removed on driver).
+        # open_loop=False: REG_SPEED accepts 0-65535 RPM (closed-loop / sensored mode).
         self.declare_parameter('open_loop',      False)
-        # BLD-510B minimum speed floor ~5% of rated (~150 RPM). Commands below this floor
-        # are treated as stop — otherwise driver clamps at 150 RPM regardless of command.
-        self.declare_parameter('min_rpm',        150)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
@@ -100,7 +102,6 @@ class RS485DriveNode(Node):
         self._dead_band      = self.get_parameter('dead_band').value
         self._speed_scale    = self.get_parameter('speed_scale').value
         self._open_loop      = self.get_parameter('open_loop').value
-        self._min_rpm        = self.get_parameter('min_rpm').value
 
         self._manual         = False
         self._target         = 0.0
@@ -141,6 +142,15 @@ class RS485DriveNode(Node):
         baud = self.get_parameter('baud_rate').value
         try:
             self._port = serial.Serial(dev, baud, timeout=0.1)
+            # Sensorless mode: Hall sensors not connected.
+            # REG_SPEED accepts 0-255 duty cycle (open_loop=True in params).
+            self._write_reg(REG_MODEL, (0xAA << 8) | MODEL_SENSORLESS)
+            # Fault clear: drop to NW=0 (external IO / EN released) then restore.
+            # NW=0 is the only software equivalent of physically disconnecting EN.
+            self._port.write(_write_reg_frame(self._mb_addr, REG_CONTROL, 0x0000))
+            self._port.read(8)
+            self._port.reset_input_buffer()
+            import time as _time; _time.sleep(0.5)
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
             self._publish_status(f'OK — {dev} @ {baud} baud, Modbus addr {self._mb_addr}')
             self.get_logger().info(f'RS485 drive ready on {dev}')
@@ -256,13 +266,13 @@ class RS485DriveNode(Node):
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
             if self._open_loop:
-                speed_val = min(255, int(abs(v) * effective_scale * self._max_rpm))
+                # max_rpm is the duty ceiling (0-12 effective range for sensorless BLD-510B).
+                # round() distributes the sparse integer range evenly; floor to 1 so any
+                # nonzero throttle always results in motion.
+                speed_val = max(1, min(self._max_rpm,
+                                       round(abs(v) * effective_scale * self._max_rpm)))
             else:
                 speed_val = int(abs(v) * effective_scale * self._max_rpm)
-            # Below the hardware minimum the driver clamps at ~150 RPM — send stop instead
-            if speed_val < self._min_rpm:
-                self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
-                return
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
             self._write_reg(REG_SPEED,   speed_val)
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)

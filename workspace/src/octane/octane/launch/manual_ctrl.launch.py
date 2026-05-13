@@ -97,10 +97,10 @@ def generate_launch_description():
                 'port':           '/dev/rs485_drive',  # udev symlink for CH340 (VID 1a86:7523)
                 'baud_rate':      9600,
                 'modbus_address': 1,
-                'max_rpm':        3500,  # 100:1 gearbox * 35 RPM wheel = 3500 motor RPM at 1x
+                'max_rpm':        12,    # sensorless duty ceiling: 0-12 is the effective range
                 'pole_pairs':     4,
                 'reverse':        True,
-                'open_loop':      False,  # closed-loop (Hall sensors); set True if jumpers removed
+                'open_loop':      True,   # Hall sensors not connected → sensorless duty-cycle mode
             },
         ],
     )

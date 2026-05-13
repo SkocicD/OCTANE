@@ -71,8 +71,9 @@ class ManualDriveNode(Node):
         self.get_logger().info(f'[STATE] got "{msg.data}" → manual_active={self.manual_active}')
         if was_active and not self.manual_active:
             stop = DriveCommand()
-            stop.left_velocity = 0.0
+            stop.left_velocity  = 0.0
             stop.right_velocity = 0.0
+            stop.speed_modifier = self._speed_modifier
             self.pub.publish(stop)
 
     def on_key_state(self, msg: UInt8):
