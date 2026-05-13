@@ -1,7 +1,7 @@
-# Motor node IDs 1-6
-# Left side:  1=front-left, 2=mid-left,  3=back-left
-# Right side: 4=back-right, 5=mid-right, 6=front-right  (right side polarity flipped — mirrored mount)
-# Node 3 (back-left) is additionally flipped relative to the other left-side motors
+# Motor node IDs 0-5
+# Left side:  0=front-left, 1=mid-left,  2=back-left
+# Right side: 3=back-right, 4=mid-right, 5=front-right  (right side polarity flipped — mirrored mount)
+# Node 3 (back-right) is additionally flipped relative to the other right-side motors
 
 from octane_manual_ctrl.can.can_open_handler import CANOpenMessageFactory
 
@@ -22,8 +22,8 @@ class MotorController:
         self._node_id = node_id
         self._tx = transceiver
         self._factory = CANOpenMessageFactory()
-        self._right_side = node_id > 3   # right-side motors (4,5,6) mount mirrored
-        self._extra_flip = node_id == 3  # back-left physically opposite the other left-side motors
+        self._right_side = node_id > 2   # right-side motors mount mirrored
+        self._extra_flip = node_id == 3  # back-right physically opposite the other right-side motors
         self._running = False             # tracks whether motor is currently spinning
 
     def turn_on(self):
