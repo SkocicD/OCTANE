@@ -99,7 +99,7 @@ def generate_launch_description():
                 'modbus_address': 1,
                 'max_rpm':        3000,
                 'pole_pairs':     4,
-                'reverse':        False,
+                'reverse':        True,
             },
         ],
     )
