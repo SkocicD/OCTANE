@@ -432,7 +432,11 @@ def main():
     def _rebuild_train_loader():
         active = curriculum.current_ids if curriculum else train_ids
         if curriculum and not curriculum.is_full:
-            return _make_train_loader(active, data_root, depth_stats, bs, target_steps, pin)
+            # Cap repeats at 5x per epoch so small pools don't spin excessively
+            pool = len(active)
+            eff_steps = min(target_steps, pool * 5 // max(bs, 1))
+            eff_steps = max(eff_steps, max(pool // max(bs, 1), 1))
+            return _make_train_loader(active, data_root, depth_stats, bs, eff_steps, pin)
         ds = TerrainDataset(data_root, list(active), depth_stats, augment=True)
         return DataLoader(ds, batch_size=bs, shuffle=True, num_workers=4, pin_memory=pin)
 
@@ -499,7 +503,10 @@ def main():
         if 'loss_fn' in ckpt:
             loss_fn.load_state_dict(ckpt['loss_fn'])
         if 'optimizer' in ckpt:
-            optimizer.load_state_dict(ckpt['optimizer'])
+            try:
+                optimizer.load_state_dict(ckpt['optimizer'])
+            except ValueError:
+                print("[train] Optimizer state skipped (parameter count changed — new params added)")
         if 'scheduler' in ckpt:
             scheduler.load_state_dict(ckpt['scheduler'])
         if curriculum and 'curriculum' in ckpt:
@@ -577,9 +584,6 @@ def main():
         if val_loss < best_val:
             best_val          = val_loss
             epochs_no_improve = 0
-            torch.save({**ckpt_data, 'val_loss': val_loss},
-                       os.path.join(ckpt_dir, 'best.pt'))
-            print(f"  -> saved best.pt (val={val_loss:.4f})")
         else:
             epochs_no_improve += 1
             # Suppress early stopping while curriculum is still expanding
@@ -587,7 +591,18 @@ def main():
                 print(f"[train] Early stopping — no improvement for {patience} epochs")
                 break
 
-        torch.save(ckpt_data, os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt'))
+        epoch_path = os.path.join(ckpt_dir, f'epoch_{epoch:03d}.pt')
+        torch.save(ckpt_data, epoch_path)
+
+        # best.pt = always the latest checkpoint
+        import shutil
+        shutil.copy2(epoch_path, os.path.join(ckpt_dir, 'best.pt'))
+
+        # Keep only the 10 most recent epoch checkpoints
+        import glob as _glob
+        old_ckpts = sorted(_glob.glob(os.path.join(ckpt_dir, 'epoch_*.pt')))[:-10]
+        for old in old_ckpts:
+            os.remove(old)
 
         gc.collect()
         _safe_empty_cache()

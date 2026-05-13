@@ -10,8 +10,8 @@ from PIL import Image
 from torchvision import transforms
 
 GRID_SIZE = 200
-CELL_SIZE = 0.10
-BEV_HALF  = GRID_SIZE * CELL_SIZE / 2  # 10.0 m
+CELL_SIZE = 0.05
+BEV_HALF  = GRID_SIZE * CELL_SIZE / 2  # 5.0 m
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD  = [0.229, 0.224, 0.225]
@@ -171,9 +171,6 @@ class TerrainDataset(Dataset):
         images   = self._load_images(ep_id)
         rotation = self._load_rotation(npz)
         gt       = self._load_gt(npz)
-
-        if self.augment and torch.rand(1).item() < 0.5:
-            images, gt = self._hflip(images, gt)
 
         return images, rotation, gt
 

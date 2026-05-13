@@ -6,7 +6,7 @@ import numpy as np
 import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from training.cameras import POSE_TENSOR
+from training.cameras import POSE_TENSOR, compute_ray_maps
 
 
 class PoseEmbedding(nn.Module):
@@ -81,6 +81,7 @@ class TerrainModel(nn.Module):
         super().__init__()
 
         self.register_buffer('pose_tensor', torch.from_numpy(POSE_TENSOR))
+        self.register_buffer('ray_maps', torch.from_numpy(compute_ray_maps(224)))  # (12,3,224,224)
 
         f = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1).features
         self.enc_s4 = f[:3]   # (B*12,   24, 56, 56)
@@ -98,6 +99,15 @@ class TerrainModel(nn.Module):
         self.pose_to_s3 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S3, 1)
         self.pose_to_s2 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S2, 1)
         self.pose_to_s1 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S1, 1)
+
+        # Per-pixel ray direction encoders — spatially-varying geometric signal.
+        # Initialized to zero so they start neutral and are learned gradually.
+        self.ray_to_s4 = nn.Conv2d(3, self.PROJ_S4,  1, bias=False)
+        self.ray_to_s3 = nn.Conv2d(3, self.PROJ_S3,  1, bias=False)
+        self.ray_to_s2 = nn.Conv2d(3, self.PROJ_S2,  1, bias=False)
+        self.ray_to_s1 = nn.Conv2d(3, self.PROJ_S1,  1, bias=False)
+        for m in (self.ray_to_s4, self.ray_to_s3, self.ray_to_s2, self.ray_to_s1):
+            nn.init.zeros_(m.weight)
 
         self.rot_mlp = nn.Sequential(
             nn.Linear(6, 64), nn.ReLU(inplace=True),
@@ -163,10 +173,17 @@ class TerrainModel(nn.Module):
         pe = self.pose_emb(self.pose_tensor)
         pe = pe.unsqueeze(0).expand(B, -1, -1).reshape(B * 12, self.POSE_EMBED, 1, 1)
 
-        s4 = s4 + self.pose_to_s4(pe)
-        s3 = s3 + self.pose_to_s3(pe)
-        s2 = s2 + self.pose_to_s2(pe)
-        s1 = s1 + self.pose_to_s1(pe)
+        # Ray direction maps — same for all batch items, pool to each encoder scale
+        rays = self.ray_maps.unsqueeze(0).expand(B, -1, -1, -1, -1).reshape(B * 12, 3, 224, 224)
+        rays_s4 = F.adaptive_avg_pool2d(rays, (56, 56))
+        rays_s3 = F.adaptive_avg_pool2d(rays, (28, 28))
+        rays_s2 = F.adaptive_avg_pool2d(rays, (14, 14))
+        rays_s1 = F.adaptive_avg_pool2d(rays, ( 7,  7))
+
+        s4 = s4 + self.pose_to_s4(pe) + self.ray_to_s4(rays_s4)
+        s3 = s3 + self.pose_to_s3(pe) + self.ray_to_s3(rays_s3)
+        s2 = s2 + self.pose_to_s2(pe) + self.ray_to_s2(rays_s2)
+        s1 = s1 + self.pose_to_s1(pe) + self.ray_to_s1(rays_s1)
 
         s4 = s4.view(B, 12, self.PROJ_S4, 56, 56).mean(1)
         s3 = s3.view(B, 12, self.PROJ_S3, 28, 28).mean(1)
