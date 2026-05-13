@@ -45,8 +45,8 @@ class RS485DebugNode(Node):
         self._sent       = 0.0   # actual sent (ramped, from TX log)
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
-        self._log: deque  = deque(maxlen=20)
-        self._tx_log: deque = deque(maxlen=10)
+        self._log: deque  = deque(maxlen=10)
+        self._tx_log: deque = deque(maxlen=4)
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         status_qos = QoSProfile(
@@ -129,8 +129,8 @@ class RS485DebugNode(Node):
         print()
         print(f'  Keys held   : {key_str}  {DIM}({key_age}){RESET}')
         print()
-        print(f'  Target      : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
-        print(f'  Sent        : {self._vel_bar(self._sent)}  {self._sent:+.3f}')
+        print(f'  Target  L   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
+        print(f'  Sent    L   : {self._vel_bar(self._sent)}  {self._sent:+.3f}')
         print(f'  {DIM}Last /drive/command: {cmd_age}{RESET}')
         print()
         print(f'{BOLD}  DRIVE COMMAND LOG{RESET}')

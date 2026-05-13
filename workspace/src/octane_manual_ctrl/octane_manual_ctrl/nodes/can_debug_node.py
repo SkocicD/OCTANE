@@ -38,8 +38,8 @@ class CANDebugNode(Node):
         self._sent_r     = 0.0
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
-        self._log: deque = deque(maxlen=20)
-        self._tx_log: deque = deque(maxlen=8)
+        self._log: deque = deque(maxlen=10)
+        self._tx_log: deque = deque(maxlen=4)
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         status_qos = QoSProfile(
