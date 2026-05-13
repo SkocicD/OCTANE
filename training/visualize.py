@@ -146,7 +146,8 @@ def _surface(height: np.ndarray, title: str, colorscale='RdYlGn'):
 
 def _rock_circles(objects_gt: np.ndarray, height_map: np.ndarray):
     import plotly.graph_objects as go
-    rocks = objects_gt[objects_gt[:, 3] == 0] if len(objects_gt) else np.zeros((0, 4))
+    mask  = (objects_gt[:, 3] == 0) & (np.abs(objects_gt[:, 0]) <= HALF) & (np.abs(objects_gt[:, 1]) <= HALF)
+    rocks = objects_gt[mask] if len(objects_gt) else np.zeros((0, 4))
     if len(rocks) == 0:
         return []
     theta  = np.linspace(0, 2 * np.pi, 37)
@@ -169,7 +170,8 @@ def _rock_circles(objects_gt: np.ndarray, height_map: np.ndarray):
 
 def _crater_circles(objects_gt: np.ndarray, height_map: np.ndarray):
     import plotly.graph_objects as go
-    craters = objects_gt[objects_gt[:, 3] == 1] if len(objects_gt) else np.zeros((0, 4))
+    mask    = (objects_gt[:, 3] == 1) & (np.abs(objects_gt[:, 0]) <= HALF) & (np.abs(objects_gt[:, 1]) <= HALF)
+    craters = objects_gt[mask] if len(objects_gt) else np.zeros((0, 4))
     if len(craters) == 0:
         return []
     theta  = np.linspace(0, 2 * np.pi, 37)
@@ -533,8 +535,9 @@ def _build_page(episode_id: str, pred: dict | None, gt: dict,
 
     objects   = gt.get('objects_gt', np.zeros((0, 4)))
     walls_arr = gt.get('walls_gt',   np.zeros((0, 4)))
-    n_rocks   = int((objects[:, 3] == 0).sum()) if len(objects) else 0
-    n_craters = int((objects[:, 3] == 1).sum()) if len(objects) else 0
+    in_bev    = (np.abs(objects[:, 0]) <= HALF) & (np.abs(objects[:, 1]) <= HALF) if len(objects) else np.zeros(0, bool)
+    n_rocks   = int(((objects[:, 3] == 0) & in_bev).sum()) if len(objects) else 0
+    n_craters = int(((objects[:, 3] == 1) & in_bev).sum()) if len(objects) else 0
     n_walls   = len(walls_arr)
     stat_badges = (
         f'<span class="badge badge-stat">{n_rocks} rock{"s" if n_rocks != 1 else ""}</span>'
