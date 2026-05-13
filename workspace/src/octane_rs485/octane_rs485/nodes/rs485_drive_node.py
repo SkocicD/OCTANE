@@ -85,6 +85,7 @@ class RS485DriveNode(Node):
         self.declare_parameter('ramp_time_up',   0.33)
         self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
+        self.declare_parameter('speed_scale',    0.2)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
@@ -93,6 +94,7 @@ class RS485DriveNode(Node):
         self._ramp_time_up   = self.get_parameter('ramp_time_up').value
         self._ramp_time_down = self.get_parameter('ramp_time_down').value
         self._dead_band      = self.get_parameter('dead_band').value
+        self._speed_scale    = self.get_parameter('speed_scale').value
 
         self._manual  = False
         self._target  = 0.0
@@ -219,7 +221,7 @@ class RS485DriveNode(Node):
         if abs(v) < self._dead_band:
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
-            rpm  = int(abs(v) * self._max_rpm)
+            rpm  = int(abs(v) * self._speed_scale * self._max_rpm)
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)
             self._write_reg(REG_SPEED,   rpm)

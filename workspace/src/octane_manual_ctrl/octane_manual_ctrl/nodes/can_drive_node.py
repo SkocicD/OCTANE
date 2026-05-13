@@ -39,6 +39,7 @@ class CANDriveNode(Node):
         self.declare_parameter('ramp_time_up',   0.33)
         self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
+        self.declare_parameter('speed_scale',    0.2)
 
         self._manual = False
         self._motors: list[MotorController] = []
@@ -52,6 +53,7 @@ class CANDriveNode(Node):
         self._ramp_time_up   = self.get_parameter('ramp_time_up').value
         self._ramp_time_down = self.get_parameter('ramp_time_down').value
         self._dead_band      = self.get_parameter('dead_band').value
+        self._speed_scale    = self.get_parameter('speed_scale').value
         self._watchdog_ticks = 0
         self._watchdog_every = max(1, int(CONTROL_HZ / PDO_WATCHDOG_HZ))
 
@@ -139,12 +141,12 @@ class CANDriveNode(Node):
 
         if send_l:
             for m in self._motors[:3]:
-                m.move(abs(self._current_l), reverse=(self._current_l < 0))
+                m.move(abs(self._current_l) * self._speed_scale, reverse=(self._current_l < 0))
             self._sent_l = self._current_l
 
         if send_r:
             for m in self._motors[3:]:
-                m.move(abs(self._current_r), reverse=(self._current_r < 0))
+                m.move(abs(self._current_r) * self._speed_scale, reverse=(self._current_r < 0))
             self._sent_r = self._current_r
 
         if send_l or send_r:
