@@ -126,8 +126,13 @@ release_usb() {
     # USB reset for the Orbbec depth camera (OpenNI2 can leave it locked after a crash)
     usb_reset_device "2bc5:0403" "Orbbec"
 
-    # USB reset for the gs_usb CAN transceiver
-    usb_reset_device "1d50:614e" "CAN transceiver"
+    # Bring can0 down cleanly before reset so the driver releases resources
+    sudo ip link set can0 down 2>/dev/null || true
+
+    # USB reset for the gs_usb CAN transceiver (1d50:606f — candleLight/CANable)
+    # After reset the device re-enumerates and udev rule 91-can-autostart.rules
+    # automatically runs: ip link set can0 type can bitrate 1000000 && ip link set can0 up
+    usb_reset_device "1d50:606f" "CAN transceiver"
 
     sleep 1
     echo "[CLEANUP] USB release done"

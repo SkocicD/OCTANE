@@ -1,20 +1,34 @@
 #!/bin/bash
-# One-time setup for gs_usb CAN adapter permissions.
-# Run once with sudo — lets any user open the adapter without sudo.
+# One-time setup for gs_usb CAN adapter.
+# Run once with sudo.
 
 set -e
 
-RULE_FILE="/etc/udev/rules.d/90-gs-usb.rules"
+REAL_USER="${SUDO_USER:-$USER}"
 
-echo "Writing udev rule to ${RULE_FILE}..."
+# USB device permissions
+echo "Writing USB permissions rule..."
 echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", MODE="0666", GROUP="plugdev"' \
-    | sudo tee "$RULE_FILE" > /dev/null
+    | sudo tee /etc/udev/rules.d/90-gs-usb.rules > /dev/null
 
-echo "Reloading udev rules..."
+# Auto-configure and bring up can0 whenever the gs_usb net interface appears.
+# This fires after USB reset in launch_system.sh so no manual replug is needed.
+echo "Writing CAN auto-start rule..."
+cat <<'EOF' | sudo tee /etc/udev/rules.d/91-can-autostart.rules > /dev/null
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="can*", \
+    RUN+="/usr/sbin/ip link set %k type can bitrate 1000000", \
+    RUN+="/usr/sbin/ip link set %k up"
+EOF
+
+# Sudoers entry so launch_system.sh can bring can0 DOWN without a password prompt.
+echo "Writing sudoers entry for can0..."
+echo "${REAL_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ip link set can0 down" \
+    | sudo tee /etc/sudoers.d/octane-can0 > /dev/null
+sudo chmod 440 /etc/sudoers.d/octane-can0
+
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 
-REAL_USER="${SUDO_USER:-$USER}"
 if ! groups "$REAL_USER" | grep -q plugdev; then
     echo "Adding ${REAL_USER} to plugdev group..."
     sudo usermod -aG plugdev "$REAL_USER"
@@ -24,4 +38,4 @@ else
 fi
 
 echo ""
-echo "[OK] Unplug and replug the CAN adapter, then ros2 nodes can access it without sudo."
+echo "[OK] CAN setup complete. No replug needed after launch_system.sh."
