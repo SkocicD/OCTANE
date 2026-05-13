@@ -118,6 +118,12 @@ class RS485DriveNode(Node):
         self.create_subscription(String,       '/supervisor/state', self._on_state, qos)
         self.create_subscription(DriveCommand, '/drive/command',    self._on_drive, qos)
 
+        self.get_logger().info(
+            f'RS485 params: speed_scale={self._speed_scale}  '
+            f'ramp_up={self._ramp_time_up}s  ramp_down={self._ramp_time_down}s  '
+            f'max_rpm={self._max_rpm}  dead_band={self._dead_band}'
+        )
+
         self._open_port()
         self.create_timer(1.0 / CONTROL_HZ, self._control_loop)
 
@@ -213,8 +219,14 @@ class RS485DriveNode(Node):
         self._send_velocity(self._current)
         self._sent = self._current
 
+        effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
+        rpm = int(abs(self._current) * effective_scale * self._max_rpm) \
+              if abs(self._current) >= self._dead_band else 0
         status = String()
-        status.data = f'TX  L={self._current:+.3f}'
+        status.data = (
+            f'TX  L={self._current:+.3f}  '
+            f'rpm={rpm}  scale={effective_scale:.2f}  mod={self._speed_modifier:.2f}x'
+        )
         self._tx_pub.publish(status)
 
     def _send_velocity(self, v: float):
