@@ -1,0 +1,3 @@
+drive:
+  ramp_rate: 3.0    # velocity units/second (0→1 in ~330 ms)
+  dead_band: 0.02   # min speed change before re-sending a command

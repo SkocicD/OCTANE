@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>octane_rs485</name>
+  <version>0.0.0</version>
+  <description>RS485 Modbus RTU driver for BLD-510B — replacement for broken CAN motor #2 (middle-left wheel).</description>
+  <maintainer email="adam.r.carbone@live.com">Adam Carbone</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>octane_msgs</depend>
+
+  <test_depend>pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

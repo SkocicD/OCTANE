@@ -404,6 +404,51 @@ else
     echo "[OK] gs-usb already installed"
 fi
 
+# ── 7b. pyserial (RS485 drive node) ──────────────────────────────────────────
+if ! python3 -c "import serial" &>/dev/null; then
+    echo "[SETUP] Installing pyserial..."
+    pip3 install pyserial
+    echo "[OK] pyserial installed"
+else
+    echo "[OK] pyserial already installed"
+fi
+
+# ── 7c. CH340 USB-serial kernel module + udev rule (RS485 transceiver) ────────
+CH341_KO="/lib/modules/$(uname -r)/kernel/drivers/usb/serial/ch341.ko"
+if [ ! -f "$CH341_KO" ]; then
+    echo "[SETUP] Building ch341 kernel module for $(uname -r)..."
+    CH341_BUILD="${TMPDIR}/ch341_build"
+    mkdir -p "$CH341_BUILD"
+    wget -q https://raw.githubusercontent.com/torvalds/linux/v5.15/drivers/usb/serial/ch341.c \
+        -O "${CH341_BUILD}/ch341.c"
+    cat > "${CH341_BUILD}/Makefile" << 'EOF'
+obj-m := ch341.o
+KDIR  := /lib/modules/$(shell uname -r)/build
+all:
+	make ARCH=arm64 -C $(KDIR) M=$(PWD) modules
+EOF
+    make -C "$CH341_BUILD"
+    sudo cp "${CH341_BUILD}/ch341.ko" "$CH341_KO"
+    sudo depmod -a
+    sudo bash -c "echo 'ch341' > /etc/modules-load.d/ch341.conf"
+    sudo modprobe ch341 2>/dev/null || true
+    echo "[OK] ch341 module built and installed"
+else
+    echo "[OK] ch341 module already present"
+fi
+
+UDEV_RULE="/etc/udev/rules.d/99-rs485-drive.rules"
+if [ ! -f "$UDEV_RULE" ]; then
+    echo "[SETUP] Installing udev rule for RS485 adapter (CH340 VID 1a86:7523)..."
+    echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="rs485_drive"' \
+        | sudo tee "$UDEV_RULE" > /dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    echo "[OK] udev rule installed — RS485 adapter will appear as /dev/rs485_drive"
+else
+    echo "[OK] RS485 udev rule already installed"
+fi
+
 # ── 8. rosdep install for external packages ───────────────────────────────────
 echo "[SETUP] Installing ROS deps for external packages via rosdep..."
 # Skip JetPack-native packages that rosdep can't resolve — they ship with JetPack
@@ -431,7 +476,7 @@ fi
 # ── 10. Build ──────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
-OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane"
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane_rs485 octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)
