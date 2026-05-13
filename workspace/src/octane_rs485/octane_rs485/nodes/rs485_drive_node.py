@@ -245,9 +245,10 @@ class RS485DriveNode(Node):
         self._sent = self._current
 
         if self._open_loop:
-            speed_val = min(255, int(abs(self._current) * effective_scale * self._max_rpm)) \
+            speed_val = max(1, min(self._max_rpm,
+                                   round(abs(self._current) * effective_scale * self._max_rpm))) \
                         if abs(self._current) >= self._dead_band else 0
-            speed_label = f'duty={speed_val}/255'
+            speed_label = f'duty={speed_val}/{self._max_rpm}'
         else:
             speed_val = int(abs(self._current) * effective_scale * self._max_rpm) \
                         if abs(self._current) >= self._dead_band else 0
