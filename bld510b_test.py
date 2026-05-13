@@ -33,9 +33,13 @@ REG_FAULT    = 0x801B
 CTRL_FWD  = 0x09   # NW EN
 CTRL_STOP = 0x08   # NW only
 
-MAX_RPM     = 500    # conservative test ceiling
+MAX_RPM     = 500  # test ceiling RPM
 RAMP_STEPS  = 10
 HOLD_SECS   = 1.5
+
+REG_MODEL    = 0x8004  # high byte = max current (0xAA=14-15A), low byte = mode
+MODEL_SENSORED   = 0x0F  # default — requires HA/HB/HC Hall wires
+MODEL_SENSORLESS = 0x10  # no Hall sensors needed
 
 
 def crc16(data: bytes) -> int:
@@ -106,10 +110,38 @@ else:
     print('  0x8003  read failed')
 
 fault_raw = read_reg(port, REG_FAULT)
-print(f'  0x801B  fault=0x{fault_raw or 0:04X}  {"OK" if not fault_raw else "FAULT!"}')
+fault_names = {0x01:'Locked rotor', 0x02:'Over-current', 0x04:'Hall abnormal',
+               0x08:'Bus voltage low', 0x10:'Bus voltage high', 0x20:'Current peak'}
+if fault_raw:
+    faults = [v for k, v in fault_names.items() if fault_raw & k]
+    print(f'  0x801B  fault=0x{fault_raw:04X}  FAULT: {", ".join(faults)}')
+    if fault_raw & 0x04:
+        print('           ^^^ Hall abnormal — Hall sensors not connected or miswired!')
+        print('           Switching to SENSORLESS mode so motor can run without Hall wires.')
+else:
+    print(f'  0x801B  fault=0x0000  OK')
+
+model_raw = read_reg(port, REG_MODEL)
+if model_raw is not None:
+    mode_byte = model_raw & 0xFF
+    print(f'  0x8004  model=0x{model_raw:04X}  mode={"SENSORED" if mode_byte == 0x0F else "SENSORLESS" if mode_byte == 0x10 else hex(mode_byte)}')
 
 actual_raw = read_reg(port, REG_ACTUAL)
 print(f'  0x8018  actual_speed={actual_rpm(actual_raw):.0f} RPM' if actual_raw is not None else '  0x8018  read failed')
+
+# ── Switch to sensorless if Hall fault present ───────────────────────────────
+if fault_raw and (fault_raw & 0x04):
+    print('\n=== SWITCHING TO SENSORLESS MODE (0x8004 low byte = 0x10) ===')
+    ok = write_reg(port, REG_MODEL, (0xAA << 8) | MODEL_SENSORLESS)
+    print(f'  Write 0x8004 = 0xAA10 → {"OK" if ok else "FAILED"}')
+    print('  To use Hall sensors instead: fix HA/HB/HC wiring then write 0x8004 = 0xAA0F')
+
+# ── Clear fault by toggling EN (send STOP with NW=0 then back to NW=1) ───────
+print('\n=== CLEARING FAULT (EN toggle) ===')
+write_reg(port, REG_CONTROL, 0x0000)   # NW=0, EN=0 — external IO mode (releases EN)
+time.sleep(0.3)
+fault_raw = read_reg(port, REG_FAULT)
+print(f'  Fault after reset: 0x{fault_raw or 0:04X}  {"CLEARED" if not fault_raw else "STILL FAULTED"}')
 
 # ── Zero accel/decel so driver responds instantly ───────────────────────────
 print('\n=== ZEROING ACCEL/DECEL (0x8003) ===')
