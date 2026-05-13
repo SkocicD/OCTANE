@@ -79,13 +79,16 @@ class RS485DriveNode(Node):
         self.declare_parameter('port',           '/dev/rs485_drive')
         self.declare_parameter('baud_rate',      9600)
         self.declare_parameter('modbus_address', 1)
-        self.declare_parameter('max_rpm',        3000)
+        self.declare_parameter('max_rpm',        2000)
         self.declare_parameter('pole_pairs',     4)    # factory default for BLD-510B
         self.declare_parameter('reverse',        False) # flip direction if motor wired backwards
         self.declare_parameter('ramp_time_up',   0.33)
         self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
         self.declare_parameter('speed_scale',    0.2)
+        # open_loop=True: REG_SPEED accepts 0-255 duty cycle (jumpers all removed on driver).
+        # open_loop=False: REG_SPEED accepts 0-65535 RPM (closed-loop / sensored mode).
+        self.declare_parameter('open_loop',      False)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
@@ -95,6 +98,7 @@ class RS485DriveNode(Node):
         self._ramp_time_down = self.get_parameter('ramp_time_down').value
         self._dead_band      = self.get_parameter('dead_band').value
         self._speed_scale    = self.get_parameter('speed_scale').value
+        self._open_loop      = self.get_parameter('open_loop').value
 
         self._manual         = False
         self._target         = 0.0
@@ -118,8 +122,9 @@ class RS485DriveNode(Node):
         self.create_subscription(String,       '/supervisor/state', self._on_state, qos)
         self.create_subscription(DriveCommand, '/drive/command',    self._on_drive, qos)
 
+        mode_str = 'OPEN-LOOP (0-255 duty)' if self._open_loop else f'CLOSED-LOOP (0-{self._max_rpm} RPM)'
         self.get_logger().info(
-            f'RS485 params: speed_scale={self._speed_scale}  '
+            f'RS485 params: speed_scale={self._speed_scale}  mode={mode_str}  '
             f'ramp_up={self._ramp_time_up}s  ramp_down={self._ramp_time_down}s  '
             f'max_rpm={self._max_rpm}  dead_band={self._dead_band}'
         )
@@ -149,7 +154,14 @@ class RS485DriveNode(Node):
         frame = _write_reg_frame(self._mb_addr, reg, value)
         try:
             self._port.write(frame)
-            self._port.read(8)   # consume ACK echo
+            resp = self._port.read(8)
+            if resp != frame:
+                # Bad ACK — flush so subsequent writes aren't misaligned
+                self._port.reset_input_buffer()
+                self.get_logger().warn(
+                    f'RS485 ACK mismatch reg=0x{reg:04X} val={value}: '
+                    f'got {resp.hex()} expected {frame.hex()}'
+                )
         except serial.SerialException as e:
             self.get_logger().warn(f'RS485 write error: {e}')
 
@@ -216,30 +228,39 @@ class RS485DriveNode(Node):
         if not force and self._sent is not None and abs(self._current - self._sent) <= self._dead_band:
             return
 
-        self._send_velocity(self._current)
+        effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
+        self._send_velocity(self._current, effective_scale)
         self._sent = self._current
 
-        effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
-        rpm = int(abs(self._current) * effective_scale * self._max_rpm) \
-              if abs(self._current) >= self._dead_band else 0
+        if self._open_loop:
+            speed_val = min(255, int(abs(self._current) * effective_scale * 255)) \
+                        if abs(self._current) >= self._dead_band else 0
+            speed_label = f'duty={speed_val}/255'
+        else:
+            speed_val = int(abs(self._current) * effective_scale * self._max_rpm) \
+                        if abs(self._current) >= self._dead_band else 0
+            speed_label = f'rpm={speed_val}'
         status = String()
         status.data = (
             f'TX  L={self._current:+.3f}  '
-            f'rpm={rpm}  scale={effective_scale:.2f}  mod={self._speed_modifier:.2f}x'
+            f'{speed_label}  scale={effective_scale:.2f}  mod={self._speed_modifier:.2f}x'
         )
         self._tx_pub.publish(status)
 
-    def _send_velocity(self, v: float):
+    def _send_velocity(self, v: float, effective_scale: float):
         if self._reverse:
             v = -v
         if abs(v) < self._dead_band:
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
-            effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
-            rpm  = int(abs(v) * effective_scale * self._max_rpm)
+            if self._open_loop:
+                # 0-255 duty cycle; writing RPM values overflows the 8-bit range and saturates at max
+                speed_val = min(255, int(abs(v) * effective_scale * 255))
+            else:
+                speed_val = int(abs(v) * effective_scale * self._max_rpm)
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
+            self._write_reg(REG_SPEED,   speed_val)
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)
-            self._write_reg(REG_SPEED,   rpm)
 
     def _stop(self):
         self._current = 0.0
