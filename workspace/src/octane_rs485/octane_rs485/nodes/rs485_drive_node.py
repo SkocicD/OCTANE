@@ -86,9 +86,10 @@ class RS485DriveNode(Node):
         self.declare_parameter('ramp_time_down', 0.33)
         self.declare_parameter('dead_band',      0.02)
         self.declare_parameter('speed_scale',    0.2)
-        # open_loop=True: REG_SPEED accepts 0-255 duty cycle (jumpers all removed on driver).
-        # open_loop=False: REG_SPEED accepts 0-65535 RPM (closed-loop / sensored mode).
         self.declare_parameter('open_loop',      False)
+        # BLD-510B minimum speed floor ~5% of rated (~150 RPM). Commands below this floor
+        # are treated as stop — otherwise driver clamps at 150 RPM regardless of command.
+        self.declare_parameter('min_rpm',        150)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
@@ -99,6 +100,7 @@ class RS485DriveNode(Node):
         self._dead_band      = self.get_parameter('dead_band').value
         self._speed_scale    = self.get_parameter('speed_scale').value
         self._open_loop      = self.get_parameter('open_loop').value
+        self._min_rpm        = self.get_parameter('min_rpm').value
 
         self._manual         = False
         self._target         = 0.0
@@ -254,10 +256,13 @@ class RS485DriveNode(Node):
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
             if self._open_loop:
-                # max_rpm is the duty ceiling (0-255); scaled the same way as closed-loop RPM
                 speed_val = min(255, int(abs(v) * effective_scale * self._max_rpm))
             else:
                 speed_val = int(abs(v) * effective_scale * self._max_rpm)
+            # Below the hardware minimum the driver clamps at ~150 RPM — send stop instead
+            if speed_val < self._min_rpm:
+                self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
+                return
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
             self._write_reg(REG_SPEED,   speed_val)
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)
