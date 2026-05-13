@@ -33,7 +33,7 @@ REG_FAULT    = 0x801B
 CTRL_FWD  = 0x09   # NW EN
 CTRL_STOP = 0x08   # NW only
 
-MAX_RPM     = 500  # test ceiling RPM
+MAX_RPM     = 1000  # test ceiling RPM (motor shaft, before gearbox)
 RAMP_STEPS  = 10
 HOLD_SECS   = 1.5
 
@@ -136,12 +136,13 @@ if fault_raw and (fault_raw & 0x04):
     print(f'  Write 0x8004 = 0xAA10 → {"OK" if ok else "FAILED"}')
     print('  To use Hall sensors instead: fix HA/HB/HC wiring then write 0x8004 = 0xAA0F')
 
-# ── Clear fault by toggling EN (send STOP with NW=0 then back to NW=1) ───────
-print('\n=== CLEARING FAULT (EN toggle) ===')
-write_reg(port, REG_CONTROL, 0x0000)   # NW=0, EN=0 — external IO mode (releases EN)
-time.sleep(0.3)
+# ── Clear fault by pulsing EN=0 while keeping NW=1 ───────────────────────────
+# Writing 0x0000 would clear NW and drop out of RS485 mode — use CTRL_STOP instead.
+print('\n=== CLEARING FAULT (EN pulse, NW=1 kept) ===')
+write_reg(port, REG_CONTROL, (CTRL_STOP << 8) | POLE_PAIRS)  # NW=1 EN=0
+time.sleep(0.5)
 fault_raw = read_reg(port, REG_FAULT)
-print(f'  Fault after reset: 0x{fault_raw or 0:04X}  {"CLEARED" if not fault_raw else "STILL FAULTED"}')
+print(f'  Fault after reset: 0x{fault_raw or 0:04X}  {"CLEARED" if not fault_raw else "STILL FAULTED (may need power cycle)"}')
 
 # ── Zero accel/decel so driver responds instantly ───────────────────────────
 print('\n=== ZEROING ACCEL/DECEL (0x8003) ===')
