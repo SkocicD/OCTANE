@@ -228,8 +228,8 @@ class RS485DriveNode(Node):
             effective_scale = min(1.0, self._speed_scale * self._speed_modifier)
             rpm  = int(abs(v) * effective_scale * self._max_rpm)
             ctrl = CTRL_REVERSE if v < 0 else CTRL_FORWARD
+            self._write_reg(REG_SPEED,   rpm)   # set target before enabling
             self._write_reg(REG_CONTROL, (ctrl << 8) | self._pole_pairs)
-            self._write_reg(REG_SPEED,   rpm)
 
     def _stop(self):
         self._current = 0.0
