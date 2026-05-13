@@ -78,50 +78,76 @@ kill_port() {
     fi
 }
 
-kill_cameras() {
-    echo "[CLEANUP] Releasing cameras and killing stale ROS nodes..."
-
-    # Kill any running octane / camera ROS nodes so devices aren't held across launches
-    for pattern in astra_camera_node rgb_camera_node camera_frame_splitter \
-                   astra_depth_node depth_estimation_node nvblox_node \
-                   pc_container point_cloud_xyzrgb; do
-        pkill -f "$pattern" 2>/dev/null || true
-    done
-    sleep 1
-
-    # Force-release any process still holding /dev/video* (UVC colour cameras)
-    for dev in /dev/video*; do
-        [ -e "$dev" ] || continue
-        fuser -k "$dev" 2>/dev/null || true
-    done
-
-    # USB reset for the Orbbec — OpenNI2 can leave the device locked after a crash
-    ORBBEC_USB=$(lsusb | grep -i "2bc5:0403" | grep -oP 'Bus \K[0-9]+' | head -1)
-    ORBBEC_DEV=$(lsusb | grep -i "2bc5:0403" | grep -oP 'Device \K[0-9]+' | head -1)
-    if [ -n "$ORBBEC_USB" ] && [ -n "$ORBBEC_DEV" ]; then
-        USBDEV=$(printf "/dev/bus/usb/%03d/%03d" "$ORBBEC_USB" "$ORBBEC_DEV")
-        if [ -e "$USBDEV" ]; then
-            python3 - "$USBDEV" <<'EOF' 2>/dev/null && echo "[CLEANUP] Orbbec USB reset OK" || true
+usb_reset_device() {
+    local vid_pid="$1"
+    local label="$2"
+    local bus dev usbdev
+    bus=$(lsusb | grep -i "$vid_pid" | grep -oP 'Bus \K[0-9]+' | head -1)
+    dev=$(lsusb | grep -i "$vid_pid" | grep -oP 'Device \K[0-9]+' | head -1)
+    if [ -n "$bus" ] && [ -n "$dev" ]; then
+        usbdev=$(printf "/dev/bus/usb/%03d/%03d" "$bus" "$dev")
+        if [ -e "$usbdev" ]; then
+            python3 - "$usbdev" <<'EOF' 2>/dev/null && echo "[CLEANUP] $label USB reset OK" || true
 import sys, fcntl
 with open(sys.argv[1], 'wb') as f:
     fcntl.ioctl(f, 0x5514, 0)
 EOF
         fi
     fi
+}
+
+release_usb() {
+    echo "[CLEANUP] Releasing all USB devices and killing stale ROS nodes..."
+
+    # Kill all octane ROS nodes that hold USB devices
+    for pattern in astra_camera_node rgb_camera_node camera_frame_splitter \
+                   astra_depth_node depth_estimation_node nvblox_node \
+                   pc_container point_cloud_xyzrgb \
+                   rs485_drive_node rs485_debug_node \
+                   can_drive_node can_debug_node \
+                   serial_actuator_node manual_actuator_node \
+                   adxl345_node imu_monitor_node; do
+        pkill -f "$pattern" 2>/dev/null || true
+    done
+    sleep 1
+
+    # Release all serial USB devices (RS485, Arduino, ADXL345, etc.)
+    for dev in /dev/ttyUSB* /dev/ttyACM* /dev/rs485_drive; do
+        [ -e "$dev" ] || continue
+        fuser -k "$dev" 2>/dev/null || true
+    done
+
+    # Release all UVC video devices (RGB cameras)
+    for dev in /dev/video*; do
+        [ -e "$dev" ] || continue
+        fuser -k "$dev" 2>/dev/null || true
+    done
+
+    # USB reset for the Orbbec depth camera (OpenNI2 can leave it locked after a crash)
+    usb_reset_device "2bc5:0403" "Orbbec"
+
+    # USB reset for the gs_usb CAN transceiver
+    usb_reset_device "1d50:614e" "CAN transceiver"
 
     sleep 1
-    echo "[CLEANUP] Camera cleanup done"
+    echo "[CLEANUP] USB release done"
 }
 
 case "$SUBSYSTEM" in
-    supervisor)  run_launch supervisor ;;
-    sensors)     run_launch sensors ;;
+    supervisor)
+        release_usb
+        run_launch supervisor
+        ;;
+    sensors)
+        release_usb
+        run_launch sensors
+        ;;
     perception)
-        kill_cameras
+        release_usb
         run_launch perception
         ;;
     mapping)
-        kill_cameras
+        release_usb
         run_launch mapping
         ;;
     network)
@@ -131,7 +157,7 @@ case "$SUBSYSTEM" in
             tcp_port:="${OCTANE_TCP_PORT}"
         ;;
     all)
-        kill_cameras
+        release_usb
         kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting all OCTANE subsystems..."
         PIDS=()
