@@ -3,9 +3,8 @@
 
 Launches:
   - manual_drive_node:    WASD key state -> DriveCommand (left/right velocity)
-  - can_worker:           combined process — can_drain_node (RX drain) + can_drive_node (PDO TX)
-  - can_debug_node:       purple xterm — drive-level view (transceiver status, keys, velocity bars)
-  - can_raw_debug_node:   cyan xterm — byte-level view of every RX and TX CAN frame
+  - can_drive_node:       DriveCommand -> CANOpen PDO motor commands
+  - can_debug_node:       purple xterm live view (transceiver status, keys, velocity bars)
   - rs485_drive_node:     left_velocity -> Modbus RTU BLD-510B (replaces broken CAN motor #2)
   - rs485_debug_node:     violet xterm live view for RS485 motor
   - manual_actuator_node: arrow key state -> ActuatorCommand (arm + bucket)
@@ -45,29 +44,20 @@ def generate_launch_description():
         ],
     )
 
-    can_worker_node = Node(
+    can_drive_node = Node(
         package='octane_manual_ctrl',
-        executable='can_worker',
+        executable='can_drive_node',
+        name='can_drive_node',
         output='log',
         parameters=[robot_params],
     )
 
     can_debug_terminal = ExecuteProcess(
         cmd=[
-            'xterm', '-title', 'OCTANE | CAN Drive Debug',
+            'xterm', '-title', 'OCTANE | CAN Debug',
             '-fa', 'Monospace', '-fs', '10',
             '-bg', '#0d1117', '-fg', '#bf80ff', '-hold',
             '-e', 'ros2', 'run', 'octane_manual_ctrl', 'can_debug_node',
-        ],
-        output='log',
-    )
-
-    can_raw_debug_terminal = ExecuteProcess(
-        cmd=[
-            'xterm', '-title', 'OCTANE | CAN Raw Debug',
-            '-fa', 'Monospace', '-fs', '10',
-            '-bg', '#0d1117', '-fg', '#00e5ff', '-hold',
-            '-e', 'ros2', 'run', 'octane_manual_ctrl', 'can_raw_debug_node',
         ],
         output='log',
     )
@@ -128,12 +118,11 @@ def generate_launch_description():
         throttle_scale_arg,
         # xterms first — ensures terminals open even if a background node crashes
         can_debug_terminal,
-        can_raw_debug_terminal,
         actuator_debug_terminal,
         rs485_debug_terminal,
         # background nodes
         drive_node,
-        can_worker_node,
+        can_drive_node,
         rs485_drive_node,
         manual_actuator_node,
         serial_actuator_node,
