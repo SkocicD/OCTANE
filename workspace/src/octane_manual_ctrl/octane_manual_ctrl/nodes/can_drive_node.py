@@ -27,17 +27,17 @@ LEFT_IDS  = [1, 2, 3]
 RIGHT_IDS = [4, 5, 6]
 ALL_IDS   = LEFT_IDS + RIGHT_IDS
 
-CONTROL_HZ      = 20    # ramp update rate (Hz)
-RAMP_RATE       = 3.0   # velocity units / second  (0→1 in ~330 ms)
-DEAD_BAND       = 0.02  # min speed change before a new PDO is sent
-PDO_WATCHDOG_HZ = 2     # always re-send at least this often even when steady
+CONTROL_HZ      = 20   # ramp update rate (Hz)
+PDO_WATCHDOG_HZ = 2    # always re-send at least this often even when steady
 
 
 class CANDriveNode(Node):
 
     def __init__(self):
         super().__init__('can_drive_node')
-        self.declare_parameter('bitrate', 1_000_000)
+        self.declare_parameter('bitrate',    1_000_000)
+        self.declare_parameter('ramp_rate',  3.0)
+        self.declare_parameter('dead_band',  0.02)
 
         self._manual = False
         self._motors: list[MotorController] = []
@@ -48,6 +48,8 @@ class CANDriveNode(Node):
         self._current_r = 0.0
         self._sent_l    = None   # last value actually written to CAN (None = force first send)
         self._sent_r    = None
+        self._ramp_rate      = self.get_parameter('ramp_rate').value
+        self._dead_band      = self.get_parameter('dead_band').value
         self._watchdog_ticks = 0
         self._watchdog_every = max(1, int(CONTROL_HZ / PDO_WATCHDOG_HZ))
 
@@ -102,7 +104,7 @@ class CANDriveNode(Node):
         self._target_r = max(-1.0, min(1.0, msg.right_velocity))
 
     def _control_loop(self):
-        step = RAMP_RATE / CONTROL_HZ
+        step = self._ramp_rate / CONTROL_HZ
 
         def ramp(current, target):
             diff = target - current
@@ -130,8 +132,8 @@ class CANDriveNode(Node):
         if force:
             self._watchdog_ticks = 0
 
-        send_l = force or self._sent_l is None or abs(self._current_l - self._sent_l) > DEAD_BAND
-        send_r = force or self._sent_r is None or abs(self._current_r - self._sent_r) > DEAD_BAND
+        send_l = force or self._sent_l is None or abs(self._current_l - self._sent_l) > self._dead_band
+        send_r = force or self._sent_r is None or abs(self._current_r - self._sent_r) > self._dead_band
 
         if send_l:
             for m in self._motors[:3]:

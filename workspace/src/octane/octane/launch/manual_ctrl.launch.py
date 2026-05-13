@@ -12,6 +12,9 @@ Launches:
   - actuator_debug_node:  sky-blue xterm live view (arrow keys, arm/bucket state)
 """
 
+import os
+from ament_index_python.packages import get_package_share_directory
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
@@ -19,6 +22,10 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
+
+    robot_params = os.path.join(
+        get_package_share_directory('octane'), 'config', 'robot_params.yaml'
+    )
 
     throttle_scale_arg = DeclareLaunchArgument(
         'throttle_scale',
@@ -48,6 +55,7 @@ def generate_launch_description():
         executable='can_drive_node',
         name='can_drive_node',
         output='log',
+        parameters=[robot_params],
     )
 
     can_debug_terminal = ExecuteProcess(
@@ -89,14 +97,17 @@ def generate_launch_description():
         executable='rs485_drive_node',
         name='rs485_drive_node',
         output='log',
-        parameters=[{
-            'port':      '/dev/rs485_drive',  # udev symlink for CH340 (VID 1a86:7523)
-            'baud_rate': 9600,
-            'modbus_address': 1,
-            'max_rpm':       3000,
-            'pole_pairs':    4,
-            'reverse':       False,
-        }],
+        parameters=[
+            robot_params,
+            {
+                'port':           '/dev/rs485_drive',  # udev symlink for CH340 (VID 1a86:7523)
+                'baud_rate':      9600,
+                'modbus_address': 1,
+                'max_rpm':        3000,
+                'pole_pairs':     4,
+                'reverse':        False,
+            },
+        ],
     )
 
     rs485_debug_terminal = ExecuteProcess(

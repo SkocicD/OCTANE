@@ -40,7 +40,6 @@ CTRL_REVERSE = 0x0B   # NW=1 EN=1 FR=1 BK=0
 CTRL_STOP    = 0x08   # NW=1 EN=0 FR=0 BK=0
 
 CONTROL_HZ      = 20
-DEAD_BAND       = 0.02
 PDO_WATCHDOG_HZ = 2
 
 FAULT_NAMES = {
@@ -83,13 +82,18 @@ class RS485DriveNode(Node):
         self.declare_parameter('max_rpm',        3000)
         self.declare_parameter('pole_pairs',     4)    # factory default for BLD-510B
         self.declare_parameter('reverse',        False) # flip direction if motor wired backwards
+        self.declare_parameter('ramp_rate',      3.0)
+        self.declare_parameter('dead_band',      0.02)
 
         self._mb_addr    = self.get_parameter('modbus_address').value
         self._max_rpm    = self.get_parameter('max_rpm').value
         self._pole_pairs = self.get_parameter('pole_pairs').value
         self._reverse    = self.get_parameter('reverse').value
+        self._ramp_rate  = self.get_parameter('ramp_rate').value
+        self._dead_band  = self.get_parameter('dead_band').value
 
         self._manual  = False
+        self._target  = 0.0
         self._current = 0.0
         self._sent    = None
         self._watchdog_ticks  = 0
@@ -170,38 +174,46 @@ class RS485DriveNode(Node):
             status.data = f'GATED:STANDBY  L={msg.left_velocity:+.2f}'
             self._tx_pub.publish(status)
             return
+        self._target = max(-1.0, min(1.0, msg.left_velocity))
 
-        v = max(-1.0, min(1.0, msg.left_velocity))
+    # ── control loop (ramp + watchdog) ──────────────────────────────────────────
+
+    def _control_loop(self):
+        step = self._ramp_rate / CONTROL_HZ
+
+        diff = self._target - self._current
+        if abs(diff) <= step:
+            self._current = self._target
+        else:
+            self._current += step * (1 if diff > 0 else -1)
+
+        if not self._manual:
+            if self._current == 0.0:
+                return
+            self._target = 0.0
 
         if self._port is None:
             return
 
-        if self._sent is not None and abs(v - self._sent) <= DEAD_BAND:
+        self._watchdog_ticks += 1
+        force = self._watchdog_ticks >= self._watchdog_every
+        if force:
+            self._watchdog_ticks = 0
+
+        if not force and self._sent is not None and abs(self._current - self._sent) <= self._dead_band:
             return
 
-        self._send_velocity(v)
-        self._current = v
-        self._sent    = v
+        self._send_velocity(self._current)
+        self._sent = self._current
 
         status = String()
-        status.data = f'TX  L={v:+.3f}'
+        status.data = f'TX  L={self._current:+.3f}'
         self._tx_pub.publish(status)
-
-    # ── control loop (watchdog only — keeps motor alive when velocity is steady) ─
-
-    def _control_loop(self):
-        if not self._manual or self._port is None or self._sent is None:
-            return
-
-        self._watchdog_ticks += 1
-        if self._watchdog_ticks >= self._watchdog_every:
-            self._watchdog_ticks = 0
-            self._send_velocity(self._current)
 
     def _send_velocity(self, v: float):
         if self._reverse:
             v = -v
-        if abs(v) < DEAD_BAND:
+        if abs(v) < self._dead_band:
             self._write_reg(REG_CONTROL, (CTRL_STOP << 8) | self._pole_pairs)
         else:
             rpm  = int(abs(v) * self._max_rpm)
