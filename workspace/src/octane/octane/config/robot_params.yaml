@@ -1,5 +1,6 @@
 drive:
-  ramp_time_up:   0.33  # seconds to ramp from 0 to 100% throttle
-  ramp_time_down: 0.33  # seconds to ramp from 100% to 0 throttle
+  ramp_time_up:   1  # seconds to ramp from 0 to 100% throttle
+  ramp_time_down: 0.5  # seconds to ramp from 100% to 0 throttle
   dead_band:      0.02  # min speed change before re-sending a command
   speed_scale:    0.2   # global speed cap (1.0 = full motor RPM)
+  turn_scale:     0.6   # differential multiplier applied to the turning side

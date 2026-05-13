@@ -33,21 +33,15 @@ def generate_launch_description():
         description='Max throttle output (0.0 to 1.0)'
     )
 
-    turn_scale_arg = DeclareLaunchArgument(
-        'turn_scale',
-        default_value='0.6',
-        description='Turn differential scale (0.0 to 1.0)'
-    )
-
     drive_node = Node(
         package='octane_manual_ctrl',
         executable='manual_drive_node',
         name='manual_drive_node',
         output='log',
-        parameters=[{
-            'throttle_scale': LaunchConfiguration('throttle_scale'),
-            'turn_scale': LaunchConfiguration('turn_scale'),
-        }],
+        parameters=[
+            robot_params,
+            {'throttle_scale': LaunchConfiguration('throttle_scale')},
+        ],
     )
 
     can_drive_node = Node(
@@ -122,7 +116,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         throttle_scale_arg,
-        turn_scale_arg,
         # xterms first — ensures terminals open even if a background node crashes
         can_debug_terminal,
         actuator_debug_terminal,
