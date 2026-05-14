@@ -1,6 +1,9 @@
 NVIDIA Isaac/
 .cache/
 
+# Camera recordings
+cam_storage/
+
 # ROS 2 build artifacts
 workspace/build/
 workspace/install/

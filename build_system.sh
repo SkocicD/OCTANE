@@ -468,7 +468,7 @@ echo "[OK] rosdep install done"
 # ── 9. Stale cache check ───────────────────────────────────────────────────────
 if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; then
     echo "[WARN] Stale build cache — wiping octane build artifacts..."
-    for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network; do
+    for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_logging; do
         rm -rf "${WORKSPACE_ROOT}/build/${pkg}" "${WORKSPACE_ROOT}/install/${pkg}"
     done
 fi
@@ -476,7 +476,7 @@ fi
 # ── 10. Build ──────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
-OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane_rs485 octane"
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane_rs485 octane_logging octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)

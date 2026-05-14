@@ -10,10 +10,24 @@
 #   ./launch_system.sh perception       - Launch perception only
 #   ./launch_system.sh mapping          - Launch mapping only
 #   ./launch_system.sh network          - Launch network only
+#   ./launch_system.sh logging          - Launch camera recorder only
+#
+# Flags (combinable with any subsystem or 'all'):
+#   --record   Also launch the camera recorder (logging subsystem)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$SCRIPT_DIR/workspace"
 LAUNCH_PKG="octane"
+
+# Parse flags
+RECORD=false
+POSITIONAL_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --record) RECORD=true ;;
+        *) POSITIONAL_ARGS+=("$arg") ;;
+    esac
+done
 
 # Load rover config
 source "${SCRIPT_DIR}/octane.conf"
@@ -54,7 +68,7 @@ if ! systemctl is-active --quiet avahi-daemon 2>/dev/null; then
 fi
 
 # Determine which launch file to run
-SUBSYSTEM="${1:-all}"
+SUBSYSTEM="${POSITIONAL_ARGS[0]:-all}"
 
 run_launch() {
     local name="$1"
@@ -161,6 +175,9 @@ case "$SUBSYSTEM" in
         ros2 launch "$LAUNCH_PKG" network.launch.py \
             tcp_port:="${OCTANE_TCP_PORT}"
         ;;
+    logging)
+        run_launch logging
+        ;;
     all)
         release_usb
         kill_port "${OCTANE_TCP_PORT}"
@@ -179,6 +196,10 @@ case "$SUBSYSTEM" in
         ros2 launch "$LAUNCH_PKG" network.launch.py \
             tcp_port:="${OCTANE_TCP_PORT}" &
         PIDS+=($!)
+        if [ "$RECORD" = true ]; then
+            ros2 launch "$LAUNCH_PKG" logging.launch.py &
+            PIDS+=($!)
+        fi
 
         trap 'echo ""; echo "[STOP] Shutting down all subsystems..."; kill "${PIDS[@]}" 2>/dev/null; wait "${PIDS[@]}" 2>/dev/null; exit 0' SIGINT SIGTERM
 
@@ -188,7 +209,7 @@ case "$SUBSYSTEM" in
         ;;
     *)
         echo "Unknown subsystem: $SUBSYSTEM"
-        echo "Usage: $0 [supervisor|sensors|perception|mapping|network|all|data_process]"
+        echo "Usage: $0 [supervisor|sensors|perception|mapping|network|logging|all]"
         exit 1
         ;;
 esac
