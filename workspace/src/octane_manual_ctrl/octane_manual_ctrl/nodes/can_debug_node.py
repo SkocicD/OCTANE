@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""Purple CAN debug terminal — transceiver status, live keys, velocity bars, drive log."""
+"""Purple CAN debug terminal — transceiver status, live keys, velocity bars, drive log.
 
+Press SPACE to toggle between status view and raw CAN frame view (RX/TX hex).
+"""
+
+import select
 import sys
+import termios
+import threading
 import time
+import tty
 from collections import deque
 
 import rclpy
@@ -19,9 +26,13 @@ DIM    = '\033[2m'
 GREEN  = '\033[92m'
 YELLOW = '\033[93m'
 RED    = '\033[91m'
+CYAN   = '\033[96m'
 RESET  = '\033[0m'
 
 STATE_COLORS = {'MANUAL': YELLOW, 'AUTONOMOUS': GREEN, 'FAULT': RED}
+
+VIEW_STATUS = 'status'
+VIEW_RAW    = 'raw'
 
 
 class CANDebugNode(Node):
@@ -32,15 +43,19 @@ class CANDebugNode(Node):
         self._state      = '---'
         self._can_status = f'{DIM}waiting for can_drive_node...{RESET}'
         self._keys       = 0
-        self._left_vel   = 0.0   # target  (from /drive/command)
+        self._left_vel   = 0.0
         self._right_vel  = 0.0
-        self._sent_l     = 0.0   # actual sent (ramped, from TX log)
+        self._sent_l     = 0.0
         self._sent_r     = 0.0
         self._speed_modifier = 100
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
-        self._log: deque = deque(maxlen=10)
+        self._log: deque    = deque(maxlen=10)
         self._tx_log: deque = deque(maxlen=4)
+        self._raw_log: deque = deque(maxlen=30)  # raw RX/TX hex frames
+
+        # SPACE toggles between status view and raw CAN frame view
+        self._view = VIEW_STATUS
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         status_qos = QoSProfile(
@@ -54,9 +69,34 @@ class CANDebugNode(Node):
         self.create_subscription(DriveCommand, '/drive/command',          self._on_drive,      qos)
         self.create_subscription(String,       '/manual_ctrl/can_status', self._on_can_status, status_qos)
         self.create_subscription(String,       '/manual_ctrl/can_tx',     self._on_can_tx,     qos)
+        self.create_subscription(String,       '/manual_ctrl/can_raw',    self._on_can_raw,    qos)
+
+        # Background thread reads SPACE from the xterm without blocking the ROS executor
+        self._input_thread = threading.Thread(target=self._read_keys, daemon=True)
+        self._input_thread.start()
 
         self.create_timer(0.1, self._render)
         self._render()
+
+    # ── keyboard input ──────────────────────────────────────────────────────
+
+    def _read_keys(self):
+        """Non-blocking stdin reader — toggles view on SPACE."""
+        if not sys.stdin.isatty():
+            return
+        old = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            while True:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if ready:
+                    ch = sys.stdin.read(1)
+                    if ch == ' ':
+                        self._view = VIEW_RAW if self._view == VIEW_STATUS else VIEW_STATUS
+        finally:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old)
+
+    # ── subscribers ─────────────────────────────────────────────────────────
 
     def _on_state(self, msg: String):
         self._state = msg.data
@@ -83,6 +123,18 @@ class CANDebugNode(Node):
                         pass
         self._tx_log.append(entry)
 
+    def _on_can_raw(self, msg: String):
+        # Format: "TX 0x001 08 01 00 00 00 00 00 00 00"
+        ts = time.strftime('%H:%M:%S.') + f'{int(time.time() * 1000) % 1000:03d}'
+        parts = msg.data.split(None, 3)
+        if not parts:
+            return
+        direction = parts[0]
+        color = GREEN if direction == 'TX' else CYAN
+        self._raw_log.append(
+            f'{DIM}[{ts}]{RESET}  {color}{BOLD}{direction}{RESET}  {" ".join(parts[1:])}'
+        )
+
     def _on_keys(self, msg: UInt8):
         self._keys = msg.data
         self._last_key_t = time.time()
@@ -96,6 +148,8 @@ class CANDebugNode(Node):
             f'{DIM}[{time.strftime("%H:%M:%S")}]{RESET}  '
             f'L={self._left_vel:+.2f}  R={self._right_vel:+.2f}  spd={self._speed_modifier}%'
         )
+
+    # ── rendering ───────────────────────────────────────────────────────────
 
     def _vel_bar(self, v: float) -> str:
         filled = int(abs(v) * 10)
@@ -111,15 +165,22 @@ class CANDebugNode(Node):
         return f'{color}[{bar}]{RESET}  {pct}%'
 
     def _render(self):
-        held      = [KEY_NAMES[i] for i in range(8) if self._keys & (1 << i)]
-        key_str   = f'{GREEN}{BOLD}{" ".join(held)}{RESET}' if held else f'{DIM}(none){RESET}'
-        key_age   = f'{time.time() - self._last_key_t:.1f}s ago' if self._last_key_t else 'no data'
-        cmd_age   = f'{time.time() - self._last_cmd_t:.1f}s ago' if self._last_cmd_t else 'no data yet'
-        sc        = STATE_COLORS.get(self._state, DIM)
-
         print('\033[2J\033[H', end='')
+        if self._view == VIEW_RAW:
+            self._render_raw()
+        else:
+            self._render_status()
+        sys.stdout.flush()
+
+    def _render_status(self):
+        held    = [KEY_NAMES[i] for i in range(8) if self._keys & (1 << i)]
+        key_str = f'{GREEN}{BOLD}{" ".join(held)}{RESET}' if held else f'{DIM}(none){RESET}'
+        key_age = f'{time.time() - self._last_key_t:.1f}s ago' if self._last_key_t else 'no data'
+        cmd_age = f'{time.time() - self._last_cmd_t:.1f}s ago' if self._last_cmd_t else 'no data yet'
+        sc      = STATE_COLORS.get(self._state, DIM)
+
         print(f'{BOLD}{PURPLE}{"=" * 58}{RESET}')
-        print(f'{BOLD}{PURPLE}    OCTANE | CAN DEBUG{RESET}')
+        print(f'{BOLD}{PURPLE}    OCTANE | CAN DEBUG{RESET}  {DIM}[SPACE = raw frames]{RESET}')
         print(f'{BOLD}{PURPLE}{"=" * 58}{RESET}')
         print(f'  Transceiver : {self._can_status}')
         print(f'  State       : {sc}{BOLD}{self._state}{RESET}')
@@ -138,7 +199,6 @@ class CANDebugNode(Node):
         else:
             for entry in self._log:
                 print(f'  {entry}')
-
         print()
         print(f'{BOLD}  CAN TX LOG  {DIM}(green=sent, red=gated){RESET}')
         print(f'  {DIM}{"-" * 50}{RESET}')
@@ -148,7 +208,25 @@ class CANDebugNode(Node):
             for entry in self._tx_log:
                 print(f'  {entry}')
         print(f'\n{BOLD}{PURPLE}{"=" * 58}{RESET}')
-        sys.stdout.flush()
+
+    def _render_raw(self):
+        sc = STATE_COLORS.get(self._state, DIM)
+        print(f'{BOLD}{PURPLE}{"=" * 58}{RESET}')
+        print(f'{BOLD}{PURPLE}    OCTANE | CAN RAW FRAMES{RESET}  {DIM}[SPACE = status]{RESET}')
+        print(f'{BOLD}{PURPLE}{"=" * 58}{RESET}')
+        print(f'  Transceiver : {self._can_status}')
+        print(f'  State       : {sc}{BOLD}{self._state}{RESET}')
+        print()
+        print(f'  {GREEN}{BOLD}TX{RESET} = sent to motors   {CYAN}{BOLD}RX{RESET} = replies from motors')
+        print(f'  Format: [timestamp]  DIR  ID  DLC  DATA...')
+        print(f'  {DIM}{"-" * 54}{RESET}')
+        print()
+        if not self._raw_log:
+            print(f'  {DIM}No CAN frames yet — waiting for motor traffic...{RESET}')
+        else:
+            for entry in self._raw_log:
+                print(f'  {entry}')
+        print(f'\n{BOLD}{PURPLE}{"=" * 58}{RESET}')
 
 
 def main(args=None):
