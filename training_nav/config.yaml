@@ -1,48 +1,51 @@
 arena:
-  # KSC Artemis base dimensions (metres) — variations are scaled from this
-  base_width: 6.88
-  base_length: 6.5
+  # KSC Artemis 2026 base dimensions (metres)
+  base_width:  6.88
+  base_length: 5.0
   # Zone layout as fractions of base dimensions
-  excavation_width_frac: 0.363   # 2.5 / 6.88
-  start_length_frac:     0.308   # 2.0 / 6.5
-  deposit_length_frac:   0.231   # 1.5 / 6.5
-  # Berm target size (metres, fixed regardless of scale)
+  excavation_width_frac: 0.363   # 2.5 / 6.88  (left column)
+  start_length_frac:     0.400   # 2.0 / 5.0   (bottom-left start zone height)
+  deposit_length_frac:   0.300   # 1.5 / 5.0   (bottom-right construction zone height)
+  # Berm target size (metres, fixed physical size — not scaled)
   berm_w: 1.7
   berm_h: 0.8
-  # Obstacle counts per arena (randomised ± 30%)
-  rocks_mean:   8
-  craters_mean: 6
-  rock_diameter:   0.35   # metres
-  crater_diameter: 0.45   # metres
+  # Column obstacle (fixed square in obstacle/nav zone)
+  column_size: 0.4               # side length of the fixed column obstacle
+  # Obstacle counts per arena (randomised ± 30%; spread across both obstacle zones)
+  rocks_mean:      4
+  craters_mean:    3
+  rock_diameter:   0.35          # 30-40 cm per spec
+  crater_diameter: 0.45          # 40-50 cm per spec
+  # Minimum obstacle spacing multiplier
+  obstacle_spread: 1.4           # minimum centre-centre = (d1+d2) * spread
 
 terrain:
   grid_size: 60          # cells — model always receives grid_size × grid_size
   cell_size:  0.1        # metres per cell in the full-arena terrain map
-  # Real-world view extents: calibrate these once you know what the robot
-  # actually sees from its sensors. The crop is resampled to grid_size × grid_size
-  # so the model input shape never changes.
-  view_width: 6.0        # metres the robot can see left/right (X axis)
-  view_height: 6.0       # metres the robot can see forward/back (Y axis)
-  height_noise_std: 0.04 # background terrain roughness (metres)
-  height_scale: 0.5      # normalisation divisor (matches terrain model)
+  view_width: 4.0        # metres the robot can see left/right  (calibrate to sensor)
+  view_height: 4.0       # metres the robot can see forward/back
+  height_noise_std: 0.04
+  height_scale: 0.5
 
 planner:
-  # A* cost weights
   slope_weight:  2.0
   crater_weight: 8.0
   rock_weight:   6.0
-  wall_weight:   50.0    # effectively impassable
-  # Lookahead for action extraction (cells ahead on path)
+  wall_weight:   50.0
   lookahead: 8
 
 robot:
-  # Physical geometry — 3-wheel differential drive, 14" diameter wheels, 35 RPM max
+  # 3-wheel differential drive, 14" diameter wheels, 35 RPM max
   v_max:          0.652   # 35 RPM × π × 0.3556m / 60  (m/s per wheel at full speed)
-  wheel_base:     0.483   # wheel-centre to wheel-centre (m) — 19 in
-  diff_limit:     0.8     # max |left - right|; hardware limit during differential turns
+  wheel_base:     0.483   # wheel-centre spacing (m) — 19 in
+  diff_limit:     0.8     # max |left - right|; hardware limit
   robot_width:    0.75    # physical robot body width (m)
   robot_length:   1.5     # physical robot body length (m)
-  projection_time: 3.0    # seconds ahead to project the Tesla path arc
+  projection_time: 2.5    # seconds ahead to project the Tesla path arc
+  # Bucket states: 0=UP(travel)  1=COLLECT(digging)  2=DUMP(at berm)
+  digging_speed:  0.25    # motor command (0-1) used while bucket is down collecting
+  digging_steps:  38      # sim steps with bucket=1 (~4.6 s at DT=0.12)
+  dumping_steps:  27      # sim steps stopped at berm with bucket=2 (~3.2 s)
 
 model:
   cnn_channels: [32, 64, 128]
@@ -56,16 +59,15 @@ training:
   weight_decay: 1.0e-4
   val_ratio: 0.1
   seed: 42
-  num_workers: 0           # set to 4 on Linux for faster data loading
-  # Samples generated per epoch
-  arenas_per_epoch: 500    # random arenas generated each epoch
-  samples_per_arena: 20    # robot positions sampled per arena
-  # Arena scale range (fraction of base KSC size)
-  scale_min: 0.45
+  num_workers: 0
+  arenas_per_epoch: 500
+  samples_per_arena: 20
+  scale_min: 0.85          # min arena ≈ 4.25m long — robot (1.5m) has room to manoeuvre
   scale_max: 1.0
   grad_clip: 1.0
   early_stop_patience: 20
+  bucket_loss_weight: 0.5  # weight of CrossEntropy bucket loss vs Huber motor loss
 
 checkpoints:
   dir: "checkpoints"
-  keep: 10                 # number of recent epoch checkpoints to retain
+  keep: 10

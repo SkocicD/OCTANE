@@ -1,19 +1,24 @@
 """Arena generator for Lunabotics navigation training.
 
-Generates randomised arena configurations and terrain maps based on the
-KSC Artemis arena layout, with scale/proportion variation to cover both
-the full KSC arena and the half-size UCF Exolith Lab lanes.
+KSC Artemis 2026 layout (world coords: origin bottom-left, X right, Y up):
 
-Arena coordinate system (metres, origin bottom-left):
-  X = right (width)
-  Y = up    (length / depth into arena)
+  ┌──────────────┬──────────────────────────────┐  ← y = length (5 m)
+  │              │                              │
+  │  Excavation  │     Obstacle / Nav Zone      │
+  │     Zone     │     (rocks, craters,         │
+  │   (left col) │      column obstacle)        │
+  │              │                              │
+  │  ┌─ Start ─┐ ├──────────────────────────────┤  ← y = dep_h (1.5 m)
+  │  │  Zone   │ │    Construction / Deposit    │
+  │  │ (no obs)│ │    Zone  (berm target)       │
+  └──┴─────────┴─┴──────────────────────────────┘
+  x=0         exc_w                           width
+              (2.5m)                         (6.88m)
 
-Zones (from image):
-  Start Zone   — bottom-left corner, no obstacles
-  Excavation   — left column, full depth (minus start/deposit)
-  Obstacle/Nav — right column, full depth (minus start/deposit)
-  Deposit      — bottom-right, construction zone
-  Berm Target  — high-value sub-region inside deposit zone
+Start zone: bottom-left corner, no obstacles.
+Excavation zone: FULL left column (start zone is subset; obstacles only above start).
+Construction/deposit zone: bottom-right, no obstacles.
+Obstacle/nav zone: upper-right.
 """
 
 import math
@@ -46,10 +51,10 @@ class Rect:
 
 @dataclass
 class Obstacle:
-    x: float         # centre (m)
-    y: float         # centre (m)
+    x: float
+    y: float
     diameter: float
-    kind: str        # 'rock' | 'crater'
+    kind: str        # 'rock' | 'crater' | 'column'
 
 
 @dataclass
@@ -77,36 +82,49 @@ def generate_arena(cfg: dict, rng: random.Random | None = None) -> ArenaConfig:
     width  = ac['base_width']  * scale
     length = ac['base_length'] * scale
 
-    exc_w    = width  * ac['excavation_width_frac']
-    nav_w    = width  - exc_w
-    start_h  = length * ac['start_length_frac']
-    dep_h    = length * ac['deposit_length_frac']
-    mid_h    = length - start_h - dep_h
+    exc_w   = width  * ac['excavation_width_frac']   # ~2.5 m at scale=1
+    nav_w   = width  - exc_w                         # ~4.38 m at scale=1
+    start_h = length * ac['start_length_frac']       # ~2.0 m at scale=1
+    dep_h   = length * ac['deposit_length_frac']     # ~1.5 m at scale=1
 
-    # Zone rects
-    start_zone      = Rect(0,          0,          exc_w, start_h)
-    excavation_zone = Rect(0,          start_h,    exc_w, mid_h)
-    nav_zone        = Rect(exc_w,      0,          nav_w, length - dep_h)
-    deposit_zone    = Rect(exc_w,      length - dep_h, nav_w, dep_h)
+    # ── Zone rects (corrected per 2026 image) ──────────────────────────────────
+    # Start zone: bottom-left, no obstacles
+    start_zone = Rect(0, 0, exc_w, start_h)
 
-    # Berm target (centred in deposit zone, fixed physical size clamped to zone)
-    bw = min(ac['berm_w'] * scale, deposit_zone.w * 0.7)
-    bh = min(ac['berm_h'] * scale, deposit_zone.h * 0.7)
+    # Excavation zone: full left column (robot can dig ONLY here)
+    excavation_zone = Rect(0, 0, exc_w, length)
+
+    # Deposit / construction zone: BOTTOM-right (not top)
+    deposit_zone = Rect(exc_w, 0, nav_w, dep_h)
+
+    # Obstacle / nav zone: upper-right (above deposit zone)
+    nav_zone = Rect(exc_w, dep_h, nav_w, length - dep_h)
+
+    # Berm target: inside deposit zone, fixed physical size clamped to zone
+    bw = min(ac['berm_w'], deposit_zone.w * 0.75)
+    bh = min(ac['berm_h'], deposit_zone.h * 0.75)
     bx = deposit_zone.x + (deposit_zone.w - bw) / 2
     by = deposit_zone.y + (deposit_zone.h - bh) / 2
     berm_target = Rect(bx, by, bw, bh)
 
-    # Obstacles — placed inside excavation + nav zones, not in start/deposit
-    obstacle_zones = [excavation_zone, nav_zone]
-    n_rocks   = max(1, round(ac['rocks_mean']   * scale * rng.uniform(0.7, 1.3)))
-    n_craters = max(1, round(ac['craters_mean'] * scale * rng.uniform(0.7, 1.3)))
-    obstacles = []
+    # ── Obstacles ──────────────────────────────────────────────────────────────
+    # Valid placement zones:
+    #   Left column ABOVE start zone (upper excavation area)
+    exc_upper = Rect(0, start_h, exc_w, length - start_h)
+    #   Nav/obstacle zone (upper right)
+    #   NOT in start zone, NOT in deposit/construction zone
+
+    obstacle_zones = [exc_upper, nav_zone]
+    spread = ac.get('obstacle_spread', 1.4)
+
+    n_rocks   = max(0, round(ac['rocks_mean']   * rng.uniform(0.7, 1.3)))
+    n_craters = max(0, round(ac['craters_mean'] * rng.uniform(0.7, 1.3)))
+    obstacles: list[Obstacle] = []
 
     for kind, n, diam in [('rock',   n_rocks,   ac['rock_diameter']),
                            ('crater', n_craters, ac['crater_diameter'])]:
-        placed = 0
-        attempts = 0
-        while placed < n and attempts < n * 30:
+        placed, attempts = 0, 0
+        while placed < n and attempts < n * 40:
             attempts += 1
             zone = rng.choice(obstacle_zones)
             margin = diam
@@ -114,17 +132,25 @@ def generate_arena(cfg: dict, rng: random.Random | None = None) -> ArenaConfig:
                 continue
             ox = rng.uniform(zone.x + margin, zone.x + zone.w - margin)
             oy = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
-            # Keep away from start zone
-            if start_zone.contains(ox, oy):
+
+            # Hard-exclude start and deposit zones
+            if start_zone.contains(ox, oy) or deposit_zone.contains(ox, oy):
                 continue
-            # Avoid overlap with existing obstacles
+
+            # Spread enforcement
             too_close = any(
-                math.hypot(ox - o.x, oy - o.y) < (diam + o.diameter) * 0.6
+                math.hypot(ox - o.x, oy - o.y) < (diam + o.diameter) * spread
                 for o in obstacles
             )
             if not too_close:
                 obstacles.append(Obstacle(ox, oy, diam, kind))
                 placed += 1
+
+    # ── Fixed column obstacle (upper obstacle zone, roughly centred) ───────────
+    col_sz = ac.get('column_size', 0.4)
+    col_x  = nav_zone.x + nav_zone.w * 0.4 + rng.uniform(-nav_zone.w * 0.1, nav_zone.w * 0.1)
+    col_y  = nav_zone.y + nav_zone.h * 0.5 + rng.uniform(-nav_zone.h * 0.1, nav_zone.h * 0.1)
+    obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
 
     return ArenaConfig(
         width=width, length=length, scale=scale,
@@ -144,7 +170,6 @@ def build_terrain_maps(arena: ArenaConfig, cfg: dict,
     """
     Returns terrain maps for the FULL arena (not robot-centred).
     Each map is (arena_rows, arena_cols) float32.
-
     Keys: 'height', 'rocks', 'craters', 'walls'
     """
     if rng is None:
@@ -159,56 +184,51 @@ def build_terrain_maps(arena: ArenaConfig, cfg: dict,
     def to_cell(x, y):
         return int(x / cs), int(y / cs)   # col, row
 
-    # ── Height map — smooth random + slight slope toward deposit zone ─────────
+    # ── Height map ─────────────────────────────────────────────────────────────
     height = rng.standard_normal((rows, cols)).astype(np.float32) * tc['height_noise_std']
     height = gaussian_filter(height, sigma=3.0)
-    # Gentle slope: terrain rises slightly away from robot start (bottom)
-    slope = np.linspace(0, 0.08 * arena.scale, rows)[:, None]
+    slope  = np.linspace(0, 0.08 * arena.scale, rows)[:, None]
     height += slope
-    # Flatten start zone and deposit zone
     for zone in [arena.start_zone, arena.deposit_zone]:
         c0, r0 = to_cell(zone.x, zone.y)
         c1, r1 = to_cell(zone.x + zone.w, zone.y + zone.h)
         height[r0:r1, c0:c1] *= 0.1
 
-    # ── Rock heatmap ──────────────────────────────────────────────────────────
+    # ── Rock heatmap ────────────────────────────────────────────────────────────
     rocks = np.zeros((rows, cols), dtype=np.float32)
     for obs in arena.obstacles:
         if obs.kind != 'rock':
             continue
         cx, cy = int(obs.x / cs), int(obs.y / cs)
-        sigma = max(1.0, (obs.diameter / 2) / cs)
-        r = int(sigma * 3)
+        sigma  = max(1.0, (obs.diameter / 2) / cs)
+        r      = int(sigma * 3)
         x0, x1 = max(0, cx - r), min(cols, cx + r + 1)
         y0, y1 = max(0, cy - r), min(rows, cy + r + 1)
-        xs = np.arange(x0, x1) - cx
-        ys = np.arange(y0, y1) - cy
+        xs = np.arange(x0, x1) - cx;  ys = np.arange(y0, y1) - cy
         xx, yy = np.meshgrid(xs, ys)
         rocks[y0:y1, x0:x1] = np.maximum(
             rocks[y0:y1, x0:x1],
             np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
         )
-        # Raise height at rock location
         height[y0:y1, x0:x1] += rocks[y0:y1, x0:x1] * 0.25 * arena.scale
 
-    # ── Crater heatmap ────────────────────────────────────────────────────────
+    # ── Crater heatmap ──────────────────────────────────────────────────────────
     craters = np.zeros((rows, cols), dtype=np.float32)
     for obs in arena.obstacles:
         if obs.kind != 'crater':
             continue
         cx, cy = int(obs.x / cs), int(obs.y / cs)
-        sigma = max(1.0, (obs.diameter / 2) / cs)
-        r = int(sigma * 3)
+        sigma  = max(1.0, (obs.diameter / 2) / cs)
+        r      = int(sigma * 3)
         x0, x1 = max(0, cx - r), min(cols, cx + r + 1)
         y0, y1 = max(0, cy - r), min(rows, cy + r + 1)
-        xs = np.arange(x0, x1) - cx
-        ys = np.arange(y0, y1) - cy
+        xs = np.arange(x0, x1) - cx;  ys = np.arange(y0, y1) - cy
         xx, yy = np.meshgrid(xs, ys)
         blob = np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
         craters[y0:y1, x0:x1] = np.maximum(craters[y0:y1, x0:x1], blob)
         height[y0:y1, x0:x1] -= blob * 0.3 * arena.scale
 
-    # ── Wall mask — arena boundary ────────────────────────────────────────────
+    # ── Column obstacle as hard wall ────────────────────────────────────────────
     walls = np.zeros((rows, cols), dtype=np.float32)
     wall_thick = max(1, int(0.1 / cs))
     walls[:wall_thick,  :] = 1.0
@@ -216,7 +236,17 @@ def build_terrain_maps(arena: ArenaConfig, cfg: dict,
     walls[:,  :wall_thick] = 1.0
     walls[:, -wall_thick:] = 1.0
 
-    # Normalise height
+    for obs in arena.obstacles:
+        if obs.kind != 'column':
+            continue
+        half = (obs.diameter / (math.sqrt(2) * 2)) / cs
+        cx, cy = int(obs.x / cs), int(obs.y / cs)
+        ih = max(1, int(half))
+        x0, x1 = max(0, cx - ih), min(cols, cx + ih + 1)
+        y0, y1 = max(0, cy - ih), min(rows, cy + ih + 1)
+        walls[y0:y1, x0:x1]  = 1.0
+        height[y0:y1, x0:x1] = 1.0
+
     height = (height / tc['height_scale']).astype(np.float32)
 
     return {'height': height, 'rocks': rocks, 'craters': craters, 'walls': walls,
@@ -224,7 +254,6 @@ def build_terrain_maps(arena: ArenaConfig, cfg: dict,
 
 
 def _view_cell_size(cfg: dict) -> tuple[float, float]:
-    """Returns (cell_size_x, cell_size_y) in metres/cell based on view extents."""
     tc = cfg['terrain']
     gs = tc['grid_size']
     return tc['view_width'] / gs, tc['view_height'] / gs
@@ -233,11 +262,8 @@ def _view_cell_size(cfg: dict) -> tuple[float, float]:
 def crop_robot_view(terrain: dict, robot_x: float, robot_y: float,
                     cfg: dict) -> np.ndarray:
     """
-    Resample the full arena terrain into a grid_size × grid_size patch
-    centred on the robot. view_width × view_height defines the real-world
-    extents — change those in config.yaml to calibrate to actual sensor range.
-    Out-of-bounds areas are filled with wall values.
-    Returns (4, grid_size, grid_size) float32.
+    Resample the full arena terrain into a grid_size × grid_size patch centred
+    on the robot.  Returns (4, grid_size, grid_size) float32.
     """
     tc       = cfg['terrain']
     gs       = tc['grid_size']
@@ -247,25 +273,23 @@ def crop_robot_view(terrain: dict, robot_x: float, robot_y: float,
     cols     = terrain['cols']
     half     = gs // 2
 
-    # Vectorised: build world coordinates for every output cell
-    pj = np.arange(gs)
-    pi = np.arange(gs)
-    wx = robot_x + (pj - half) * csx   # (gs,)  world-x per output column
-    wy = robot_y + (pi - half) * csy   # (gs,)  world-y per output row
+    pj = np.arange(gs);  pi = np.arange(gs)
+    wx = robot_x + (pj - half) * csx
+    wy = robot_y + (pi - half) * csy
 
-    ci = (wx / arena_cs).astype(np.intp)   # column indices in full terrain
-    ri = (wy / arena_cs).astype(np.intp)   # row    indices in full terrain
+    ci = (wx / arena_cs).astype(np.intp)
+    ri = (wy / arena_cs).astype(np.intp)
 
     col_valid = (ci >= 0) & (ci < cols)
     row_valid = (ri >= 0) & (ri < rows)
-    valid     = row_valid[:, None] & col_valid[None, :]   # (gs, gs) bool
+    valid     = row_valid[:, None] & col_valid[None, :]
 
     ci_safe = np.clip(ci, 0, cols - 1)
     ri_safe = np.clip(ri, 0, rows - 1)
 
     channels = []
     for key in ('height', 'rocks', 'craters', 'walls'):
-        patch = terrain[key][np.ix_(ri_safe, ci_safe)]          # (gs, gs)
+        patch = terrain[key][np.ix_(ri_safe, ci_safe)]
         fill  = 1.0 if key == 'walls' else 0.0
         channels.append(np.where(valid, patch, fill).astype(np.float32))
 
@@ -274,24 +298,18 @@ def crop_robot_view(terrain: dict, robot_x: float, robot_y: float,
 
 def build_goal_heatmap(arena: ArenaConfig, goal_zone: Rect,
                        robot_x: float, robot_y: float, cfg: dict) -> np.ndarray:
-    """
-    Build a (grid_size, grid_size) goal heatmap centred on the robot.
-    Uses the same view_width/view_height extents as crop_robot_view so
-    the goal channel is spatially consistent with the terrain channels.
-    """
     tc       = cfg['terrain']
     gs       = tc['grid_size']
     csx, csy = _view_cell_size(cfg)
     half     = gs // 2
 
-    pj = np.arange(gs)
-    pi = np.arange(gs)
-    wx = robot_x + (pj - half) * csx   # (gs,)
-    wy = robot_y + (pi - half) * csy   # (gs,)
+    pj = np.arange(gs);  pi = np.arange(gs)
+    wx = robot_x + (pj - half) * csx
+    wy = robot_y + (pi - half) * csy
 
     in_x    = (wx >= goal_zone.x) & (wx < goal_zone.x + goal_zone.w)
     in_y    = (wy >= goal_zone.y) & (wy < goal_zone.y + goal_zone.h)
-    heatmap = (in_y[:, None] & in_x[None, :]).astype(np.float32)   # (gs, gs)
+    heatmap = (in_y[:, None] & in_x[None, :]).astype(np.float32)
 
     heatmap = gaussian_filter(heatmap, sigma=3.0)
     if heatmap.max() > 0:

@@ -20,6 +20,7 @@ import time
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -327,7 +328,8 @@ def _save(ckpt_dir: str, epoch: int, model, optimizer, scheduler,
 
 def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
                optimizer, device: torch.device,
-               train: bool, grad_clip: float) -> float:
+               train: bool, grad_clip: float,
+               bucket_loss_weight: float = 0.5) -> float:
     model.train(train)
     total = 0.0
     desc  = 'train' if train else 'val  '
@@ -341,7 +343,9 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
             action_gt = action_gt.to(device, non_blocking=True)
 
             action_pred = model(terrain, heading)
-            loss = criterion(action_pred, action_gt)
+            motor_loss  = criterion(action_pred[:, :2], action_gt[:, :2])
+            bucket_loss = F.cross_entropy(action_pred[:, 2:], action_gt[:, 2].long())
+            loss        = motor_loss + bucket_loss_weight * bucket_loss
 
             if train:
                 optimizer.zero_grad()
@@ -429,8 +433,9 @@ def main():
     print(f'  Val    : {n_val} samples/epoch')
 
     # ── Model ──────────────────────────────────────────────────────────────────
-    model     = NavPolicy(cfg).to(device)
-    criterion = nn.HuberLoss(delta=0.1)
+    model              = NavPolicy(cfg).to(device)
+    criterion          = nn.HuberLoss(delta=0.1)
+    bucket_loss_weight = tc.get('bucket_loss_weight', 0.5)
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=tc['learning_rate'],
                                   weight_decay=tc['weight_decay'])
@@ -469,9 +474,11 @@ def main():
         print(f'\n  [{epoch:04d}/{max_epochs}]', end='  ', flush=True)
 
         train_loss = _run_epoch(train_loader, model, criterion, optimizer,
-                                device, train=True,  grad_clip=tc['grad_clip'])
+                                device, train=True,  grad_clip=tc['grad_clip'],
+                                bucket_loss_weight=bucket_loss_weight)
         val_loss   = _run_epoch(val_loader,   model, criterion, optimizer,
-                                device, train=False, grad_clip=0)
+                                device, train=False, grad_clip=0,
+                                bucket_loss_weight=bucket_loss_weight)
         scheduler.step()
 
         lr = scheduler.get_last_lr()[0]

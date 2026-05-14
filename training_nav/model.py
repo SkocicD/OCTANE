@@ -5,12 +5,13 @@ Input:
               channels: height, rocks, craters, walls, goal_heatmap
   heading:  (B, 2)  — [sin(yaw), cos(yaw)]
 
-Output:
-  (B, 2)  — [left_motor, right_motor], both sigmoid-bounded to [0, 1]
-             |left - right| ≤ diff_limit (0.8) enforced by expert supervision
+Output: (B, 5) tensor
+  [0]   left_motor   — sigmoid [0, 1]
+  [1]   right_motor  — sigmoid [0, 1]
+  [2:5] bucket_logits — raw logits for CrossEntropy (classes: 0=UP 1=COLLECT 2=DUMP)
 
 Architecture: lightweight CNN encoder → global average pool →
-concat with heading embedding → MLP → action head.
+concat with heading embedding → MLP → two separate heads.
 Small enough to run in real-time on Jetson Orin.
 """
 
@@ -24,9 +25,9 @@ class NavPolicy(nn.Module):
     def __init__(self, cfg: dict):
         super().__init__()
         mc = cfg['model']
-        ch = mc['cnn_channels']       # e.g. [32, 64, 128]
-        fc = mc['fc_dims']             # e.g. [256, 128]
-        he = mc['heading_embed_dim']   # e.g. 16
+        ch = mc['cnn_channels']
+        fc = mc['fc_dims']
+        he = mc['heading_embed_dim']
 
         # CNN: 5-channel terrain input
         layers = []
@@ -43,15 +44,13 @@ class NavPolicy(nn.Module):
             ]
             in_ch = out_ch
         self.cnn = nn.Sequential(*layers)
-        self.gap = nn.AdaptiveAvgPool2d(1)   # → (B, ch[-1], 1, 1)
+        self.gap = nn.AdaptiveAvgPool2d(1)
 
-        # Heading embedding
         self.heading_mlp = nn.Sequential(
             nn.Linear(2, he),
             nn.ReLU(inplace=True),
         )
 
-        # MLP head
         mlp_in = ch[-1] + he
         mlp_layers = []
         for dim in fc:
@@ -59,12 +58,23 @@ class NavPolicy(nn.Module):
             mlp_in = dim
         self.mlp = nn.Sequential(*mlp_layers)
 
-        self.action_head = nn.Linear(mlp_in, 2)
+        # Separate heads
+        self.motor_head  = nn.Linear(mlp_in, 2)   # left, right
+        self.bucket_head = nn.Linear(mlp_in, 3)   # logits for bucket classes 0/1/2
 
     def forward(self, terrain: torch.Tensor, heading: torch.Tensor) -> torch.Tensor:
         x = self.cnn(terrain)
-        x = self.gap(x).flatten(1)          # (B, ch[-1])
-        h = self.heading_mlp(heading)        # (B, he)
+        x = self.gap(x).flatten(1)
+        h = self.heading_mlp(heading)
         x = torch.cat([x, h], dim=1)
         x = self.mlp(x)
-        return torch.sigmoid(self.action_head(x))  # (B, 2) in [0, 1] — (left, right)
+        motors       = torch.sigmoid(self.motor_head(x))   # (B, 2) in [0, 1]
+        bucket_logits = self.bucket_head(x)                # (B, 3) raw logits
+        return torch.cat([motors, bucket_logits], dim=1)   # (B, 5)
+
+    @staticmethod
+    def decode(out: torch.Tensor):
+        """Split a (B,5) or (5,) output into (left, right, bucket_class)."""
+        motors = out[..., :2]
+        bucket = out[..., 2:].argmax(dim=-1)
+        return motors, bucket

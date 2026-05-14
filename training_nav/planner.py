@@ -1,16 +1,16 @@
 """A* pathfinder on terrain cost maps.
 
-Generates expert trajectories used as training supervision for the
-navigation policy. The cost at each cell combines:
-  - Terrain slope (gradient of height map)
-  - Crater probability
-  - Rock probability
-  - Wall mask (near-impassable)
+Generates expert trajectories for navigation policy training.
+Cost at each cell combines slope, crater, rock, and wall penalties.
 
-Action extraction: looks `lookahead` cells ahead on the A* path from the
-robot's current position, computes the desired heading to that waypoint,
-then derives (left_motor, right_motor) in [0, 1] for differential drive.
-|left - right| is capped at diff_limit (default 0.8) per hardware constraint.
+Action extraction produces (left, right, bucket):
+  left/right ∈ [0, 1]  — differential drive motor commands
+  bucket ∈ {0, 1, 2}   — 0=UP(travel) 1=COLLECT(digging) 2=DUMP(at berm)
+  |left - right| ≤ diff_limit (0.8) per hardware constraint.
+
+During 'digging' and 'dumping' phases the planner returns fixed low-speed
+or stopped commands with the appropriate bucket position rather than
+navigating with A*.
 """
 
 import heapq
@@ -20,20 +20,23 @@ import numpy as np
 from scipy.ndimage import sobel
 
 
+_BUCKET_FOR_PHASE = {
+    'to_excavation': 0,
+    'digging':       1,
+    'to_deposit':    0,
+    'dumping':       2,
+}
+
+
 def _build_cost_map(terrain_maps: np.ndarray, cfg: dict) -> np.ndarray:
-    """
-    terrain_maps: (4, H, W) — height, rocks, craters, walls (robot-centred crop)
-    Returns (H, W) float32 cost map.
-    """
-    pc = cfg['planner']
+    """terrain_maps: (4, H, W) — height, rocks, craters, walls → (H, W) cost."""
+    pc      = cfg['planner']
     height  = terrain_maps[0]
     rocks   = terrain_maps[1]
     craters = terrain_maps[2]
     walls   = terrain_maps[3]
 
-    # Slope magnitude from height
-    sx = sobel(height, axis=1)
-    sy = sobel(height, axis=0)
+    sx = sobel(height, axis=1);  sy = sobel(height, axis=0)
     slope = np.sqrt(sx**2 + sy**2)
 
     cost = (1.0
@@ -45,47 +48,34 @@ def _build_cost_map(terrain_maps: np.ndarray, cfg: dict) -> np.ndarray:
 
 
 def astar(cost: np.ndarray, start: tuple, goal: tuple) -> list | None:
-    """
-    A* on a cost grid. start/goal are (row, col) tuples.
-    Returns list of (row, col) from start to goal, or None if unreachable.
-    """
     rows, cols = cost.shape
-    sr, sc = start
-    gr, gc = goal
+    sr, sc = start;  gr, gc = goal
 
-    if not (0 <= sr < rows and 0 <= sc < cols):
-        return None
-    if not (0 <= gr < rows and 0 <= gc < cols):
-        return None
+    if not (0 <= sr < rows and 0 <= sc < cols): return None
+    if not (0 <= gr < rows and 0 <= gc < cols): return None
 
-    def h(r, c):
-        return math.hypot(r - gr, c - gc)
+    def h(r, c): return math.hypot(r - gr, c - gc)
 
     open_set = [(h(sr, sc), 0.0, sr, sc)]
     came_from = {}
-    g_score = {(sr, sc): 0.0}
+    g_score   = {(sr, sc): 0.0}
 
     while open_set:
         _, g, r, c = heapq.heappop(open_set)
-
         if (r, c) == (gr, gc):
             path = []
             node = (r, c)
             while node in came_from:
-                path.append(node)
-                node = came_from[node]
+                path.append(node);  node = came_from[node]
             path.append((sr, sc))
             return list(reversed(path))
-
         if g > g_score.get((r, c), float('inf')) + 1e-6:
             continue
-
         for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
             nr, nc = r + dr, c + dc
-            if not (0 <= nr < rows and 0 <= nc < cols):
-                continue
+            if not (0 <= nr < rows and 0 <= nc < cols): continue
             step = math.sqrt(2) if (dr and dc) else 1.0
-            ng = g + step * float(cost[nr, nc])
+            ng   = g + step * float(cost[nr, nc])
             if ng < g_score.get((nr, nc), float('inf')):
                 g_score[(nr, nc)] = ng
                 came_from[(nr, nc)] = (r, c)
@@ -95,16 +85,11 @@ def astar(cost: np.ndarray, start: tuple, goal: tuple) -> list | None:
 
 
 def extract_action(path: list, robot_heading: float,
-                   cfg: dict) -> tuple[float, float] | None:
+                   cfg: dict, phase: str = 'to_excavation') -> tuple[float, float, int] | None:
     """
-    Given a path (list of (row, col)) and the robot's current heading (radians),
-    look `lookahead` steps ahead and compute (left_motor, right_motor) in [0, 1].
-
-    Convention:
-      - heading 0   = +X (right in grid = +col)
-      - heading π/2 = +Y (up in grid   = -row, since row 0 is top)
-
-    Returns (left, right) both in [0, 1] with |left-right| ≤ diff_limit, or None.
+    Given a path (list of (row, col)) and robot heading (radians),
+    return (left, right, bucket) for the navigation portion of a phase.
+    Returns None if path is too short.
     """
     lookahead  = cfg['planner']['lookahead']
     diff_limit = cfg.get('robot', {}).get('diff_limit', 0.8)
@@ -113,26 +98,25 @@ def extract_action(path: list, robot_heading: float,
         return None
 
     target_idx = min(lookahead, len(path) - 1)
-    tr, tc_ = path[target_idx]
-    sr, sc  = path[0]
+    tr, tc_  = path[target_idx]
+    sr, sc   = path[0]
 
     dx = tc_ - sc
-    dy = -(tr - sr)   # negate: row ↑ = world Y ↑
+    dy = -(tr - sr)   # row ↑ = world Y ↑
 
     desired_heading = math.atan2(dy, dx)
     angular_error   = _angle_diff(desired_heading, robot_heading)
 
-    # Proportional angular mix capped to diff_limit/2 each side
     mix  = float(np.clip(angular_error / (math.pi / 2), -1.0, 1.0)) * (diff_limit / 2)
     base = float(np.clip(1.0 - 0.6 * abs(mix) / (diff_limit / 2), 0.2, 1.0))
 
-    left  = float(np.clip(base - mix, 0.0, 1.0))
-    right = float(np.clip(base + mix, 0.0, 1.0))
-    return left, right
+    left   = float(np.clip(base - mix, 0.0, 1.0))
+    right  = float(np.clip(base + mix, 0.0, 1.0))
+    bucket = _BUCKET_FOR_PHASE.get(phase, 0)
+    return left, right, bucket
 
 
 def _angle_diff(a: float, b: float) -> float:
-    """Signed difference a - b wrapped to [-π, π]."""
     d = a - b
     while d >  math.pi: d -= 2 * math.pi
     while d < -math.pi: d += 2 * math.pi
@@ -140,28 +124,39 @@ def _angle_diff(a: float, b: float) -> float:
 
 
 def plan_action(terrain_maps: np.ndarray, goal_heatmap: np.ndarray,
-                robot_heading: float, cfg: dict) -> tuple[float, float] | None:
+                robot_heading: float, cfg: dict,
+                phase: str = 'to_excavation') -> tuple[float, float, int] | None:
     """
-    Full pipeline: build cost map → find goal cell → A* → extract action.
-    terrain_maps: (4, gs, gs), goal_heatmap: (gs, gs)
-    Returns (left_motor, right_motor) in [0, 1] or None if no path found.
+    Full pipeline: build cost map → A* → extract (left, right, bucket).
+
+    For 'digging' phase: returns slow-forward + bucket=1 (no A* needed).
+    For 'dumping' phase: returns stopped + bucket=2 (no A* needed).
+    Returns None if no path found (navigation phases).
     """
-    gs = cfg['terrain']['grid_size']
+    rc = cfg.get('robot', {})
+
+    # Fixed-action phases — no navigation needed
+    if phase == 'digging':
+        spd = rc.get('digging_speed', 0.25)
+        return spd, spd, 1
+
+    if phase == 'dumping':
+        return 0.0, 0.0, 2
+
+    # Navigation phases — run A*
+    gs   = cfg['terrain']['grid_size']
     half = gs // 2
-    start = (half, half)   # robot always at centre
+    start = (half, half)
 
-    cost = _build_cost_map(terrain_maps, cfg)
-
-    # Goal = brightest cell in goal heatmap
+    cost     = _build_cost_map(terrain_maps, cfg)
     goal_idx = np.unravel_index(np.argmax(goal_heatmap), goal_heatmap.shape)
-    goal = (int(goal_idx[0]), int(goal_idx[1]))
+    goal     = (int(goal_idx[0]), int(goal_idx[1]))
 
     if goal == start or goal_heatmap[goal] < 0.05:
-        # Already at goal — stop
-        return 0.0, 0.0
+        return 0.0, 0.0, _BUCKET_FOR_PHASE.get(phase, 0)
 
     path = astar(cost, start, goal)
     if path is None or len(path) < 2:
         return None
 
-    return extract_action(path, robot_heading, cfg)
+    return extract_action(path, robot_heading, cfg, phase)
