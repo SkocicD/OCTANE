@@ -65,15 +65,9 @@ class CANDriveNode(Node):
         )
         self._status_pub = self.create_publisher(String, '/manual_ctrl/can_status', status_qos)
 
-        self._raw_pub = self.create_publisher(String, '/manual_ctrl/can_raw', qos)
-
         self._tx = None
         try:
-            tx = CANTransceiver(
-                bitrate=self.get_parameter('bitrate').value,
-                rx_callback=self._on_can_rx,
-                tx_callback=self._on_can_tx_raw,
-            )
+            tx = CANTransceiver(bitrate=self.get_parameter('bitrate').value)
             self._tx = tx
             for nid in ALL_IDS:
                 m = MotorController(nid, tx)
@@ -99,18 +93,6 @@ class CANDriveNode(Node):
         msg = String()
         msg.data = text
         self._status_pub.publish(msg)
-
-    def _publish_raw(self, direction: str, can_id: int, data: bytes):
-        hex_bytes = ' '.join(f'{b:02X}' for b in data)
-        msg = String()
-        msg.data = f'{direction} 0x{can_id:03X} {len(data):02d} {hex_bytes}'
-        self._raw_pub.publish(msg)
-
-    def _on_can_rx(self, can_id: int, data: bytes):
-        self._publish_raw('RX', can_id, data)
-
-    def _on_can_tx_raw(self, can_id: int, data: bytes):
-        self._publish_raw('TX', can_id, data)
 
     def _on_state(self, msg: String):
         was = self._manual
