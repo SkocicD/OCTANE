@@ -543,17 +543,17 @@ button:hover { background: #30363d; }
 </footer>
 
 <script>
-// ── Constants injected server-side ────────────────────────────────────────────
-const V_MAX       = /*V_MAX*/0.652;
-const WHEEL_BASE  = /*WHEEL_BASE*/0.483;
-const ROBOT_W     = /*ROBOT_W*/0.75;
-const ROBOT_L     = /*ROBOT_L*/1.5;
-const PROJ_TIME   = /*PROJ_TIME*/3.0;
-const DIFF_LIMIT  = /*DIFF_LIMIT*/0.8;
-const GS          = /*GS*/60;
-const VIEW_W      = /*VIEW_W*/6.0;
-const VIEW_H      = /*VIEW_H*/6.0;
-const VIEW_L      = VIEW_H;   // alias — robot-view canvas height extent = VIEW_H
+// ── Constants (injected by Python server) ─────────────────────────────────────
+const V_MAX      = _V_MAX_;
+const WHEEL_BASE = _WHEEL_BASE_;
+const ROBOT_W    = _ROBOT_W_;
+const ROBOT_L    = _ROBOT_L_;
+const PROJ_TIME  = _PROJ_TIME_;
+const DIFF_LIMIT = _DIFF_LIMIT_;
+const GS         = _GS_;
+const VIEW_W     = _VIEW_W_;
+const VIEW_H     = _VIEW_H_;
+const VIEW_L     = VIEW_H;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let scene    = null;   // full scene data (fetched once per arena)
@@ -580,7 +580,7 @@ setInterval(pollState, 100);   // 10 Hz
 // ── Render loop ───────────────────────────────────────────────────────────────
 function raf() {
   requestAnimationFrame(raf);
-  if (!state || !scene) return;
+  if (!state || !scene || state.rx == null || !scene.arena_w) return;
   drawArena();
   drawCrop();
   updateUI();
@@ -996,15 +996,15 @@ def _serve(cfg: dict, args: argparse.Namespace, phase_req: list):
 
     constants = (
         _HTML
-        .replace('/*V_MAX*/',      str(rc['v_max']))
-        .replace('/*WHEEL_BASE*/', str(rc['wheel_base']))
-        .replace('/*ROBOT_W*/',    str(rc['robot_width']))
-        .replace('/*ROBOT_L*/',    str(rc['robot_length']))
-        .replace('/*PROJ_TIME*/',  str(rc['projection_time']))
-        .replace('/*DIFF_LIMIT*/', str(rc['diff_limit']))
-        .replace('/*GS*/',         str(cfg['terrain']['grid_size']))
-        .replace('/*VIEW_W*/',     str(cfg['terrain']['view_width']))
-        .replace('/*VIEW_H*/',     str(cfg['terrain']['view_height']))
+        .replace('_V_MAX_',      str(rc['v_max']))
+        .replace('_WHEEL_BASE_', str(rc['wheel_base']))
+        .replace('_ROBOT_W_',    str(rc['robot_width']))
+        .replace('_ROBOT_L_',    str(rc['robot_length']))
+        .replace('_PROJ_TIME_',  str(rc['projection_time']))
+        .replace('_DIFF_LIMIT_', str(rc['diff_limit']))
+        .replace('_GS_',         str(cfg['terrain']['grid_size']))
+        .replace('_VIEW_W_',     str(cfg['terrain']['view_width']))
+        .replace('_VIEW_H_',     str(cfg['terrain']['view_height']))
     )
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -1022,18 +1022,6 @@ def _serve(cfg: dict, args: argparse.Namespace, phase_req: list):
             elif path == '/api/state':
                 with _sim_lock:
                     s = dict(_sim_state)
-                # Add crop data to state
-                if s:
-                    try:
-                        from training_nav.arena import crop_robot_view, build_goal_heatmap
-                        from training_nav.arena import generate_arena, build_terrain_maps
-                        # We need the current terrain — pull from scene
-                        with _sim_lock:
-                            sc = dict(_sim_scene)
-                        # We can't easily re-get the terrain here; include crop in sim state
-                        pass
-                    except Exception:
-                        pass
                 self._send_json(s)
 
             elif path == '/api/scene':
@@ -1093,11 +1081,14 @@ def main():
 
     phase_req = [args.phase]
 
-    sim_thread = threading.Thread(
-        target=_sim_loop,
-        args=(cfg, args.checkpoint, args.seed, phase_req),
-        daemon=True,
-    )
+    def _sim_loop_guarded():
+        try:
+            _sim_loop(cfg, args.checkpoint, args.seed, phase_req)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    sim_thread = threading.Thread(target=_sim_loop_guarded, daemon=True)
     sim_thread.start()
     _serve(cfg, args, phase_req)
 
