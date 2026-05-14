@@ -70,8 +70,7 @@ echo    Visualize arenas/model:    visualize_nav.bat
 echo                               python training_nav/visualize.py --seed 42
 echo.
 echo  Prerequisites for a new machine:
-echo    1. Python 3.10+      https://python.org
-echo    2. Git               https://git-scm.com
-echo    3. NVIDIA driver 527+ https://nvidia.com/drivers  (for GPU training)
+echo    1. Python 3.10+       https://python.org
+echo    2. NVIDIA driver 527+ https://nvidia.com/drivers  (for GPU training)
 echo.
 pause
