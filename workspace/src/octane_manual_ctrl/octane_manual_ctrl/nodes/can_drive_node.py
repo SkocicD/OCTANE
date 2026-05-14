@@ -65,8 +65,10 @@ class CANDriveNode(Node):
         )
         self._status_pub = self.create_publisher(String, '/manual_ctrl/can_status', status_qos)
 
+        self._tx = None
         try:
             tx = CANTransceiver(bitrate=self.get_parameter('bitrate').value)
+            self._tx = tx
             for nid in ALL_IDS:
                 m = MotorController(nid, tx)
                 m.turn_on()
@@ -168,6 +170,11 @@ class CANDriveNode(Node):
         for m in self._motors:
             try:
                 m.stop()
+            except Exception:
+                pass
+        if hasattr(self, '_tx') and self._tx is not None:
+            try:
+                self._tx.shutdown()
             except Exception:
                 pass
 

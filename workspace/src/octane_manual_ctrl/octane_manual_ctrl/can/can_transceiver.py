@@ -33,3 +33,9 @@ class CANTransceiver:
 
     def send(self, can_id: int, data: bytes):
         self._dev.send(GsUsbFrame(can_id=can_id, data=data))
+
+    def shutdown(self):
+        try:
+            self._dev.stop()
+        except Exception:
+            pass

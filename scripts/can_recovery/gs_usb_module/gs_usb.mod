@@ -1,0 +1,1 @@
+/media/csulunabotics/SSD2/OCTANE/gs_usb_module/gs_usb.o

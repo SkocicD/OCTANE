@@ -1,0 +1,55 @@
+#!/bin/bash
+# Soft-replug the gs_usb CAN transceiver and bring up the interface.
+# Uses the USB driver unbind/bind sysfs interface (Jetson-recommended approach).
+# Must run as root (called via sudo from launch_system.sh).
+
+VID="1d50"
+PID="606f"
+BITRATE="${1:-1000000}"
+
+# Find the USB device sysfs path
+SYSFS_PATH=""
+for d in /sys/bus/usb/devices/*/; do
+    [ "$(cat ${d}idVendor 2>/dev/null)" = "$VID" ] || continue
+    [ "$(cat ${d}idProduct 2>/dev/null)" = "$PID" ] || continue
+    SYSFS_PATH="$d"
+    break
+done
+
+if [ -z "$SYSFS_PATH" ]; then
+    echo "[ERROR] CAN transceiver (${VID}:${PID}) not found on USB bus — physically replug it" >&2
+    exit 1
+fi
+
+DEV_ID=$(basename "$SYSFS_PATH")
+echo "[CAN] Unbinding ${DEV_ID}..."
+echo "$DEV_ID" > /sys/bus/usb/drivers/usb/unbind
+sleep 1
+
+echo "[CAN] Binding ${DEV_ID}..."
+echo "$DEV_ID" > /sys/bus/usb/drivers/usb/bind
+sleep 2
+
+# Find the gs_usb-backed CAN interface (not the onboard mttcan can0/can1)
+CAN_IFACE=""
+for i in $(seq 1 20); do
+    for iface in /sys/class/net/can*/; do
+        driver=$(readlink -f "${iface}device/driver" 2>/dev/null | xargs basename 2>/dev/null)
+        if [ "$driver" = "gs_usb" ]; then
+            CAN_IFACE=$(basename "$iface")
+            break 2
+        fi
+    done
+    sleep 0.5
+done
+
+if [ -z "$CAN_IFACE" ]; then
+    echo "[ERROR] gs_usb CAN interface did not appear after bind" >&2
+    exit 1
+fi
+
+echo "[CAN] Bringing up ${CAN_IFACE} at ${BITRATE} bps..."
+ip link set "$CAN_IFACE" down 2>/dev/null || true
+ip link set "$CAN_IFACE" type can bitrate "$BITRATE"
+ip link set "$CAN_IFACE" up
+echo "[CAN] ${CAN_IFACE} is up"

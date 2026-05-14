@@ -92,22 +92,32 @@ kill_port() {
     fi
 }
 
-usb_reset_device() {
-    local vid_pid="$1"
-    local label="$2"
+usb_reset_orbbec() {
     local bus dev usbdev
-    bus=$(lsusb | grep -i "$vid_pid" | grep -oP 'Bus \K[0-9]+' | head -1)
-    dev=$(lsusb | grep -i "$vid_pid" | grep -oP 'Device \K[0-9]+' | head -1)
+    bus=$(lsusb | grep -i "2bc5:0403" | grep -oP 'Bus \K[0-9]+' | head -1)
+    dev=$(lsusb | grep -i "2bc5:0403" | grep -oP 'Device \K[0-9]+' | head -1)
     if [ -n "$bus" ] && [ -n "$dev" ]; then
         usbdev=$(printf "/dev/bus/usb/%03d/%03d" "$bus" "$dev")
         if [ -e "$usbdev" ]; then
-            python3 - "$usbdev" <<'EOF' 2>/dev/null && echo "[CLEANUP] $label USB reset OK" || true
+            python3 - "$usbdev" <<'EOF' 2>/dev/null && echo "[CLEANUP] Orbbec USB reset OK" || true
 import sys, fcntl
 with open(sys.argv[1], 'wb') as f:
     fcntl.ioctl(f, 0x5514, 0)
 EOF
         fi
     fi
+}
+
+# Find the gs_usb-backed CAN interface (not the onboard mttcan can0/can1)
+find_can_usb_iface() {
+    for iface in /sys/class/net/can*/; do
+        local driver
+        driver=$(readlink -f "${iface}device/driver" 2>/dev/null | xargs basename 2>/dev/null)
+        if [ "$driver" = "gs_usb" ]; then
+            basename "$iface"
+            return
+        fi
+    done
 }
 
 release_usb() {
@@ -125,6 +135,16 @@ release_usb() {
     done
     sleep 1
 
+    # Force-release the gs_usb CAN transceiver if any process is still holding it
+    # (can_drive_node uses libusb directly and may survive pkill)
+    for d in /sys/bus/usb/devices/*/; do
+        [ "$(cat ${d}idVendor 2>/dev/null)" = "1d50" ] || continue
+        [ "$(cat ${d}idProduct 2>/dev/null)" = "606f" ] || continue
+        BUS=$(cat ${d}busnum 2>/dev/null); DEV=$(cat ${d}devnum 2>/dev/null)
+        DEVPATH=$(printf "/dev/bus/usb/%03d/%03d" "$BUS" "$DEV")
+        fuser -k "$DEVPATH" 2>/dev/null || true
+    done
+
     # Release all serial USB devices (RS485, Arduino, ADXL345, etc.)
     for dev in /dev/ttyUSB* /dev/ttyACM* /dev/rs485_drive; do
         [ -e "$dev" ] || continue
@@ -138,35 +158,52 @@ release_usb() {
     done
 
     # USB reset for the Orbbec depth camera (OpenNI2 can leave it locked after a crash)
-    usb_reset_device "2bc5:0403" "Orbbec"
+    usb_reset_orbbec
 
-    # Bring can0 down cleanly before reset so the driver releases resources
-    sudo ip link set can0 down 2>/dev/null || true
+    # Bring the gs_usb CAN interface down — that's all that's needed.
+    # Never USB-reset the CAN transceiver; USBDEVFS_RESET crashes CANable firmware.
+    CAN_IFACE=$(find_can_usb_iface)
+    if [ -n "$CAN_IFACE" ]; then
+        sudo ip link set "$CAN_IFACE" down 2>/dev/null || true
+        echo "[CLEANUP] $CAN_IFACE down"
+    else
+        echo "[WARN] No gs_usb CAN interface found — transceiver may not be plugged in"
+    fi
 
-    # USB reset for the gs_usb CAN transceiver (1d50:606f — candleLight/CANable)
-    # After reset the device re-enumerates and udev rule 91-can-autostart.rules
-    # automatically runs: ip link set can0 type can bitrate 1000000 && ip link set can0 up
-    usb_reset_device "1d50:606f" "CAN transceiver"
-
-    sleep 1
     echo "[CLEANUP] USB release done"
+}
+
+bring_up_can() {
+    local CAN_IFACE
+    CAN_IFACE=$(find_can_usb_iface)
+    if [ -n "$CAN_IFACE" ]; then
+        sudo ip link set "$CAN_IFACE" type can bitrate 1000000 2>/dev/null || true
+        sudo ip link set "$CAN_IFACE" up 2>/dev/null || true
+        echo "[OK] $CAN_IFACE up"
+    else
+        echo "[WARN] No gs_usb CAN interface — transceiver not plugged in"
+    fi
 }
 
 case "$SUBSYSTEM" in
     supervisor)
         release_usb
+        bring_up_can
         run_launch supervisor
         ;;
     sensors)
         release_usb
+        bring_up_can
         run_launch sensors
         ;;
     perception)
         release_usb
+        bring_up_can
         run_launch perception
         ;;
     mapping)
         release_usb
+        bring_up_can
         run_launch mapping
         ;;
     network)
@@ -180,6 +217,7 @@ case "$SUBSYSTEM" in
         ;;
     all)
         release_usb
+        bring_up_can
         kill_port "${OCTANE_TCP_PORT}"
         echo "[LAUNCH] Starting all OCTANE subsystems..."
         PIDS=()

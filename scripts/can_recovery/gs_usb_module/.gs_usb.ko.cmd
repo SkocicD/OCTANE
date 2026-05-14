@@ -1,0 +1,1 @@
+cmd_/media/csulunabotics/SSD2/OCTANE/gs_usb_module/gs_usb.ko := ld -r -EL  -maarch64elf -z noexecstack --build-id=sha1  -T scripts/module.lds -o /media/csulunabotics/SSD2/OCTANE/gs_usb_module/gs_usb.ko /media/csulunabotics/SSD2/OCTANE/gs_usb_module/gs_usb.o /media/csulunabotics/SSD2/OCTANE/gs_usb_module/gs_usb.mod.o;  true
