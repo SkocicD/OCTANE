@@ -5,8 +5,9 @@ view window, the A* planned path, a Tesla-style kinematic projection arc,
 and a side panel with the robot's terrain crop + action comparison.
 
 Usage:
-  python training_nav/visualize.py
-  python training_nav/visualize.py --checkpoint training_nav/checkpoints/best.pt
+  python training_nav/visualize.py          (from repo root)
+  python visualize.py                        (from training_nav/)
+  python training_nav/visualize.py --checkpoint path/to/best.pt
   python training_nav/visualize.py --seed 42 --phase to_excavation
   python training_nav/visualize.py --port 8766
 """
@@ -860,8 +861,9 @@ def _serve(cfg: dict, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',     default='training_nav/config.yaml')
-    parser.add_argument('--checkpoint', default='training_nav/checkpoints/best.pt')
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    parser.add_argument('--config',     default=os.path.join(_script_dir, 'config.yaml'))
+    parser.add_argument('--checkpoint', default=os.path.join(_script_dir, 'checkpoints', 'best.pt'))
     parser.add_argument('--seed',       type=int, default=0)
     parser.add_argument('--phase',      default='to_excavation',
                         choices=['to_excavation', 'to_deposit'])

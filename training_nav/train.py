@@ -361,7 +361,8 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',   default='training_nav/config.yaml')
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    parser.add_argument('--config',   default=os.path.join(_script_dir, 'config.yaml'))
     parser.add_argument('--headless', action='store_true',
                         help='Skip interactive prompts — use config defaults')
     parser.add_argument('--view',     action='store_true',
@@ -371,6 +372,9 @@ def main():
     cfg = _load_cfg(args.config)
     tc  = cfg['training']
     cc  = cfg['checkpoints']
+    # Resolve checkpoints dir relative to the script, not CWD
+    if not os.path.isabs(cc['dir']):
+        cc['dir'] = os.path.join(_script_dir, cc['dir'])
 
     torch.manual_seed(tc['seed'])
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
