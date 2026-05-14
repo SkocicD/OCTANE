@@ -74,6 +74,10 @@ def generate_launch_description():
         executable='serial_actuator_node',
         name='serial_actuator_node',
         output='log',
+        parameters=[{
+            'port': '/dev/arduino_nano',  # udev symlink: 99-arduino-nano.rules (KERNELS 1-4.2.1, external USB hub)
+            'baud': 9600,
+        }],
     )
 
     actuator_debug_terminal = ExecuteProcess(
