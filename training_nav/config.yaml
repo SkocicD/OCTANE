@@ -17,6 +17,7 @@ arena:
 
 terrain:
   grid_size: 60          # cells — model always receives grid_size × grid_size
+  cell_size:  0.1        # metres per cell in the full-arena terrain map
   # Real-world view extents: calibrate these once you know what the robot
   # actually sees from its sensors. The crop is resampled to grid_size × grid_size
   # so the model input shape never changes.
@@ -34,6 +35,13 @@ planner:
   # Lookahead for action extraction (cells ahead on path)
   lookahead: 8
 
+robot:
+  # Physical geometry — 3-wheel differential drive, 14" diameter wheels
+  v_max:           0.5    # max linear speed (m/s)
+  omega_max:       1.5    # max angular speed (rad/s)  — full differential ≈ 2*v/d
+  width:           0.483  # wheel-centre to wheel-centre (m) — 19 in
+  projection_time: 3.0    # seconds ahead to project the Tesla path arc
+
 model:
   cnn_channels: [32, 64, 128]
   fc_dims: [256, 128]
@@ -46,9 +54,10 @@ training:
   weight_decay: 1.0e-4
   val_ratio: 0.1
   seed: 42
+  num_workers: 0           # set to 4 on Linux for faster data loading
   # Samples generated per epoch
-  arenas_per_epoch: 500       # random arenas generated each epoch
-  samples_per_arena: 20       # robot positions sampled per arena
+  arenas_per_epoch: 500    # random arenas generated each epoch
+  samples_per_arena: 20    # robot positions sampled per arena
   # Arena scale range (fraction of base KSC size)
   scale_min: 0.45
   scale_max: 1.0
@@ -57,4 +66,4 @@ training:
 
 checkpoints:
   dir: "training_nav/checkpoints"
-  save_every: 5
+  keep: 10                 # number of recent epoch checkpoints to retain

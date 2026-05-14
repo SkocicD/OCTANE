@@ -151,7 +151,7 @@ def build_terrain_maps(arena: ArenaConfig, cfg: dict,
         rng = np.random.default_rng()
 
     tc = cfg['terrain']
-    cs = tc['cell_size']
+    cs = tc.get('cell_size', 0.1)
 
     cols = max(1, round(arena.width  / cs))
     rows = max(1, round(arena.length / cs))
@@ -239,34 +239,37 @@ def crop_robot_view(terrain: dict, robot_x: float, robot_y: float,
     Out-of-bounds areas are filled with wall values.
     Returns (4, grid_size, grid_size) float32.
     """
-    tc   = cfg['terrain']
-    gs   = tc['grid_size']
-    csx, csy = _view_cell_size(cfg)   # metres per output cell
-    arena_cs = tc.get('cell_size', 0.1)  # metres per source cell
-    rows = terrain['rows']
-    cols = terrain['cols']
-    half = gs // 2
+    tc       = cfg['terrain']
+    gs       = tc['grid_size']
+    csx, csy = _view_cell_size(cfg)
+    arena_cs = tc.get('cell_size', 0.1)
+    rows     = terrain['rows']
+    cols     = terrain['cols']
+    half     = gs // 2
+
+    # Vectorised: build world coordinates for every output cell
+    pj = np.arange(gs)
+    pi = np.arange(gs)
+    wx = robot_x + (pj - half) * csx   # (gs,)  world-x per output column
+    wy = robot_y + (pi - half) * csy   # (gs,)  world-y per output row
+
+    ci = (wx / arena_cs).astype(np.intp)   # column indices in full terrain
+    ri = (wy / arena_cs).astype(np.intp)   # row    indices in full terrain
+
+    col_valid = (ci >= 0) & (ci < cols)
+    row_valid = (ri >= 0) & (ri < rows)
+    valid     = row_valid[:, None] & col_valid[None, :]   # (gs, gs) bool
+
+    ci_safe = np.clip(ci, 0, cols - 1)
+    ri_safe = np.clip(ri, 0, rows - 1)
 
     channels = []
     for key in ('height', 'rocks', 'craters', 'walls'):
-        full  = terrain[key]
-        patch = np.zeros((gs, gs), dtype=np.float32)
-        if key == 'walls':
-            patch[:] = 1.0
+        patch = terrain[key][np.ix_(ri_safe, ci_safe)]          # (gs, gs)
+        fill  = 1.0 if key == 'walls' else 0.0
+        channels.append(np.where(valid, patch, fill).astype(np.float32))
 
-        for pi in range(gs):
-            for pj in range(gs):
-                # World position of this output cell
-                wx = robot_x + (pj - half) * csx
-                wy = robot_y + (pi - half) * csy
-                # Source cell in full arena
-                ci = int(wx / arena_cs)
-                ri = int(wy / arena_cs)
-                if 0 <= ri < rows and 0 <= ci < cols:
-                    patch[pi, pj] = full[ri, ci]
-        channels.append(patch)
-
-    return np.stack(channels, axis=0)  # (4, gs, gs)
+    return np.stack(channels, axis=0)   # (4, gs, gs)
 
 
 def build_goal_heatmap(arena: ArenaConfig, goal_zone: Rect,
@@ -276,18 +279,19 @@ def build_goal_heatmap(arena: ArenaConfig, goal_zone: Rect,
     Uses the same view_width/view_height extents as crop_robot_view so
     the goal channel is spatially consistent with the terrain channels.
     """
-    tc   = cfg['terrain']
-    gs   = tc['grid_size']
+    tc       = cfg['terrain']
+    gs       = tc['grid_size']
     csx, csy = _view_cell_size(cfg)
-    half = gs // 2
+    half     = gs // 2
 
-    heatmap = np.zeros((gs, gs), dtype=np.float32)
-    for pi in range(gs):
-        for pj in range(gs):
-            wx = robot_x + (pj - half) * csx
-            wy = robot_y + (pi - half) * csy
-            if goal_zone.contains(wx, wy):
-                heatmap[pi, pj] = 1.0
+    pj = np.arange(gs)
+    pi = np.arange(gs)
+    wx = robot_x + (pj - half) * csx   # (gs,)
+    wy = robot_y + (pi - half) * csy   # (gs,)
+
+    in_x    = (wx >= goal_zone.x) & (wx < goal_zone.x + goal_zone.w)
+    in_y    = (wy >= goal_zone.y) & (wy < goal_zone.y + goal_zone.h)
+    heatmap = (in_y[:, None] & in_x[None, :]).astype(np.float32)   # (gs, gs)
 
     heatmap = gaussian_filter(heatmap, sigma=3.0)
     if heatmap.max() > 0:
