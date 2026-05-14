@@ -6,7 +6,8 @@ Input:
   heading:  (B, 2)  — [sin(yaw), cos(yaw)]
 
 Output:
-  (B, 2)  — [linear_vel, angular_vel], both tanh-bounded to [-1, 1]
+  (B, 2)  — [left_motor, right_motor], both sigmoid-bounded to [0, 1]
+             |left - right| ≤ diff_limit (0.8) enforced by expert supervision
 
 Architecture: lightweight CNN encoder → global average pool →
 concat with heading embedding → MLP → action head.
@@ -66,4 +67,4 @@ class NavPolicy(nn.Module):
         h = self.heading_mlp(heading)        # (B, he)
         x = torch.cat([x, h], dim=1)
         x = self.mlp(x)
-        return torch.tanh(self.action_head(x))  # (B, 2) in [-1, 1]
+        return torch.sigmoid(self.action_head(x))  # (B, 2) in [0, 1] — (left, right)

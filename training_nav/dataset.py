@@ -3,7 +3,7 @@
 Each sample:
   terrain:  (5, gs, gs) float32 — height, rocks, craters, walls, goal_heatmap
   heading:  (2,)        float32 — [sin(yaw), cos(yaw)]
-  action:   (2,)        float32 — [linear_vel, angular_vel]
+  action:   (2,)        float32 — [left_motor, right_motor] both in [0, 1]
 
 Mission phases (goal zones the robot is trained to navigate toward):
   0 — start → excavation zone entry

@@ -36,10 +36,12 @@ planner:
   lookahead: 8
 
 robot:
-  # Physical geometry — 3-wheel differential drive, 14" diameter wheels
-  v_max:           0.5    # max linear speed (m/s)
-  omega_max:       1.5    # max angular speed (rad/s)  — full differential ≈ 2*v/d
-  width:           0.483  # wheel-centre to wheel-centre (m) — 19 in
+  # Physical geometry — 3-wheel differential drive, 14" diameter wheels, 35 RPM max
+  v_max:          0.652   # 35 RPM × π × 0.3556m / 60  (m/s per wheel at full speed)
+  wheel_base:     0.483   # wheel-centre to wheel-centre (m) — 19 in
+  diff_limit:     0.8     # max |left - right|; hardware limit during differential turns
+  robot_width:    0.75    # physical robot body width (m)
+  robot_length:   1.5     # physical robot body length (m)
   projection_time: 3.0    # seconds ahead to project the Tesla path arc
 
 model:

@@ -9,8 +9,8 @@ navigation policy. The cost at each cell combines:
 
 Action extraction: looks `lookahead` cells ahead on the A* path from the
 robot's current position, computes the desired heading to that waypoint,
-then derives (linear_vel, angular_vel) from the angular error to the robot's
-current heading.
+then derives (left_motor, right_motor) in [0, 1] for differential drive.
+|left - right| is capped at diff_limit (default 0.8) per hardware constraint.
 """
 
 import heapq
@@ -98,15 +98,17 @@ def extract_action(path: list, robot_heading: float,
                    cfg: dict) -> tuple[float, float] | None:
     """
     Given a path (list of (row, col)) and the robot's current heading (radians),
-    look `lookahead` steps ahead and compute (linear_vel, angular_vel).
+    look `lookahead` steps ahead and compute (left_motor, right_motor) in [0, 1].
 
     Convention:
       - heading 0   = +X (right in grid = +col)
       - heading π/2 = +Y (up in grid   = -row, since row 0 is top)
 
-    Returns (linear_vel, angular_vel) both in [-1, 1], or None if path too short.
+    Returns (left, right) both in [0, 1] with |left-right| ≤ diff_limit, or None.
     """
-    lookahead = cfg['planner']['lookahead']
+    lookahead  = cfg['planner']['lookahead']
+    diff_limit = cfg.get('robot', {}).get('diff_limit', 0.8)
+
     if len(path) < 2:
         return None
 
@@ -114,21 +116,19 @@ def extract_action(path: list, robot_heading: float,
     tr, tc_ = path[target_idx]
     sr, sc  = path[0]
 
-    # In image coords row increases downward, so negate row difference for heading
-    dx = tc_ - sc         # +col = +X
-    dy = -(tr - sr)       # +up  = +Y (negate row diff)
+    dx = tc_ - sc
+    dy = -(tr - sr)   # negate: row ↑ = world Y ↑
 
     desired_heading = math.atan2(dy, dx)
     angular_error   = _angle_diff(desired_heading, robot_heading)
 
-    # Simple proportional mapping
-    max_angular = math.pi / 2   # cap angular vel at 90°/s equivalent
-    angular_vel = float(np.clip(angular_error / max_angular, -1.0, 1.0))
+    # Proportional angular mix capped to diff_limit/2 each side
+    mix  = float(np.clip(angular_error / (math.pi / 2), -1.0, 1.0)) * (diff_limit / 2)
+    base = float(np.clip(1.0 - 0.6 * abs(mix) / (diff_limit / 2), 0.2, 1.0))
 
-    # Reduce linear speed when turning hard
-    linear_vel = float(np.clip(1.0 - 0.6 * abs(angular_vel), 0.2, 1.0))
-
-    return linear_vel, angular_vel
+    left  = float(np.clip(base - mix, 0.0, 1.0))
+    right = float(np.clip(base + mix, 0.0, 1.0))
+    return left, right
 
 
 def _angle_diff(a: float, b: float) -> float:
@@ -144,7 +144,7 @@ def plan_action(terrain_maps: np.ndarray, goal_heatmap: np.ndarray,
     """
     Full pipeline: build cost map → find goal cell → A* → extract action.
     terrain_maps: (4, gs, gs), goal_heatmap: (gs, gs)
-    Returns (linear_vel, angular_vel) or None if no path found.
+    Returns (left_motor, right_motor) in [0, 1] or None if no path found.
     """
     gs = cfg['terrain']['grid_size']
     half = gs // 2
