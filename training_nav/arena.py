@@ -160,9 +160,13 @@ def generate_arena(cfg: dict, rng: random.Random | None = None,
                 oy = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
                 if start_zone.contains(ox, oy) or deposit_zone.contains(ox, oy):
                     continue
+                # Tight physical buffer for column; spread-based spacing for rocks/craters
                 too_close = any(
+                    math.hypot(ox - o.x, oy - o.y) < (diam / 2 + o.diameter / 2) * 1.3
+                    for o in obstacles if o.kind == 'column'
+                ) or any(
                     math.hypot(ox - o.x, oy - o.y) < (diam + o.diameter) * spread
-                    for o in obstacles
+                    for o in obstacles if o.kind != 'column'
                 )
                 if not too_close:
                     obstacles.append(Obstacle(ox, oy, diam, kind))
