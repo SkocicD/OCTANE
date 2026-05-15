@@ -420,7 +420,8 @@ def main():
     # ── Dataset ────────────────────────────────────────────────────────────────
     n_train = int(tc['arenas_per_epoch'] * tc['samples_per_arena'] * (1 - tc['val_ratio']))
     n_val   = int(tc['arenas_per_epoch'] * tc['samples_per_arena'] * tc['val_ratio'])
-    nw      = tc.get('num_workers', 0)
+    _nw_cfg = tc.get('num_workers', 0)
+    nw      = max(2, int((os.cpu_count() or 4) * 0.75)) if _nw_cfg < 0 else _nw_cfg
     pin     = torch.cuda.is_available()
 
     train_ds = NavDataset(cfg, n_train, seed=tc['seed'])
@@ -433,6 +434,7 @@ def main():
 
     print(f'  Train  : {n_train} samples/epoch')
     print(f'  Val    : {n_val} samples/epoch')
+    print(f'  Workers: {nw}')
 
     # ── Model ──────────────────────────────────────────────────────────────────
     model              = NavPolicy(cfg).to(device)

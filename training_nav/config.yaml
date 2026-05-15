@@ -76,13 +76,13 @@ training:
   weight_decay: 1.0e-4
   val_ratio: 0.1
   seed: 42
-  num_workers: 0
+  num_workers: -1          # -1 = auto (75 % of CPU cores)
   arenas_per_epoch: 500
   samples_per_arena: 20
   scale_min: 0.80          # wider range covers real-world measurement variation
   scale_max: 1.05
   grad_clip: 1.0
-  early_stop_patience: 20
+  early_stop_patience: 30
   bucket_loss_weight: 0.5  # weight of CrossEntropy bucket loss vs Huber motor loss
   arena_mix_ucf: 0.4       # fraction of training samples drawn from UCF layout
 
