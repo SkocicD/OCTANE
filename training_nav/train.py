@@ -317,8 +317,9 @@ def _save(ckpt_dir: str, epoch: int, model, optimizer, scheduler,
     epoch_path = os.path.join(ckpt_dir, f'epoch_{epoch:04d}.pt')
     torch.save(data, epoch_path)
 
-    # best.pt = always the latest checkpoint (for easy inference)
-    shutil.copy2(epoch_path, os.path.join(ckpt_dir, 'best.pt'))
+    # best.pt = only the epoch with lowest val loss
+    if val_loss <= best_val:
+        shutil.copy2(epoch_path, os.path.join(ckpt_dir, 'best.pt'))
 
     # Prune old checkpoints
     old = sorted(glob.glob(os.path.join(ckpt_dir, 'epoch_*.pt')))[:-keep]
