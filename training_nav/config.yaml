@@ -1,23 +1,38 @@
-arena:
-  # KSC Artemis 2026 base dimensions (metres)
-  base_width:  6.88
-  base_length: 5.0
-  # Zone layout as fractions of base dimensions
-  excavation_width_frac: 0.363   # 2.5 / 6.88  (left column)
-  start_length_frac:     0.400   # 2.0 / 5.0   (bottom-left start zone height)
-  deposit_length_frac:   0.300   # 1.5 / 5.0   (bottom-right construction zone height)
-  # Berm target size (metres, fixed physical size — not scaled)
-  berm_w: 1.7
-  berm_h: 0.8
-  # Column obstacle (fixed square in obstacle/nav zone)
-  column_size: 0.4               # side length of the fixed column obstacle
-  # Obstacle counts per arena (randomised ± 30%; spread across both obstacle zones)
-  rocks_mean:      4
-  craters_mean:    3
-  rock_diameter:   0.35          # 30-40 cm per spec
-  crater_diameter: 0.45          # 40-50 cm per spec
-  # Minimum obstacle spacing multiplier
-  obstacle_spread: 1.4           # minimum centre-centre = (d1+d2) * spread
+arenas:
+
+  ksc:
+    # KSC Artemis 2026 — left-column excavation, bottom-right deposit, bottom-left start
+    base_width:  6.88
+    base_length: 5.0
+    excavation_width_frac: 0.363   # 2.5 / 6.88  (left column)
+    start_length_frac:     0.400   # 2.0 / 5.0   (start zone height, bottom-left)
+    deposit_length_frac:   0.300   # 1.5 / 5.0   (deposit/construction zone height, bottom-right)
+    berm_w: 1.7
+    berm_h: 0.8
+    column_size: 0.4
+    rocks_mean:      4
+    craters_mean:    3
+    rock_diameter:   0.35
+    crater_diameter: 0.45
+    obstacle_spread: 1.4
+
+  ucf:
+    # UCF Practice Arena 2026 — upper-left excavation, bottom-left deposit, top-right start
+    base_width:  8.10
+    base_length: 4.57
+    construction_w_frac: 0.321   # 2.6 / 8.10  (bottom-left construction zone width)
+    construction_h_frac: 0.438   # 2.0 / 4.57  (construction zone height)
+    excavation_w_frac:   0.494   # 4.0 / 8.10  (upper-left excavation zone width)
+    start_w_frac:        0.247   # 2.0 / 8.10  (start zone width, from right edge)
+    start_h_frac:        0.438   # 2.0 / 4.57  (start zone height, from top edge)
+    berm_w: 1.5
+    berm_h: 0.9
+    column_size: 0.0             # no fixed column at UCF
+    rocks_mean:      4
+    craters_mean:    3
+    rock_diameter:   0.35
+    crater_diameter: 0.45
+    obstacle_spread: 1.4
 
 terrain:
   grid_size: 60          # cells — model always receives grid_size × grid_size
@@ -51,6 +66,7 @@ model:
   cnn_channels: [32, 64, 128]
   fc_dims: [256, 128]
   heading_embed_dim: 16
+  arena_embed_dim: 4       # embedding size for the arena-type scalar input
 
 training:
   epochs: 200
@@ -62,11 +78,12 @@ training:
   num_workers: 0
   arenas_per_epoch: 500
   samples_per_arena: 20
-  scale_min: 0.85          # min arena ≈ 4.25m long — robot (1.5m) has room to manoeuvre
-  scale_max: 1.0
+  scale_min: 0.80          # wider range covers real-world measurement variation
+  scale_max: 1.05
   grad_clip: 1.0
   early_stop_patience: 20
   bucket_loss_weight: 0.5  # weight of CrossEntropy bucket loss vs Huber motor loss
+  arena_mix_ucf: 0.4       # fraction of training samples drawn from UCF layout
 
 checkpoints:
   dir: "checkpoints"

@@ -1,24 +1,31 @@
 """Arena generator for Lunabotics navigation training.
 
-KSC Artemis 2026 layout (world coords: origin bottom-left, X right, Y up):
+Supports two arena layouts:
 
-  ┌──────────────┬──────────────────────────────┐  ← y = length (5 m)
+KSC Artemis 2026 (arena_type='ksc'):
+  ┌──────────────┬──────────────────────────────┐  ← y = length (~5 m)
   │              │                              │
   │  Excavation  │     Obstacle / Nav Zone      │
   │     Zone     │     (rocks, craters,         │
   │   (left col) │      column obstacle)        │
   │              │                              │
-  │  ┌─ Start ─┐ ├──────────────────────────────┤  ← y = dep_h (1.5 m)
+  │  ┌─ Start ─┐ ├──────────────────────────────┤  ← y = dep_h (~1.5 m)
   │  │  Zone   │ │    Construction / Deposit    │
   │  │ (no obs)│ │    Zone  (berm target)       │
   └──┴─────────┴─┴──────────────────────────────┘
   x=0         exc_w                           width
-              (2.5m)                         (6.88m)
 
-Start zone: bottom-left corner, no obstacles.
-Excavation zone: FULL left column (start zone is subset; obstacles only above start).
-Construction/deposit zone: bottom-right, no obstacles.
-Obstacle/nav zone: upper-right.
+UCF Practice Arena 2026 (arena_type='ucf'):
+  ┌─────────────────────┬──────────────┬───────┐  ← y = length (~4.57 m)
+  │                     │              │ Start │
+  │  Excavation Zone    │  Nav/Obs     │ Zone  │
+  │  (upper-left)       │  Zone        │ (top- │
+  │                     │              │ right)│
+  ├─────────────────────┴──────────────┴───────┤  ← y = const_h (~2.0 m)
+  │  Construction Zone  │                      │
+  │  (berm target)      │   (open / navigable) │
+  └─────────────────────┴──────────────────────┘
+  x=0                 const_w                width
 """
 
 import math
@@ -32,10 +39,10 @@ from scipy.ndimage import gaussian_filter
 
 @dataclass
 class Rect:
-    x: float   # left edge (m)
-    y: float   # bottom edge (m)
-    w: float   # width (m)
-    h: float   # height (m)
+    x: float
+    y: float
+    w: float
+    h: float
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
@@ -62,6 +69,7 @@ class ArenaConfig:
     width: float
     length: float
     scale: float
+    arena_type: str          # 'ksc' | 'ucf'
     start_zone: Rect
     excavation_zone: Rect
     nav_zone: Rect
@@ -70,74 +78,78 @@ class ArenaConfig:
     obstacles: list = field(default_factory=list)
 
 
-def generate_arena(cfg: dict, rng: random.Random | None = None) -> ArenaConfig:
-    """Build one randomised arena from config."""
+def generate_arena(cfg: dict, rng: random.Random | None = None,
+                   arena_type: str = 'ksc') -> ArenaConfig:
+    """Build one randomised arena from config for the given arena_type."""
     if rng is None:
         rng = random.Random()
 
-    ac = cfg['arena']
-    tc = cfg['training']
-
+    ac     = cfg['arenas'][arena_type]
+    tc     = cfg['training']
     scale  = rng.uniform(tc['scale_min'], tc['scale_max'])
     width  = ac['base_width']  * scale
     length = ac['base_length'] * scale
-
-    exc_w   = width  * ac['excavation_width_frac']   # ~2.5 m at scale=1
-    nav_w   = width  - exc_w                         # ~4.38 m at scale=1
-    start_h = length * ac['start_length_frac']       # ~2.0 m at scale=1
-    dep_h   = length * ac['deposit_length_frac']     # ~1.5 m at scale=1
-
-    # ── Zone rects (corrected per 2026 image) ──────────────────────────────────
-    # Start zone: bottom-left, no obstacles
-    start_zone = Rect(0, 0, exc_w, start_h)
-
-    # Excavation zone: full left column (robot can dig ONLY here)
-    excavation_zone = Rect(0, 0, exc_w, length)
-
-    # Deposit / construction zone: BOTTOM-right (not top)
-    deposit_zone = Rect(exc_w, 0, nav_w, dep_h)
-
-    # Obstacle / nav zone: upper-right (above deposit zone)
-    nav_zone = Rect(exc_w, dep_h, nav_w, length - dep_h)
-
-    # Berm target: inside deposit zone, fixed physical size clamped to zone
-    bw = min(ac['berm_w'], deposit_zone.w * 0.75)
-    bh = min(ac['berm_h'], deposit_zone.h * 0.75)
-    bx = deposit_zone.x + (deposit_zone.w - bw) / 2
-    by = deposit_zone.y + (deposit_zone.h - bh) / 2
-    berm_target = Rect(bx, by, bw, bh)
-
-    # ── Obstacles ──────────────────────────────────────────────────────────────
-    # Valid placement zones:
-    #   Left column ABOVE start zone (upper excavation area)
-    exc_upper = Rect(0, start_h, exc_w, length - start_h)
-    #   Nav/obstacle zone (upper right)
-    #   NOT in start zone, NOT in deposit/construction zone
-
-    obstacle_zones = [exc_upper, nav_zone]
     spread = ac.get('obstacle_spread', 1.4)
 
     n_rocks   = max(0, round(ac['rocks_mean']   * rng.uniform(0.7, 1.3)))
     n_craters = max(0, round(ac['craters_mean'] * rng.uniform(0.7, 1.3)))
-    obstacles: list[Obstacle] = []
 
+    if arena_type == 'ucf':
+        # UCF: construction bottom-left, excavation upper-left, start top-right
+        const_w = width  * ac['construction_w_frac']
+        const_h = length * ac['construction_h_frac']
+        exc_w   = width  * ac['excavation_w_frac']
+        st_w    = width  * ac['start_w_frac']
+        st_h    = length * ac['start_h_frac']
+
+        start_zone      = Rect(width - st_w, length - st_h, st_w, st_h)
+        excavation_zone = Rect(0, const_h, exc_w, length - const_h)
+        deposit_zone    = Rect(0, 0, const_w, const_h)
+        nav_zone        = Rect(exc_w, const_h, width - exc_w, length - const_h)
+
+        bw = min(ac['berm_w'], deposit_zone.w * 0.75)
+        bh = min(ac['berm_h'], deposit_zone.h * 0.75)
+        bx = deposit_zone.x + (deposit_zone.w - bw) / 2
+        by = deposit_zone.y + (deposit_zone.h - bh) / 2
+        berm_target = Rect(bx, by, bw, bh)
+
+        obstacle_zones = [excavation_zone, nav_zone]
+
+    else:  # ksc
+        exc_w   = width  * ac['excavation_width_frac']
+        nav_w   = width  - exc_w
+        start_h = length * ac['start_length_frac']
+        dep_h   = length * ac['deposit_length_frac']
+
+        start_zone      = Rect(0, 0, exc_w, start_h)
+        excavation_zone = Rect(0, 0, exc_w, length)
+        deposit_zone    = Rect(exc_w, 0, nav_w, dep_h)
+        nav_zone        = Rect(exc_w, dep_h, nav_w, length - dep_h)
+
+        bw = min(ac['berm_w'], deposit_zone.w * 0.75)
+        bh = min(ac['berm_h'], deposit_zone.h * 0.75)
+        bx = deposit_zone.x + (deposit_zone.w - bw) / 2
+        by = deposit_zone.y + (deposit_zone.h - bh) / 2
+        berm_target = Rect(bx, by, bw, bh)
+
+        exc_upper      = Rect(0, start_h, exc_w, length - start_h)
+        obstacle_zones = [exc_upper, nav_zone]
+
+    # ── Obstacle placement (common to both layouts) ────────────────────────────
+    obstacles: list[Obstacle] = []
     for kind, n, diam in [('rock',   n_rocks,   ac['rock_diameter']),
                            ('crater', n_craters, ac['crater_diameter'])]:
         placed, attempts = 0, 0
         while placed < n and attempts < n * 40:
             attempts += 1
-            zone = rng.choice(obstacle_zones)
+            zone   = rng.choice(obstacle_zones)
             margin = diam
             if zone.w <= 2 * margin or zone.h <= 2 * margin:
                 continue
             ox = rng.uniform(zone.x + margin, zone.x + zone.w - margin)
             oy = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
-
-            # Hard-exclude start and deposit zones
             if start_zone.contains(ox, oy) or deposit_zone.contains(ox, oy):
                 continue
-
-            # Spread enforcement
             too_close = any(
                 math.hypot(ox - o.x, oy - o.y) < (diam + o.diameter) * spread
                 for o in obstacles
@@ -146,20 +158,18 @@ def generate_arena(cfg: dict, rng: random.Random | None = None) -> ArenaConfig:
                 obstacles.append(Obstacle(ox, oy, diam, kind))
                 placed += 1
 
-    # ── Fixed column obstacle (upper obstacle zone, roughly centred) ───────────
-    col_sz = ac.get('column_size', 0.4)
-    col_x  = nav_zone.x + nav_zone.w * 0.4 + rng.uniform(-nav_zone.w * 0.1, nav_zone.w * 0.1)
-    col_y  = nav_zone.y + nav_zone.h * 0.5 + rng.uniform(-nav_zone.h * 0.1, nav_zone.h * 0.1)
-    obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
+    # ── Fixed column obstacle (KSC only) ──────────────────────────────────────
+    col_sz = ac.get('column_size', 0.0)
+    if col_sz > 0:
+        col_x = nav_zone.x + nav_zone.w * 0.4 + rng.uniform(-nav_zone.w * 0.1, nav_zone.w * 0.1)
+        col_y = nav_zone.y + nav_zone.h * 0.5 + rng.uniform(-nav_zone.h * 0.1, nav_zone.h * 0.1)
+        obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
 
     return ArenaConfig(
-        width=width, length=length, scale=scale,
-        start_zone=start_zone,
-        excavation_zone=excavation_zone,
-        nav_zone=nav_zone,
-        deposit_zone=deposit_zone,
-        berm_target=berm_target,
-        obstacles=obstacles,
+        width=width, length=length, scale=scale, arena_type=arena_type,
+        start_zone=start_zone, excavation_zone=excavation_zone,
+        nav_zone=nav_zone, deposit_zone=deposit_zone,
+        berm_target=berm_target, obstacles=obstacles,
     )
 
 
