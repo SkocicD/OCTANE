@@ -735,14 +735,24 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function lerp(a, b, t)    { return a + (b - a) * t; }
 
 // ── Kinematic projection ───────────────────────────────────────────────────────
+function _boostCmds(left, right) {
+  // Scale commands up to a minimum display magnitude while preserving turn ratio.
+  const MIN = 0.22, avg = (Math.abs(left) + Math.abs(right)) / 2;
+  if (avg < 1e-3) return [MIN, MIN];
+  if (avg >= MIN)  return [left, right];
+  const s = MIN / avg;
+  return [Math.max(-1, Math.min(1, left*s)), Math.max(-1, Math.min(1, right*s))];
+}
+
 function projectArc(rx, ry, heading, left, right) {
+  const [bL, bR] = _boostCmds(left, right);
   const DT = 0.06, steps = Math.round(PROJ_TIME / DT);
   const x0 = rx + (ROBOT_L / 2) * Math.cos(heading);
   const y0 = ry + (ROBOT_L / 2) * Math.sin(heading);
   const pts = [{x: x0, y: y0}];
   let x = x0, y = y0, h = heading;
   for (let i = 0; i < steps; i++) {
-    const vL = left * V_MAX, vR = right * V_MAX;
+    const vL = bL * V_MAX, vR = bR * V_MAX;
     const v  = (vL + vR) / 2, w = (vR - vL) / WHEEL_BASE;
     x += v * Math.cos(h) * DT;
     y += v * Math.sin(h) * DT;
@@ -753,6 +763,7 @@ function projectArc(rx, ry, heading, left, right) {
 }
 
 function projectArcGrid(heading, left, right) {
+  const [bL, bR] = _boostCmds(left, right);
   const CSX = VIEW_W / GS, CSY = VIEW_H / GS;
   const DT = 0.06, steps = Math.round(PROJ_TIME / DT);
   const half = GS / 2;
@@ -761,7 +772,7 @@ function projectArcGrid(heading, left, right) {
   const pts = [{col: col0, row: row0}];
   let col = col0, row = row0, h = heading;
   for (let i = 0; i < steps; i++) {
-    const vL = left * V_MAX, vR = right * V_MAX;
+    const vL = bL * V_MAX, vR = bR * V_MAX;
     const v  = (vL + vR) / 2, w = (vR - vL) / WHEEL_BASE;
     col +=  v * Math.cos(h) * DT / CSX;
     row += -v * Math.sin(h) * DT / CSY;
@@ -907,6 +918,14 @@ function drawArena() {
     const v=Math.round(lerp(6,28,t));
     ctx.fillStyle=`rgb(${v},${v+1},${v+3})`;
     ctx.fillRect(c*cellW,(rows-1-r)*cellH,cellW+1,cellH+1);
+  }
+
+  // Wall channel — rendered the way the terrain-perception model sees it
+  for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
+    if (scene.terrain_w[r][c]>0.5) {
+      ctx.fillStyle='rgba(210,170,55,0.62)';
+      ctx.fillRect(c*cellW,(rows-1-r)*cellH,cellW+1,cellH+1);
+    }
   }
 
   // Zone overlays
@@ -1277,8 +1296,23 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
         phase_idx = 0
         phase     = _PHASE_SEQ[phase_idx]
 
-        goal_zone       = _goal_zone_for_phase(arena, phase)
-        rx, ry, heading = _sample_robot_pose(arena, phase, rng)
+        goal_zone = _goal_zone_for_phase(arena, phase)
+
+        # Always spawn in the start zone at the beginning of a new arena
+        _margin = 0.4
+        _clear  = 0.55
+        sz = arena.start_zone
+        rx, ry = sz.centre()
+        heading = rng.uniform(-math.pi, math.pi)
+        for _ in range(80):
+            _x = rng.uniform(sz.x + _margin, sz.x + sz.w - _margin)
+            _y = rng.uniform(sz.y + _margin, sz.y + sz.h - _margin)
+            if (sz.w > 2 * _margin and sz.h > 2 * _margin and
+                    all(math.hypot(_x - o.x, _y - o.y) > o.diameter / 2 + _clear
+                        for o in arena.obstacles)):
+                rx, ry = _x, _y
+                heading = rng.uniform(-math.pi, math.pi)
+                break
 
         gx, gy    = goal_zone.centre()
         goal_rc   = _world_to_cell(gx, gy, cs)
