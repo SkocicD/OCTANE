@@ -51,14 +51,15 @@ planner:
 
 robot:
   # 3-wheel differential drive, 14" diameter wheels, 35 RPM max
-  v_max:          0.652   # 35 RPM × π × 0.3556m / 60  (m/s per wheel at full speed)
-  wheel_base:     0.483   # wheel-centre spacing (m) — 19 in
-  diff_limit:     0.8     # max |left - right|; hardware limit
-  robot_width:    0.75    # physical robot body width (m)
-  robot_length:   1.5     # physical robot body length (m)
-  projection_time: 2.5    # seconds ahead to project the Tesla path arc
+  v_max:           0.652   # 35 RPM × π × 0.3556m / 60  (m/s per wheel at full speed)
+  wheel_base:      0.483   # wheel-centre spacing (m) — 19 in
+  diff_limit:      0.8     # max |left - right|; hardware limit
+  robot_width:     0.75    # physical robot body width (m)
+  robot_length:    1.5     # physical robot body length (m)
+  projection_time: 8.0     # seconds ahead to project the Tesla path arc
+  nav_speed_limit: 0.20    # max motor command for navigation phases (~7 RPM, 20% of 35 RPM)
   # Bucket states: 0=UP(travel)  1=COLLECT(digging)  2=DUMP(at berm)
-  digging_speed:  0.25    # motor command (0-1) used while bucket is down collecting
+  digging_speed:  0.12    # motor command during excavation — slower than nav for precision
   digging_steps:  38      # sim steps with bucket=1 (~4.6 s at DT=0.12)
   dumping_steps:  27      # sim steps stopped at berm with bucket=2 (~3.2 s)
 

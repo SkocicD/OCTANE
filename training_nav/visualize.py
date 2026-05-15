@@ -736,8 +736,8 @@ function lerp(a, b, t)    { return a + (b - a) * t; }
 
 // ── Kinematic projection ───────────────────────────────────────────────────────
 function _boostCmds(left, right) {
-  // Scale commands up to a minimum display magnitude while preserving turn ratio.
-  const MIN = 0.22, avg = (Math.abs(left) + Math.abs(right)) / 2;
+  // Ensure a minimum arc length for stopped/near-stopped states (dumping phase etc).
+  const MIN = 0.08, avg = (Math.abs(left) + Math.abs(right)) / 2;
   if (avg < 1e-3) return [MIN, MIN];
   if (avg >= MIN)  return [left, right];
   const s = MIN / avg;

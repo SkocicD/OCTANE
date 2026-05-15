@@ -91,8 +91,10 @@ def extract_action(path: list, robot_heading: float,
     return (left, right, bucket) for the navigation portion of a phase.
     Returns None if path is too short.
     """
+    rc         = cfg.get('robot', {})
     lookahead  = cfg['planner']['lookahead']
-    diff_limit = cfg.get('robot', {}).get('diff_limit', 0.8)
+    diff_limit = rc.get('diff_limit', 0.8)
+    nav_limit  = float(rc.get('nav_speed_limit', 1.0))
 
     if len(path) < 2:
         return None
@@ -110,8 +112,8 @@ def extract_action(path: list, robot_heading: float,
     mix  = float(np.clip(angular_error / (math.pi / 2), -1.0, 1.0)) * (diff_limit / 2)
     base = float(np.clip(1.0 - 0.6 * abs(mix) / (diff_limit / 2), 0.2, 1.0))
 
-    left   = float(np.clip(base - mix, 0.0, 1.0))
-    right  = float(np.clip(base + mix, 0.0, 1.0))
+    left   = float(np.clip((base - mix) * nav_limit, 0.0, 1.0))
+    right  = float(np.clip((base + mix) * nav_limit, 0.0, 1.0))
     bucket = _BUCKET_FOR_PHASE.get(phase, 0)
     return left, right, bucket
 
