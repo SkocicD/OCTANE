@@ -59,20 +59,23 @@ def _start_zones_for_phase(arena: ArenaConfig, phase: str) -> list[Rect]:
 
 def _sample_robot_pose(arena: ArenaConfig, phase: str,
                        rng: random.Random) -> tuple[float, float, float]:
-    """Sample a valid robot start position and random heading for the given phase."""
-    margin    = 0.4
+    """Sample a valid robot start position (clear of obstacles) for the given phase."""
+    margin     = 0.4
+    clearance  = 0.55   # min distance from robot centre to any obstacle edge
     candidates = _start_zones_for_phase(arena, phase)
 
-    for _ in range(60):
+    for _ in range(100):
         zone = rng.choice(candidates)
         if zone.w <= 2 * margin or zone.h <= 2 * margin:
             continue
         x = rng.uniform(zone.x + margin, zone.x + zone.w - margin)
         y = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
-        heading = rng.uniform(-math.pi, math.pi)
-        return x, y, heading
+        if all(math.hypot(x - o.x, y - o.y) > o.diameter / 2 + clearance
+               for o in arena.obstacles):
+            return x, y, rng.uniform(-math.pi, math.pi)
 
-    return arena.width / 2, arena.length / 2, 0.0
+    z = candidates[0]
+    return z.x + z.w / 2, z.y + z.h / 2, 0.0
 
 
 class NavDataset(Dataset):

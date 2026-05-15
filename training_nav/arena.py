@@ -135,42 +135,93 @@ def generate_arena(cfg: dict, rng: random.Random | None = None,
         exc_upper      = Rect(0, start_h, exc_w, length - start_h)
         obstacle_zones = [exc_upper, nav_zone]
 
-    # ── Obstacle placement (common to both layouts) ────────────────────────────
-    obstacles: list[Obstacle] = []
-    for kind, n, diam in [('rock',   n_rocks,   ac['rock_diameter']),
-                           ('crater', n_craters, ac['crater_diameter'])]:
-        placed, attempts = 0, 0
-        while placed < n and attempts < n * 40:
-            attempts += 1
-            zone   = rng.choice(obstacle_zones)
-            margin = diam
-            if zone.w <= 2 * margin or zone.h <= 2 * margin:
-                continue
-            ox = rng.uniform(zone.x + margin, zone.x + zone.w - margin)
-            oy = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
-            if start_zone.contains(ox, oy) or deposit_zone.contains(ox, oy):
-                continue
-            too_close = any(
-                math.hypot(ox - o.x, oy - o.y) < (diam + o.diameter) * spread
-                for o in obstacles
-            )
-            if not too_close:
-                obstacles.append(Obstacle(ox, oy, diam, kind))
-                placed += 1
+    # ── Obstacle placement + clear-path check (retry up to 8×) ────────────────
+    last_arena = None
+    for _attempt in range(8):
+        obstacles: list[Obstacle] = []
+        for kind, n, diam in [('rock',   n_rocks,   ac['rock_diameter']),
+                               ('crater', n_craters, ac['crater_diameter'])]:
+            placed, attempts = 0, 0
+            while placed < n and attempts < n * 40:
+                attempts += 1
+                zone   = rng.choice(obstacle_zones)
+                margin = diam
+                if zone.w <= 2 * margin or zone.h <= 2 * margin:
+                    continue
+                ox = rng.uniform(zone.x + margin, zone.x + zone.w - margin)
+                oy = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
+                if start_zone.contains(ox, oy) or deposit_zone.contains(ox, oy):
+                    continue
+                too_close = any(
+                    math.hypot(ox - o.x, oy - o.y) < (diam + o.diameter) * spread
+                    for o in obstacles
+                )
+                if not too_close:
+                    obstacles.append(Obstacle(ox, oy, diam, kind))
+                    placed += 1
 
-    # ── Fixed column obstacle (KSC only) ──────────────────────────────────────
-    col_sz = ac.get('column_size', 0.0)
-    if col_sz > 0:
-        col_x = nav_zone.x + nav_zone.w * 0.4 + rng.uniform(-nav_zone.w * 0.1, nav_zone.w * 0.1)
-        col_y = nav_zone.y + nav_zone.h * 0.5 + rng.uniform(-nav_zone.h * 0.1, nav_zone.h * 0.1)
-        obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
+        col_sz = ac.get('column_size', 0.0)
+        if col_sz > 0:
+            col_x = nav_zone.x + nav_zone.w * 0.4 + rng.uniform(-nav_zone.w * 0.1, nav_zone.w * 0.1)
+            col_y = nav_zone.y + nav_zone.h * 0.5 + rng.uniform(-nav_zone.h * 0.1, nav_zone.h * 0.1)
+            obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
 
-    return ArenaConfig(
-        width=width, length=length, scale=scale, arena_type=arena_type,
-        start_zone=start_zone, excavation_zone=excavation_zone,
-        nav_zone=nav_zone, deposit_zone=deposit_zone,
-        berm_target=berm_target, obstacles=obstacles,
-    )
+        candidate = ArenaConfig(
+            width=width, length=length, scale=scale, arena_type=arena_type,
+            start_zone=start_zone, excavation_zone=excavation_zone,
+            nav_zone=nav_zone, deposit_zone=deposit_zone,
+            berm_target=berm_target, obstacles=obstacles,
+        )
+        last_arena = candidate
+        if _has_clear_corridors(candidate):
+            return candidate
+
+    return last_arena
+
+
+def _has_clear_corridors(arena: ArenaConfig, robot_clearance: float = 0.45) -> bool:
+    """BFS check that start→excavation and excavation→deposit corridors are navigable."""
+    cs   = 0.15
+    cols = max(1, int(arena.width  / cs) + 2)
+    rows = max(1, int(arena.length / cs) + 2)
+
+    blocked = [[False] * cols for _ in range(rows)]
+    for obs in arena.obstacles:
+        r  = obs.diameter / 2 + robot_clearance
+        cx = int(obs.x / cs)
+        cy = int(obs.y / cs)
+        rc = int(r / cs) + 1
+        for dr in range(-rc, rc + 1):
+            for dc in range(-rc, rc + 1):
+                if dr * dr + dc * dc <= rc * rc:
+                    nr, nc = cy + dr, cx + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        blocked[nr][nc] = True
+
+    def can_reach(from_z: Rect, to_z: Rect) -> bool:
+        sx, sy = from_z.centre()
+        sc = (int(sy / cs), int(sx / cs))
+        if not (0 <= sc[0] < rows and 0 <= sc[1] < cols):
+            return False
+        visited = {sc}
+        q = [sc]
+        while q:
+            nq = []
+            for r, c in q:
+                if to_z.contains(c * cs, r * cs):
+                    return True
+                for dr, dc in ((-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)):
+                    nr, nc = r + dr, c + dc
+                    if (0 <= nr < rows and 0 <= nc < cols
+                            and (nr, nc) not in visited
+                            and not blocked[nr][nc]):
+                        visited.add((nr, nc))
+                        nq.append((nr, nc))
+            q = nq
+        return False
+
+    return (can_reach(arena.start_zone, arena.excavation_zone) and
+            can_reach(arena.excavation_zone, arena.deposit_zone))
 
 
 # ── Terrain map generation ────────────────────────────────────────────────────

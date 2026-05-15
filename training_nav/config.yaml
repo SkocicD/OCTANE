@@ -10,11 +10,11 @@ arenas:
     berm_w: 1.7
     berm_h: 0.8
     column_size: 0.4
-    rocks_mean:      4
-    craters_mean:    3
+    rocks_mean:      3
+    craters_mean:    2
     rock_diameter:   0.35
     crater_diameter: 0.45
-    obstacle_spread: 1.4
+    obstacle_spread: 1.6
 
   ucf:
     # UCF Practice Arena 2026 — upper-left excavation, bottom-left deposit, top-right start
@@ -28,11 +28,11 @@ arenas:
     berm_w: 1.5
     berm_h: 0.9
     column_size: 0.0             # no fixed column at UCF
-    rocks_mean:      4
-    craters_mean:    3
+    rocks_mean:      3
+    craters_mean:    2
     rock_diameter:   0.35
     crater_diameter: 0.45
-    obstacle_spread: 1.4
+    obstacle_spread: 1.6
 
 terrain:
   grid_size: 60          # cells — model always receives grid_size × grid_size
