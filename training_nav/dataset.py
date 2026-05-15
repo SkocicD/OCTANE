@@ -5,12 +5,23 @@ Each sample:
   heading:    (2,)        float32 — [sin(yaw), cos(yaw)]
   arena_type: ()          float32 — 0.0=UCF, 1.0=KSC
   action:     (3,)        float32 — [left_motor, right_motor, bucket_class(0/1/2)]
+                          motors are normalised to [-1, 1] (divide by nav_speed_limit).
 
 Mission phases (randomly sampled per episode):
   to_excavation  — navigate from start/nav zone to excavation zone   (bucket UP)
   digging        — slow forward movement in excavation zone           (bucket COLLECT)
   to_deposit     — navigate from excavation zone to berm target       (bucket UP)
   dumping        — stopped at berm zone                               (bucket DUMP)
+
+Staged curriculum (controlled by config.curriculum):
+  Stage 0  — no obstacles; robot learns pure goal-seeking.
+  Stage 1  — 1-2 obstacles; basic avoidance.
+  Stage 2  — full obstacles + DART positional noise; recovery training.
+  Stage 3  — full obstacles + heavier DART; hardening.
+
+DART (Dataset Aggregation via Random Trajectory) perturbs the robot's starting
+position with Gaussian noise so the model sees off-path recovery states without
+requiring interactive expert rollouts.
 """
 
 import math
@@ -41,8 +52,6 @@ def _start_zones_for_phase(arena: ArenaConfig, phase: str) -> list[Rect]:
     if phase == 'to_excavation':
         return [arena.start_zone, arena.nav_zone]
     elif phase == 'digging':
-        # Place robot in the excavation zone, but avoid any overlap with the start
-        # zone (KSC start sits at the bottom of the excavation column).
         ez = arena.excavation_zone
         sz = arena.start_zone
         overlaps = (sz.x < ez.x + ez.w and sz.x + sz.w > ez.x and
@@ -60,8 +69,8 @@ def _start_zones_for_phase(arena: ArenaConfig, phase: str) -> list[Rect]:
 def _sample_robot_pose(arena: ArenaConfig, phase: str,
                        rng: random.Random) -> tuple[float, float, float]:
     """Sample a valid robot start position (clear of obstacles) for the given phase."""
-    margin     = 0.4
-    clearance  = 0.55   # min distance from robot centre to any obstacle edge
+    margin    = 0.4
+    clearance = 0.55
     candidates = _start_zones_for_phase(arena, phase)
 
     for _ in range(100):
@@ -79,38 +88,88 @@ def _sample_robot_pose(arena: ArenaConfig, phase: str,
 
 
 class NavDataset(Dataset):
-    """Generates navigation samples on the fly.
+    """Generates navigation samples on the fly with a staged curriculum.
 
-    Each call to __getitem__ generates a fresh random arena (KSC or UCF,
-    sampled according to arena_mix_ucf), places the robot at a valid position
-    for the sampled phase, and returns the expert-supervised action.
+    reshuffle(epoch) must be called each epoch before iterating so that
+    workers receive fresh seeds AND the correct curriculum stage.
     """
 
     def __init__(self, cfg: dict, n_samples: int, seed: int = 0):
-        self.cfg      = cfg
-        self.n        = n_samples
-        self.base_rng = random.Random(seed)
-        self.np_rng   = np.random.default_rng(seed)
-        self._seeds   = [self.base_rng.randint(0, 2**31) for _ in range(n_samples)]
+        self.cfg       = cfg
+        self.n         = n_samples
+        self.epoch     = 0
+        self.max_epochs = cfg['training'].get('epochs', 200)
+        self._cc       = cfg.get('curriculum', {})
+        self.base_rng  = random.Random(seed)
+        self.np_rng    = np.random.default_rng(seed)
+        self._seeds    = [self.base_rng.randint(0, 2**31) for _ in range(n_samples)]
 
     def __len__(self):
         return self.n
+
+    # ── Curriculum helpers ────────────────────────────────────────────────────
+
+    def _stage(self) -> int:
+        prog = self.epoch / max(self.max_epochs, 1)
+        cc   = self._cc
+        if prog < cc.get('stage0_end', 0.15): return 0
+        if prog < cc.get('stage1_end', 0.40): return 1
+        if prog < cc.get('stage2_end', 0.75): return 2
+        return 3
+
+    def _dart_params(self, stage: int) -> tuple[float, float]:
+        cc = self._cc
+        if stage == 2:
+            return cc.get('dart_prob_s2', 0.30), cc.get('dart_std_s2', 0.18)
+        if stage == 3:
+            return cc.get('dart_prob_s3', 0.50), cc.get('dart_std_s3', 0.32)
+        return 0.0, 0.0
+
+    # ── Sample generation ─────────────────────────────────────────────────────
 
     def __getitem__(self, idx: int):
         seed   = self._seeds[idx]
         rng    = random.Random(seed)
         np_rng = np.random.default_rng(seed)
+        stage  = self._stage()
 
-        mix        = self.cfg['training'].get('arena_mix_ucf', 0.4)
-        atype      = 'ucf' if rng.random() < mix else 'ksc'
-        atype_val  = np.float32(0.0 if atype == 'ucf' else 1.0)
+        mix       = self.cfg['training'].get('arena_mix_ucf', 0.4)
+        atype     = 'ucf' if rng.random() < mix else 'ksc'
+        atype_val = np.float32(0.0 if atype == 'ucf' else 1.0)
 
-        arena   = generate_arena(self.cfg, rng, arena_type=atype)
+        arena = generate_arena(self.cfg, rng, arena_type=atype)
+
+        # ── Stage 0 / 1: prune obstacles to teach basic goal-seeking first ────
+        if stage == 0:
+            # No obstacles at all — pure goal-seeking (structural column kept)
+            arena.obstacles = [o for o in arena.obstacles if o.kind == 'column']
+        elif stage == 1:
+            # Keep column + at most 2 non-column obstacles
+            non_col = [o for o in arena.obstacles if o.kind != 'column']
+            rng.shuffle(non_col)
+            arena.obstacles = ([o for o in arena.obstacles if o.kind == 'column']
+                               + non_col[:2])
+
         terrain = build_terrain_maps(arena, self.cfg, np_rng)
 
         phase     = rng.choice(_PHASES)
         goal_zone = _goal_zone_for_phase(arena, phase)
         rx, ry, heading = _sample_robot_pose(arena, phase, rng)
+
+        # ── DART: perturb position to create recovery training states ─────────
+        dart_prob, dart_std = self._dart_params(stage)
+        if dart_prob > 0 and rng.random() < dart_prob:
+            margin = 0.4
+            for _ in range(20):
+                rx_p = rx + rng.gauss(0, dart_std)
+                ry_p = ry + rng.gauss(0, dart_std)
+                rx_p = float(np.clip(rx_p, margin, arena.width  - margin))
+                ry_p = float(np.clip(ry_p, margin, arena.length - margin))
+                clearance = 0.45
+                if all(math.hypot(rx_p - o.x, ry_p - o.y) > o.diameter / 2 + clearance
+                       for o in arena.obstacles):
+                    rx, ry = rx_p, ry_p
+                    break
 
         terrain_crop = crop_robot_view(terrain, rx, ry, self.cfg)
         goal_map     = build_goal_heatmap(arena, goal_zone, rx, ry, self.cfg)
@@ -125,8 +184,7 @@ class NavDataset(Dataset):
             action = (0.0, 0.0, 0)
 
         left, right, bucket = action
-        nav_limit = self.cfg['robot'].get('nav_speed_limit', 1.0)
-        # Normalise motors to [-1, 1] so model uses full tanh range
+        nav_limit  = self.cfg['robot'].get('nav_speed_limit', 1.0)
         action_vec = np.array([left / nav_limit, right / nav_limit, float(bucket)],
                                dtype=np.float32)
 
@@ -138,5 +196,6 @@ class NavDataset(Dataset):
         )
 
     def reshuffle(self, epoch: int):
+        self.epoch = epoch
         base = random.Random(epoch)
         self._seeds = [base.randint(0, 2**31) for _ in range(self.n)]

@@ -162,4 +162,25 @@ def plan_action(terrain_maps: np.ndarray, goal_heatmap: np.ndarray,
     if path is None or len(path) < 2:
         return None
 
-    return extract_action(path, robot_heading, cfg, phase)
+    left, right, bucket = extract_action(path, robot_heading, cfg, phase)
+
+    # Speed-aware expert: scan ahead on the planned path for obstacles.
+    # Slowing the expert here means training data teaches the policy to
+    # reduce speed near obstacles, not just route around them.
+    pc        = cfg.get('planner', {})
+    cs        = cfg['terrain']['cell_size']
+    slow_r    = float(pc.get('slow_radius', 1.0))
+    slow_min  = float(pc.get('slow_min',    0.35))
+    n_look    = max(1, int(slow_r / cs))
+    nav_limit = float(cfg.get('robot', {}).get('nav_speed_limit', 1.0))
+
+    for pr, pc_ in path[1 : n_look + 1]:
+        obs = float(terrain_maps[1][pr, pc_] + terrain_maps[2][pr, pc_])
+        if obs > 0.20:
+            # Scale inversely with obstacle intensity, floor at slow_min
+            scale = float(np.clip(1.0 - obs * 1.8, slow_min, 1.0))
+            left  = float(np.clip(left  * scale, -nav_limit, nav_limit))
+            right = float(np.clip(right * scale, -nav_limit, nav_limit))
+            break
+
+    return left, right, bucket

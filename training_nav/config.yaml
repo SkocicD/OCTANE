@@ -48,6 +48,9 @@ planner:
   rock_weight:   6.0
   wall_weight:   50.0
   lookahead: 8
+  # Speed-aware expert: slow down when the A* path passes near an obstacle
+  slow_radius:   1.0    # metres ahead on path to check for obstacles
+  slow_min:      0.35   # minimum speed multiplier when obstacle on path (never dead-stop)
 
 robot:
   # 3-wheel differential drive, 14" diameter wheels, 35 RPM max
@@ -83,8 +86,26 @@ training:
   scale_max: 1.05
   grad_clip: 1.0
   early_stop_patience: 30
-  bucket_loss_weight: 0.5  # weight of CrossEntropy bucket loss vs Huber motor loss
-  arena_mix_ucf: 0.4       # fraction of training samples drawn from UCF layout
+  bucket_loss_weight:    0.50   # weight of CrossEntropy bucket loss vs Huber motor loss
+  speed_reg_weight:      0.08   # L1 penalty on |motor output| — enforces slow driving
+  proximity_reg_weight:  0.15   # penalise forward speed when obstacles visible in crop
+  arena_mix_ucf: 0.4            # fraction of training samples drawn from UCF layout
+
+# ── Curriculum ───────────────────────────────────────────────────────────────────
+# Staged difficulty (fraction of max_epochs at which each stage begins/ends).
+# Stage 0  — empty arena, goal-seeking only (no obstacles).
+# Stage 1  — 1–2 obstacles, all phases.  Robot learns basic avoidance.
+# Stage 2  — full obstacles + DART recovery perturbations.  Core training.
+# Stage 3  — full obstacles + heavier DART.  Hardening / fine-tune.
+curriculum:
+  stage0_end:  0.15   # epochs 0 – 15 %
+  stage1_end:  0.40   # epochs 15 – 40 %
+  stage2_end:  0.75   # epochs 40 – 75 %
+  # stage 3  = 75 – 100 %
+  dart_prob_s2: 0.30  # probability of DART perturbation in stage 2
+  dart_prob_s3: 0.50  # probability of DART perturbation in stage 3
+  dart_std_s2:  0.18  # metres of Gaussian noise on robot position in stage 2
+  dart_std_s3:  0.32  # metres of Gaussian noise on robot position in stage 3
 
 checkpoints:
   dir: "checkpoints"

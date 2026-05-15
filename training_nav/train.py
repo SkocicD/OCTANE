@@ -330,7 +330,15 @@ def _save(ckpt_dir: str, epoch: int, model, optimizer, scheduler,
 def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
                optimizer, device: torch.device,
                train: bool, grad_clip: float,
-               bucket_loss_weight: float = 0.5) -> float:
+               bucket_loss_weight:   float = 0.5,
+               speed_reg_weight:     float = 0.08,
+               proximity_reg_weight: float = 0.15) -> float:
+    """One training or validation pass.
+
+    Loss = Huber(motors) + w_bucket·CE(bucket)
+         + w_speed·mean(|pred_motors|)              ← enforces slow driving
+         + w_prox·mean(max_obstacle · |pred_motors|) ← slow down near obstacles
+    """
     model.train(train)
     total = 0.0
     desc  = 'train' if train else 'val  '
@@ -345,9 +353,29 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
             action_gt  = action_gt.to(device, non_blocking=True)
 
             action_pred = model(terrain, heading, arena_type)
+
+            # Core imitation losses
             motor_loss  = criterion(action_pred[:, :2], action_gt[:, :2])
             bucket_loss = F.cross_entropy(action_pred[:, 2:], action_gt[:, 2].long())
-            loss        = motor_loss + bucket_loss_weight * bucket_loss
+
+            # Speed regularisation — penalise high absolute motor commands.
+            # Targets are normalised to [-1,1]; nav_limit maps to 1.0.
+            # This gently biases the policy toward the low-speed region.
+            speed_loss = action_pred[:, :2].abs().mean()
+
+            # Obstacle proximity penalty — terrain channels 1+2 are rocks+craters.
+            # Penalise high motor output whenever any obstacle is visible in the
+            # crop, proportional to the strongest obstacle signal.
+            # (terrain is (B, 5, gs, gs); channels: height, rocks, craters, walls, goal)
+            with torch.no_grad():
+                max_obs = (terrain[:, 1] + terrain[:, 2]).flatten(1).max(dim=1).values
+            avg_spd    = action_pred[:, :2].abs().mean(dim=1)
+            prox_loss  = (max_obs * avg_spd).mean()
+
+            loss = (motor_loss
+                    + bucket_loss_weight   * bucket_loss
+                    + speed_reg_weight     * speed_loss
+                    + proximity_reg_weight * prox_loss)
 
             if train:
                 optimizer.zero_grad()
@@ -358,7 +386,7 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
 
             lv = loss.item()
             total += lv
-            bar.set_postfix_str(f'{lv:.4f}')
+            bar.set_postfix_str(f'L={lv:.4f} spd={speed_loss.item():.3f}')
 
     return total / max(len(loader), 1)
 
@@ -438,8 +466,10 @@ def main():
 
     # ── Model ──────────────────────────────────────────────────────────────────
     model              = NavPolicy(cfg).to(device)
-    criterion          = nn.HuberLoss(delta=0.1)
-    bucket_loss_weight = tc.get('bucket_loss_weight', 0.5)
+    criterion            = nn.HuberLoss(delta=0.1)
+    bucket_loss_weight   = tc.get('bucket_loss_weight',    0.5)
+    speed_reg_weight     = tc.get('speed_reg_weight',      0.08)
+    proximity_reg_weight = tc.get('proximity_reg_weight',  0.15)
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=tc['learning_rate'],
                                   weight_decay=tc['weight_decay'])
@@ -483,10 +513,14 @@ def main():
 
         train_loss = _run_epoch(train_loader, model, criterion, optimizer,
                                 device, train=True,  grad_clip=tc['grad_clip'],
-                                bucket_loss_weight=bucket_loss_weight)
+                                bucket_loss_weight=bucket_loss_weight,
+                                speed_reg_weight=speed_reg_weight,
+                                proximity_reg_weight=proximity_reg_weight)
         val_loss   = _run_epoch(val_loader,   model, criterion, optimizer,
                                 device, train=False, grad_clip=0,
-                                bucket_loss_weight=bucket_loss_weight)
+                                bucket_loss_weight=bucket_loss_weight,
+                                speed_reg_weight=speed_reg_weight,
+                                proximity_reg_weight=proximity_reg_weight)
         scheduler.step()
 
         lr = scheduler.get_last_lr()[0]
