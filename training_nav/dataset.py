@@ -1,11 +1,11 @@
 """Navigation dataset — generates samples on the fly from random arenas.
 
-Each sample:
-  terrain:    (5, gs, gs) float32 — height, rocks, craters, walls, goal_heatmap
-  heading:    (2,)        float32 — [sin(yaw), cos(yaw)]
-  arena_type: ()          float32 — 0.0=UCF, 1.0=KSC
-  action:     (3,)        float32 — [left_motor, right_motor, bucket_class(0/1/2)]
-                          motors are normalised to [-1, 1] (divide by nav_speed_limit).
+Each sample is a sequence of T timesteps (T = cfg['model']['seq_len'], default 32):
+  terrain:    (T, 5, gs, gs) float32 — height, rocks, craters, walls, goal_heatmap
+  heading:    (T, 2)         float32 — [sin(yaw), cos(yaw)]
+  arena_type: ()             float32 — 0.0=UCF, 1.0=KSC
+  action:     (T, 3)         float32 — [left_motor, right_motor, bucket_class(0/1/2)]
+                             motors are normalised to [-1, 1] (divide by nav_speed_limit).
 
 Mission phases (randomly sampled per episode):
   to_excavation  — navigate from start/nav zone to excavation zone   (bucket UP)
@@ -171,28 +171,51 @@ class NavDataset(Dataset):
                     rx, ry = rx_p, ry_p
                     break
 
-        terrain_crop = crop_robot_view(terrain, rx, ry, self.cfg)
-        goal_map     = build_goal_heatmap(arena, goal_zone, rx, ry, self.cfg)
-        terrain_5ch  = np.concatenate(
-            [terrain_crop, goal_map[None]], axis=0
-        ).astype(np.float32)
+        seq_len   = self.cfg['model'].get('seq_len', 32)
+        nav_limit = self.cfg['robot'].get('nav_speed_limit', 1.0)
+        sim_dt    = self.cfg['training'].get('sim_dt', 0.10)
+        wb        = self.cfg['robot']['wheel_base']
 
-        heading_vec = np.array([math.sin(heading), math.cos(heading)], dtype=np.float32)
+        terrain_list = []
+        heading_list = []
+        action_list  = []
 
-        action = plan_action(terrain_crop, goal_map, heading, self.cfg, phase=phase)
-        if action is None:
-            action = (0.0, 0.0, 0)
+        for _ in range(seq_len):
+            # Record heading BEFORE update
+            heading_vec = np.array([math.sin(heading), math.cos(heading)],
+                                   dtype=np.float32)
+            heading_list.append(heading_vec)
 
-        left, right, bucket = action
-        nav_limit  = self.cfg['robot'].get('nav_speed_limit', 1.0)
-        action_vec = np.array([left / nav_limit, right / nav_limit, float(bucket)],
-                               dtype=np.float32)
+            terrain_crop = crop_robot_view(terrain, rx, ry, self.cfg)
+            goal_map     = build_goal_heatmap(arena, goal_zone, rx, ry, self.cfg)
+            terrain_5ch  = np.concatenate(
+                [terrain_crop, goal_map[None]], axis=0
+            ).astype(np.float32)
+            terrain_list.append(terrain_5ch)
+
+            action = plan_action(terrain_crop, goal_map, heading, self.cfg, phase=phase)
+            if action is None:
+                action = (0.0, 0.0, 0)
+            left, right, bucket = action
+            action_vec = np.array([left / nav_limit, right / nav_limit, float(bucket)],
+                                   dtype=np.float32)
+            action_list.append(action_vec)
+
+            # Differential-drive kinematics: advance robot pose
+            v     = (left + right) / 2.0
+            omega = (right - left) / wb
+            rx    += v * math.cos(heading) * sim_dt
+            ry    += v * math.sin(heading) * sim_dt
+            heading += omega * sim_dt
+            heading  = ((heading + math.pi) % (2 * math.pi)) - math.pi
+            rx = float(np.clip(rx, 0.2, arena.width  - 0.2))
+            ry = float(np.clip(ry, 0.2, arena.length - 0.2))
 
         return (
-            torch.from_numpy(terrain_5ch),
-            torch.from_numpy(heading_vec),
-            torch.tensor(atype_val),
-            torch.from_numpy(action_vec),
+            torch.from_numpy(np.stack(terrain_list).astype(np.float32)),   # (T, 5, gs, gs)
+            torch.from_numpy(np.stack(heading_list).astype(np.float32)),   # (T, 2)
+            torch.tensor(atype_val),                                        # scalar
+            torch.from_numpy(np.stack(action_list).astype(np.float32)),    # (T, 3)
         )
 
     def reshuffle(self, epoch: int):

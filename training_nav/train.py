@@ -355,26 +355,30 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
             arena_type = arena_type.to(device, non_blocking=True)
             action_gt  = action_gt.to(device, non_blocking=True)
 
-            action_pred = model(terrain, heading, arena_type)
+            action_pred_seq, _ = model(terrain, heading, arena_type, hidden=None)
+            # action_pred_seq: (B, T, 5)
+            motor_pred  = action_pred_seq[:, :, :2]   # (B, T, 2)
+            bucket_pred = action_pred_seq[:, :, 2:]   # (B, T, 3)
 
             # Core imitation losses
-            motor_loss  = criterion(action_pred[:, :2], action_gt[:, :2])
-            bucket_loss = F.cross_entropy(action_pred[:, 2:], action_gt[:, 2].long())
+            motor_loss  = criterion(motor_pred, action_gt[:, :, :2])
+            bucket_loss = F.cross_entropy(
+                bucket_pred.reshape(-1, 3),
+                action_gt[:, :, 2].reshape(-1).long(),
+            )
 
             # Speed FLOOR: penalise being too slow when the expert is moving.
             # This is the inverse of a speed penalty — it prevents mode collapse
             # toward zero without fighting the expert's demonstrated speed.
             # Only fires on samples where the expert commands meaningful motion.
-            with torch.no_grad():
-                moving_mask = (action_gt[:, :2].abs().mean(dim=1) > 0.15).float()
-            pred_mag   = action_pred[:, :2].abs().mean(dim=1)
-            speed_loss = (F.relu(0.30 - pred_mag) * moving_mask).mean()
+            pred_mag    = motor_pred.abs().mean(dim=-1)   # (B, T)
+            moving_mask = (action_gt[:, :, :2].abs().mean(dim=-1) > 0.15).float().detach()
+            speed_loss  = (F.relu(0.30 - pred_mag) * moving_mask).mean()
 
             # Obstacle proximity penalty — terrain channels 1+2 are rocks+craters.
             # Weight reduced (0.03) so it cannot override the imitation signal.
-            with torch.no_grad():
-                max_obs = (terrain[:, 1] + terrain[:, 2]).flatten(1).max(dim=1).values
-            prox_loss  = (max_obs * pred_mag).mean()
+            max_obs   = (terrain[:, :, 1] + terrain[:, :, 2]).flatten(2).max(dim=-1).values
+            prox_loss = (max_obs * pred_mag).mean()
 
             loss = (motor_loss
                     + bucket_loss_weight   * bucket_loss
@@ -389,7 +393,7 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
                 optimizer.step()
 
             lv  = loss.item()
-            pm  = pred_mag.mean().item()
+            pm  = pred_mag.mean().item()   # pred_mag is (B,T); scalar average
             total      += lv
             total_pmag += pm
             bar.set_postfix_str(f'L={lv:.4f} mag={pm:.3f}')

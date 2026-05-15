@@ -148,6 +148,7 @@ def _load_model(cfg: dict, checkpoint_path: str):
         ckpt   = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt['model'])
         model.eval()
+        model._hidden = None  # LSTM hidden state; reset per arena
         model._device = device
         model._cfg    = cfg
         print(f'[visualize] model loaded from {os.path.basename(checkpoint_path)}')
@@ -168,7 +169,9 @@ def _infer(model, terrain_crop: np.ndarray, goal_map: np.ndarray,
                           dtype=torch.float32).to(model._device)
         at = torch.tensor([arena_type_val], dtype=torch.float32).to(model._device)
         with torch.inference_mode():
-            out = model(t, h, at).squeeze(0).cpu().numpy()
+            out, new_hidden = model(t, h, at, hidden=model._hidden)
+            model._hidden = (new_hidden[0].detach(), new_hidden[1].detach())
+        out = out.squeeze(0).cpu().numpy()
         nav_limit = model._cfg['robot'].get('nav_speed_limit', 0.20)
         left   = float(out[0]) * nav_limit   # tanh → [-1,1], scale back to motor range
         right  = float(out[1]) * nav_limit
@@ -1258,6 +1261,8 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
         atype_val = 0.0 if atype == 'ucf' else 1.0
 
         arena   = generate_arena(cfg, rng, arena_type=atype)
+        if model is not None:
+            model._hidden = None
         terrain = build_terrain_maps(arena, cfg, np_rng)
         cost_full = _build_full_cost_map(terrain, cfg)
 

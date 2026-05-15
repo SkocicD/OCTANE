@@ -71,6 +71,8 @@ model:
   fc_dims: [256, 128]
   heading_embed_dim: 16
   arena_embed_dim: 4       # embedding size for the arena-type scalar input
+  lstm_hidden: 256         # LSTM hidden size (matches fc_dims first layer)
+  seq_len: 32              # timesteps per training sequence (~3.2 s at sim_dt=0.10)
 
 training:
   epochs: 200
@@ -90,6 +92,7 @@ training:
   speed_reg_weight:      0.01   # floor penalty — was 0.08, caused mode collapse toward zero
   proximity_reg_weight:  0.03   # was 0.15, combined with speed_reg was dominating imitation
   arena_mix_ucf: 0.4            # fraction of training samples drawn from UCF layout
+  sim_dt: 0.10              # seconds per simulation step for sequence generation
 
 # ── Curriculum ───────────────────────────────────────────────────────────────────
 # Staged difficulty (fraction of max_epochs at which each stage begins/ends).
