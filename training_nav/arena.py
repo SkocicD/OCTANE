@@ -162,8 +162,9 @@ def generate_arena(cfg: dict, rng: random.Random | None = None,
 
         col_sz = ac.get('column_size', 0.0)
         if col_sz > 0:
-            col_x = nav_zone.x + nav_zone.w * 0.4 + rng.uniform(-nav_zone.w * 0.1, nav_zone.w * 0.1)
-            col_y = nav_zone.y + nav_zone.h * 0.5 + rng.uniform(-nav_zone.h * 0.1, nav_zone.h * 0.1)
+            # Column is centered in the full arena per KSC Artemis field spec
+            col_x = width  / 2 + rng.uniform(-width  * 0.04, width  * 0.04)
+            col_y = length / 2 + rng.uniform(-length * 0.04, length * 0.04)
             obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
 
         candidate = ArenaConfig(
