@@ -337,12 +337,13 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
         bar = tqdm(loader, desc=desc, leave=False,
                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} '
                                '[{elapsed}<{remaining}  {postfix}]')
-        for terrain, heading, action_gt in bar:
-            terrain   = terrain.to(device, non_blocking=True)
-            heading   = heading.to(device, non_blocking=True)
-            action_gt = action_gt.to(device, non_blocking=True)
+        for terrain, heading, arena_type, action_gt in bar:
+            terrain    = terrain.to(device, non_blocking=True)
+            heading    = heading.to(device, non_blocking=True)
+            arena_type = arena_type.to(device, non_blocking=True)
+            action_gt  = action_gt.to(device, non_blocking=True)
 
-            action_pred = model(terrain, heading)
+            action_pred = model(terrain, heading, arena_type)
             motor_loss  = criterion(action_pred[:, :2], action_gt[:, :2])
             bucket_loss = F.cross_entropy(action_pred[:, 2:], action_gt[:, 2].long())
             loss        = motor_loss + bucket_loss_weight * bucket_loss
@@ -453,11 +454,15 @@ def main():
     if ckpt_path:
         print(f'\n  Resuming from {os.path.basename(ckpt_path)}')
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt['model'])
-        optimizer.load_state_dict(ckpt['optimizer'])
-        scheduler.load_state_dict(ckpt['scheduler'])
-        start_epoch = ckpt['epoch'] + 1
-        best_val    = ckpt.get('best_val', float('inf'))
+        try:
+            model.load_state_dict(ckpt['model'])
+            optimizer.load_state_dict(ckpt['optimizer'])
+            scheduler.load_state_dict(ckpt['scheduler'])
+            start_epoch = ckpt['epoch'] + 1
+            best_val    = ckpt.get('best_val', float('inf'))
+        except RuntimeError as e:
+            print(f'  Checkpoint incompatible (architecture changed): {e}')
+            print('  Starting from scratch.\n')
     else:
         print()
 

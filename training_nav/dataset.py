@@ -1,9 +1,10 @@
 """Navigation dataset — generates samples on the fly from random arenas.
 
 Each sample:
-  terrain:  (5, gs, gs) float32 — height, rocks, craters, walls, goal_heatmap
-  heading:  (2,)        float32 — [sin(yaw), cos(yaw)]
-  action:   (3,)        float32 — [left_motor, right_motor, bucket_class(0/1/2)]
+  terrain:    (5, gs, gs) float32 — height, rocks, craters, walls, goal_heatmap
+  heading:    (2,)        float32 — [sin(yaw), cos(yaw)]
+  arena_type: ()          float32 — 0.0=UCF, 1.0=KSC
+  action:     (3,)        float32 — [left_motor, right_motor, bucket_class(0/1/2)]
 
 Mission phases (randomly sampled per episode):
   to_excavation  — navigate from start/nav zone to excavation zone   (bucket UP)
@@ -40,10 +41,15 @@ def _start_zones_for_phase(arena: ArenaConfig, phase: str) -> list[Rect]:
     if phase == 'to_excavation':
         return [arena.start_zone, arena.nav_zone]
     elif phase == 'digging':
-        # Robot is already somewhere in the excavation zone
-        exc_upper = Rect(0, arena.start_zone.h, arena.excavation_zone.w,
-                         arena.excavation_zone.h - arena.start_zone.h)
-        return [exc_upper]
+        # Place robot in the excavation zone, but avoid any overlap with the start
+        # zone (KSC start sits at the bottom of the excavation column).
+        ez = arena.excavation_zone
+        sz = arena.start_zone
+        overlaps = (sz.x < ez.x + ez.w and sz.x + sz.w > ez.x and
+                    sz.y < ez.y + ez.h and sz.y + sz.h > ez.y)
+        y_min = max(ez.y, sz.y + sz.h) if overlaps else ez.y + ez.h * 0.1
+        inner = Rect(ez.x, y_min, ez.w, ez.y + ez.h - y_min)
+        return [inner if inner.h >= 0.5 else ez]
     elif phase == 'to_deposit':
         return [arena.excavation_zone, arena.nav_zone]
     elif phase == 'dumping':
@@ -72,9 +78,9 @@ def _sample_robot_pose(arena: ArenaConfig, phase: str,
 class NavDataset(Dataset):
     """Generates navigation samples on the fly.
 
-    Each call to __getitem__ generates a fresh random arena, placing the
-    robot at a valid position for the sampled phase, and returns the
-    expert-supervised action (left, right, bucket).
+    Each call to __getitem__ generates a fresh random arena (KSC or UCF,
+    sampled according to arena_mix_ucf), places the robot at a valid position
+    for the sampled phase, and returns the expert-supervised action.
     """
 
     def __init__(self, cfg: dict, n_samples: int, seed: int = 0):
@@ -92,7 +98,11 @@ class NavDataset(Dataset):
         rng    = random.Random(seed)
         np_rng = np.random.default_rng(seed)
 
-        arena   = generate_arena(self.cfg, rng)
+        mix        = self.cfg['training'].get('arena_mix_ucf', 0.4)
+        atype      = 'ucf' if rng.random() < mix else 'ksc'
+        atype_val  = np.float32(0.0 if atype == 'ucf' else 1.0)
+
+        arena   = generate_arena(self.cfg, rng, arena_type=atype)
         terrain = build_terrain_maps(arena, self.cfg, np_rng)
 
         phase     = rng.choice(_PHASES)
@@ -117,6 +127,7 @@ class NavDataset(Dataset):
         return (
             torch.from_numpy(terrain_5ch),
             torch.from_numpy(heading_vec),
+            torch.tensor(atype_val),
             torch.from_numpy(action_vec),
         )
 
