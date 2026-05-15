@@ -71,16 +71,19 @@ robot:
   recovery_steps:   8      # sim steps to continue backing up after entering danger zone
 
 model:
-  cnn_channels: [32, 64, 128]
-  fc_dims: [256, 128]
+  cnn_channels: [64, 128, 256, 512]   # 4-block CNN, ~4.7 M params
+  fc_dims: [512, 256, 128]
   heading_embed_dim: 16
-  arena_embed_dim: 4       # embedding size for the arena-type scalar input
-  lstm_hidden: 256         # LSTM hidden size (matches fc_dims first layer)
-  seq_len: 32              # timesteps per training sequence (~3.2 s at sim_dt=0.10)
+  arena_embed_dim: 8
+  zone_embed_dim: 8        # current arena zone (start/excavation/nav/deposit/berm/outside)
+  phase_embed_dim: 8       # learned embedding for mission phase (0-3)
+  lstm_hidden: 512
+  lstm_layers: 2           # 2-layer LSTM, ~4.2 M params
+  seq_len: 32              # base (overridden per curriculum stage)
 
 training:
   epochs: 200
-  batch_size: 256
+  batch_size: 64             # B×T ≈ 16 K frames; reduce further if OOM with stage-3 seqs
   learning_rate: 3.0e-4
   weight_decay: 1.0e-4
   val_ratio: 0.1
@@ -88,14 +91,14 @@ training:
   num_workers: -1          # -1 = auto (75 % of CPU cores)
   arenas_per_epoch: 500
   samples_per_arena: 20
-  scale_min: 0.80          # wider range covers real-world measurement variation
-  scale_max: 1.05
+  scale_min: 1.0           # fixed competition dimensions — no scale variation
+  scale_max: 1.0
   grad_clip: 1.0
   early_stop_patience: 60
   bucket_loss_weight:    0.50   # weight of CrossEntropy bucket loss vs Huber motor loss
   speed_reg_weight:      0.01   # floor penalty — was 0.08, caused mode collapse toward zero
   proximity_reg_weight:  0.03   # was 0.15, combined with speed_reg was dominating imitation
-  arena_mix_ucf: 0.4            # fraction of training samples drawn from UCF layout
+  arena_mix_ucf: 0.5            # 50/50 KSC / UCF split
   sim_dt: 0.10              # seconds per simulation step for sequence generation
 
 # ── Curriculum ───────────────────────────────────────────────────────────────────
@@ -117,8 +120,8 @@ curriculum:
   # context as the task difficulty demands it, and early-stage training stays fast.
   seq_len_s0:   8     # stage 0 — 0.8 s of history (pure goal-seeking)
   seq_len_s1:  16     # stage 1 — 1.6 s (basic obstacle awareness)
-  seq_len_s2:  64     # stage 2 — 6.4 s (DART recovery + full avoidance manoeuvres)
-  seq_len_s3: 128     # stage 3 — 12.8 s (extended segments; reduce batch_size if OOM)
+  seq_len_s2: 128     # stage 2 — 12.8 s (DART recovery + full avoidance manoeuvres)
+  seq_len_s3: 256     # stage 3 — 25.6 s (covers ~1/3 of a full 15 m+ traverse at 0.20 m/s)
 
 checkpoints:
   dir: "checkpoints"

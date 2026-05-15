@@ -33,7 +33,7 @@ from torch.utils.data import Dataset
 
 from training_nav.arena import (
     ArenaConfig, Rect, build_goal_heatmap, build_terrain_maps,
-    crop_robot_view, generate_arena,
+    crop_robot_view, current_zone, generate_arena,
 )
 from training_nav.planner import plan_action
 
@@ -41,6 +41,9 @@ from training_nav.planner import plan_action
 _PHASES = ['to_excavation', 'digging', 'to_deposit', 'dumping']
 
 _BUCKET_FOR_PHASE = {'to_excavation': 0, 'digging': 1, 'to_deposit': 0, 'dumping': 2}
+_PHASE_IDX        = {'to_excavation': 0, 'digging': 1, 'to_deposit': 2, 'dumping': 3}
+_ZONE_IDX         = {'start': 0, 'excavation': 1, 'nav': 2,
+                     'deposit': 3, 'berm_target': 4, 'outside': 5}
 
 
 def _angle_diff(a: float, b: float) -> float:
@@ -259,16 +262,19 @@ class NavDataset(Dataset):
         danger_dist = float(self.cfg['robot'].get('danger_distance',  0.55))
         recover_min = int(  self.cfg['robot'].get('recovery_steps',   8))
         recovery_cd = 0   # countdown: steps of recovery action remaining
+        phase_idx   = _PHASE_IDX.get(phase, 0)
 
         terrain_list = []
         heading_list = []
+        zone_list    = []
         action_list  = []
 
         for _ in range(seq_len):
-            # Record heading BEFORE update
+            # Record state BEFORE kinematics update
             heading_vec = np.array([math.sin(heading), math.cos(heading)],
                                    dtype=np.float32)
             heading_list.append(heading_vec)
+            zone_list.append(_ZONE_IDX.get(current_zone(arena, rx, ry), 5))
 
             terrain_crop = crop_robot_view(terrain, rx, ry, self.cfg)
             goal_map     = build_goal_heatmap(arena, goal_zone, rx, ry, self.cfg)
@@ -307,10 +313,12 @@ class NavDataset(Dataset):
             ry = float(np.clip(ry, 0.2, arena.length - 0.2))
 
         return (
-            torch.from_numpy(np.stack(terrain_list).astype(np.float32)),   # (T, 5, gs, gs)
-            torch.from_numpy(np.stack(heading_list).astype(np.float32)),   # (T, 2)
-            torch.tensor(atype_val),                                        # scalar
-            torch.from_numpy(np.stack(action_list).astype(np.float32)),    # (T, 3)
+            torch.from_numpy(np.stack(terrain_list).astype(np.float32)),         # (T, 5, gs, gs)
+            torch.from_numpy(np.stack(heading_list).astype(np.float32)),         # (T, 2)
+            torch.tensor(zone_list, dtype=torch.long),                           # (T,)
+            torch.tensor(atype_val),                                              # scalar float
+            torch.tensor(phase_idx, dtype=torch.long),                           # scalar int
+            torch.from_numpy(np.stack(action_list).astype(np.float32)),          # (T, 3)
         )
 
     def reshuffle(self, epoch: int):

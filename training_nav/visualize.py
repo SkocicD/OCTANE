@@ -42,7 +42,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from training_nav.arena import (
     build_goal_heatmap, build_terrain_maps, crop_robot_view, generate_arena,
 )
-from training_nav.dataset import _goal_zone_for_phase, _sample_robot_pose
+from training_nav.arena import current_zone as _current_zone
+from training_nav.dataset import _goal_zone_for_phase, _sample_robot_pose, _PHASE_IDX, _ZONE_IDX
 from training_nav.planner import _build_cost_map, astar, plan_action
 
 
@@ -159,21 +160,26 @@ def _load_model(cfg: dict, checkpoint_path: str):
 
 
 def _infer(model, terrain_crop: np.ndarray, goal_map: np.ndarray,
-           heading: float, phase: str, arena_type_val: float):
+           heading: float, phase: str, arena_type_val: float,
+           rx: float, ry: float, arena):
     """Run model inference; returns (left, right, bucket) or None."""
     try:
         import torch
-        t5 = np.concatenate([terrain_crop, goal_map[None]], axis=0)
-        t  = torch.from_numpy(t5).unsqueeze(0).to(model._device)
-        h  = torch.tensor([[math.sin(heading), math.cos(heading)]],
-                          dtype=torch.float32).to(model._device)
-        at = torch.tensor([arena_type_val], dtype=torch.float32).to(model._device)
+        t5  = np.concatenate([terrain_crop, goal_map[None]], axis=0)
+        t   = torch.from_numpy(t5).unsqueeze(0).to(model._device)
+        h   = torch.tensor([[math.sin(heading), math.cos(heading)]],
+                           dtype=torch.float32).to(model._device)
+        z   = torch.tensor([_ZONE_IDX.get(_current_zone(arena, rx, ry), 5)],
+                           dtype=torch.long).to(model._device)
+        at  = torch.tensor([arena_type_val], dtype=torch.float32).to(model._device)
+        ph  = torch.tensor([_PHASE_IDX.get(phase, 0)],
+                           dtype=torch.long).to(model._device)
         with torch.inference_mode():
-            out, new_hidden = model(t, h, at, hidden=model._hidden)
+            out, new_hidden = model(t, h, z, at, ph, hidden=model._hidden)
             model._hidden = (new_hidden[0].detach(), new_hidden[1].detach())
         out = out.squeeze(0).cpu().numpy()
         nav_limit = model._cfg['robot'].get('nav_speed_limit', 0.20)
-        left   = float(out[0]) * nav_limit   # tanh → [-1,1], scale back to motor range
+        left   = float(out[0]) * nav_limit
         right  = float(out[1]) * nav_limit
         bucket = int(np.argmax(out[2:]))
         return left, right, bucket
@@ -213,8 +219,9 @@ def _sim_loop(cfg: dict, checkpoint_path: str, init_seed: int):
         np_rng = np.random.default_rng(seed)
         seed  += 1
 
-        arena   = generate_arena(cfg, rng)
-        terrain = build_terrain_maps(arena, cfg, np_rng)
+        arena     = generate_arena(cfg, rng)
+        atype_val = 0.0  # KSC default for legacy sim loop
+        terrain   = build_terrain_maps(arena, cfg, np_rng)
         cost_full = _build_full_cost_map(terrain, cfg)
 
         def _rect(r):
@@ -269,7 +276,8 @@ def _sim_loop(cfg: dict, checkpoint_path: str, init_seed: int):
             terrain_crop  = crop_robot_view(terrain, rx, ry, cfg)
             goal_map      = build_goal_heatmap(arena, goal_zone, rx, ry, cfg)
             expert_action = plan_action(terrain_crop, goal_map, heading, cfg, phase=phase)
-            model_action  = (_infer(model, terrain_crop, goal_map, heading, phase)
+            model_action  = (_infer(model, terrain_crop, goal_map, heading, phase,
+                                    atype_val, rx, ry, arena)
                              if model else None)
 
             # Pick action source
@@ -1337,7 +1345,8 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
             terrain_crop  = crop_robot_view(terrain, rx, ry, cfg)
             goal_map      = build_goal_heatmap(arena, goal_zone, rx, ry, cfg)
             expert_action = plan_action(terrain_crop, goal_map, heading, cfg, phase=phase)
-            model_action  = (_infer(model, terrain_crop, goal_map, heading, phase, atype_val)
+            model_action  = (_infer(model, terrain_crop, goal_map, heading, phase, atype_val,
+                                    rx, ry, arena)
                              if model else None)
 
             raw_action = model_action if model_action is not None else expert_action

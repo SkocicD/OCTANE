@@ -349,13 +349,15 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
         bar = tqdm(loader, desc=desc, leave=False,
                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} '
                                '[{elapsed}<{remaining}  {postfix}]')
-        for terrain, heading, arena_type, action_gt in bar:
+        for terrain, heading, zone_idx, arena_type, phase_idx, action_gt in bar:
             terrain    = terrain.to(device, non_blocking=True)
             heading    = heading.to(device, non_blocking=True)
+            zone_idx   = zone_idx.to(device, non_blocking=True)
             arena_type = arena_type.to(device, non_blocking=True)
+            phase_idx  = phase_idx.to(device, non_blocking=True)
             action_gt  = action_gt.to(device, non_blocking=True)
 
-            action_pred_seq, _ = model(terrain, heading, arena_type, hidden=None)
+            action_pred_seq, _ = model(terrain, heading, zone_idx, arena_type, phase_idx, hidden=None)
             # action_pred_seq: (B, T, 5)
             motor_pred  = action_pred_seq[:, :, :2]   # (B, T, 2)
             bucket_pred = action_pred_seq[:, :, 2:]   # (B, T, 3)
