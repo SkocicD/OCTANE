@@ -13,9 +13,12 @@ Phase state machine (loops):
 Collision detection: robot body rectangle vs obstacle circles → arena reset.
 
 Usage:
-  python training_nav/visualize.py          (from repo root)
-  python visualize.py                        (from training_nav/)
+  python training_nav/visualize.py                       (from repo root)
+  python visualize.py                                    (from training_nav/)
   python training_nav/visualize.py --checkpoint path/to/best.pt
+  python training_nav/visualize.py --arena ksc           (force KSC layout)
+  python training_nav/visualize.py --arena ucf           (force UCF layout)
+  python training_nav/visualize.py --arena random        (mix both, default)
   python training_nav/visualize.py --seed 42
   python training_nav/visualize.py --port 8766
 """
@@ -143,17 +146,17 @@ def _load_model(cfg: dict, checkpoint_path: str):
 
 
 def _infer(model, terrain_crop: np.ndarray, goal_map: np.ndarray,
-           heading: float, phase: str):
+           heading: float, phase: str, arena_type_val: float):
     """Run model inference; returns (left, right, bucket) or None."""
     try:
         import torch
-        from training_nav.model import NavPolicy
         t5 = np.concatenate([terrain_crop, goal_map[None]], axis=0)
         t  = torch.from_numpy(t5).unsqueeze(0).to(model._device)
         h  = torch.tensor([[math.sin(heading), math.cos(heading)]],
                           dtype=torch.float32).to(model._device)
+        at = torch.tensor([arena_type_val], dtype=torch.float32).to(model._device)
         with torch.inference_mode():
-            out = model(t, h).squeeze(0).cpu().numpy()
+            out = model(t, h, at).squeeze(0).cpu().numpy()
         left   = float(out[0])
         right  = float(out[1])
         bucket = int(np.argmax(out[2:]))
@@ -413,6 +416,8 @@ header {
 }
 .badge-model  { background: rgba(20,140,232,.15); color: #58a6ff; border: 1px solid rgba(20,140,232,.4); }
 .badge-expert { background: rgba(255,215,0,.1);   color: #d4a820; border: 1px solid rgba(255,215,0,.3); }
+.badge-ksc    { background: rgba(46,160,67,.12);  color: #3fb950; border: 1px solid rgba(46,160,67,.35); }
+.badge-ucf    { background: rgba(255,140,0,.12);  color: #ff9800; border: 1px solid rgba(255,140,0,.35); }
 #statusDot {
   width: 7px; height: 7px; border-radius: 50%;
   background: #3fb950; box-shadow: 0 0 6px #3fb950;
@@ -558,6 +563,7 @@ button:hover { background: #30363d; }
   <div class="logo">OCT<span>A</span>NE</div>
   <span style="color:#484f58;font-size:11px">NAVIGATION POLICY</span>
   <span class="badge badge-expert" id="modeBadge">A* EXPERT</span>
+  <span class="badge badge-ksc" id="arenaBadge">KSC</span>
   <div id="statusDot"></div>
   <div class="header-right">
     <span class="hval">v <strong id="hVel">—</strong> m/s</span>
@@ -627,9 +633,10 @@ button:hover { background: #30363d; }
     <div class="panel" style="flex:1">
       <div class="panel-title">Arena info</div>
       <div class="info-grid">
+        <div class="info-item"><span class="info-key">Layout</span><span class="info-val" id="iLayout">—</span></div>
+        <div class="info-item"><span class="info-key">Scale</span><span class="info-val" id="iSc">—</span></div>
         <div class="info-item"><span class="info-key">Width</span><span class="info-val" id="iW">—</span></div>
         <div class="info-item"><span class="info-key">Length</span><span class="info-val" id="iL">—</span></div>
-        <div class="info-item"><span class="info-key">Scale</span><span class="info-val" id="iSc">—</span></div>
         <div class="info-item"><span class="info-key">Obstacles</span><span class="info-val" id="iObs">—</span></div>
         <div class="info-item"><span class="info-key">Robot X</span><span class="info-val" id="iRx">—</span></div>
         <div class="info-item"><span class="info-key">Robot Y</span><span class="info-val" id="iRy">—</span></div>
@@ -1040,10 +1047,14 @@ function updateUI() {
   if (scene) {
     const rocks  =scene.obstacles.filter(o=>o.k==='rock').length;
     const craters=scene.obstacles.filter(o=>o.k==='crater').length;
+    const atype  =(scene.arena_type||'ksc').toUpperCase();
+    document.getElementById('iLayout').textContent=atype;
     document.getElementById('iW').textContent   =scene.arena_w.toFixed(2)+' m';
     document.getElementById('iL').textContent   =scene.arena_l.toFixed(2)+' m';
     document.getElementById('iSc').textContent  =(scene.arena_scale*100).toFixed(0)+'%';
     document.getElementById('iObs').textContent =`${rocks}r ${craters}c`;
+    const ab=document.getElementById('arenaBadge');
+    ab.textContent=atype; ab.className='badge badge-'+(scene.arena_type||'ksc');
     document.getElementById('iRx').textContent  =state.rx.toFixed(2)+' m';
     document.getElementById('iRy').textContent  =state.ry.toFixed(2)+' m';
     document.getElementById('iPhase').textContent=state.phase;
@@ -1173,20 +1184,21 @@ def _serve(cfg: dict, args: argparse.Namespace):
 _reset_req = [False]
 
 
-def _sim_loop_guarded(cfg: dict, checkpoint_path: str, init_seed: int):
-    """Wrapper that restarts _sim_loop on unhandled exceptions."""
+def _sim_loop_guarded(cfg: dict, checkpoint_path: str, init_seed: int,
+                      arena_override: str | None = None):
+    """Wrapper that restarts _sim_loop_with_reset on unhandled exceptions."""
     seed = init_seed
     while True:
         try:
-            # Patch _sim_loop to honour reset requests
-            _sim_loop_with_reset(cfg, checkpoint_path, seed)
+            _sim_loop_with_reset(cfg, checkpoint_path, seed, arena_override)
         except Exception:
             traceback.print_exc()
             time.sleep(1.0)
         seed += 1
 
 
-def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int):
+def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
+                         arena_override: str | None = None):
     """Wraps _sim_loop: checks _reset_req each arena iteration."""
     rc         = cfg['robot']
     v_max      = rc['v_max']
@@ -1199,6 +1211,7 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int):
 
     dig_steps  = rc.get('digging_steps',  38)
     dump_steps = rc.get('dumping_steps',  27)
+    mix_ucf    = cfg['training'].get('arena_mix_ucf', 0.4)
 
     model = (_load_model(cfg, checkpoint_path)
              if checkpoint_path and os.path.exists(checkpoint_path) else None)
@@ -1212,7 +1225,13 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int):
         np_rng = np.random.default_rng(seed)
         seed  += 1
 
-        arena   = generate_arena(cfg, rng)
+        if arena_override:
+            atype = arena_override
+        else:
+            atype = 'ucf' if rng.random() < mix_ucf else 'ksc'
+        atype_val = 0.0 if atype == 'ucf' else 1.0
+
+        arena   = generate_arena(cfg, rng, arena_type=atype)
         terrain = build_terrain_maps(arena, cfg, np_rng)
         cost_full = _build_full_cost_map(terrain, cfg)
 
@@ -1226,6 +1245,7 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int):
                 'arena_w':     arena.width,
                 'arena_l':     arena.length,
                 'arena_scale': arena.scale,
+                'arena_type':  atype,
                 't_rows':      terrain['rows'],
                 't_cols':      terrain['cols'],
                 'cell_size':   cs,
@@ -1271,7 +1291,7 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int):
             terrain_crop  = crop_robot_view(terrain, rx, ry, cfg)
             goal_map      = build_goal_heatmap(arena, goal_zone, rx, ry, cfg)
             expert_action = plan_action(terrain_crop, goal_map, heading, cfg, phase=phase)
-            model_action  = (_infer(model, terrain_crop, goal_map, heading, phase)
+            model_action  = (_infer(model, terrain_crop, goal_map, heading, phase, atype_val)
                              if model else None)
 
             raw_action = model_action if model_action is not None else expert_action
@@ -1381,12 +1401,16 @@ def main():
     parser.add_argument('--checkpoint', default=os.path.join(_script_dir, 'checkpoints', 'best.pt'))
     parser.add_argument('--seed',       type=int, default=0)
     parser.add_argument('--port',       type=int, default=8766)
+    parser.add_argument('--arena',      choices=['ksc', 'ucf', 'random'], default='random',
+                        help='Arena layout to simulate (random mixes both per training config)')
     args = parser.parse_args()
     cfg  = _load_cfg(args.config)
 
+    arena_override = None if args.arena == 'random' else args.arena
+
     sim_thread = threading.Thread(
         target=_sim_loop_guarded,
-        args=(cfg, args.checkpoint, args.seed),
+        args=(cfg, args.checkpoint, args.seed, arena_override),
         daemon=True,
     )
     sim_thread.start()
