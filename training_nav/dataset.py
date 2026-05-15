@@ -40,6 +40,68 @@ from training_nav.planner import plan_action
 
 _PHASES = ['to_excavation', 'digging', 'to_deposit', 'dumping']
 
+_BUCKET_FOR_PHASE = {'to_excavation': 0, 'digging': 1, 'to_deposit': 0, 'dumping': 2}
+
+
+def _angle_diff(a: float, b: float) -> float:
+    d = a - b
+    while d >  math.pi: d -= 2 * math.pi
+    while d < -math.pi: d += 2 * math.pi
+    return d
+
+
+def _nearest_obstacle(rx: float, ry: float, arena) -> tuple:
+    """Return (dist_to_edge, obstacle_or_wall_tag, is_wall) for the closest hazard."""
+    min_dist = float('inf')
+    nearest  = None
+    is_wall  = False
+    for obs in arena.obstacles:
+        d = math.hypot(rx - obs.x, ry - obs.y) - obs.diameter / 2
+        if d < min_dist:
+            min_dist = d
+            nearest  = obs
+            is_wall  = False
+    for dist_to_wall, tag in [
+        (rx,                 'x_min'),
+        (arena.width  - rx,  'x_max'),
+        (ry,                 'y_min'),
+        (arena.length - ry,  'y_max'),
+    ]:
+        if dist_to_wall < min_dist:
+            min_dist = dist_to_wall
+            nearest  = tag
+            is_wall  = True
+    return min_dist, nearest, is_wall
+
+
+def _recovery_action(rx: float, ry: float, heading: float,
+                     nearest, is_wall: bool,
+                     nav_limit: float, phase: str) -> tuple:
+    """Expert recovery: steer toward the escape heading (away from obstacle/wall).
+
+    Uses the same differential-drive mixing as the A* planner so the model
+    sees consistent action structure in both normal and recovery states.
+    """
+    bucket = _BUCKET_FOR_PHASE.get(phase, 0)
+    wall_escapes = {'x_min': 0.0, 'x_max': math.pi,
+                    'y_min': math.pi / 2, 'y_max': -math.pi / 2}
+    if is_wall:
+        escape = wall_escapes.get(nearest, 0.0)
+    elif nearest is not None:
+        # Direction FROM obstacle TO robot = direction to move away
+        escape = math.atan2(ry - nearest.y, rx - nearest.x)
+    else:
+        escape = heading + math.pi
+
+    escape   = ((escape + math.pi) % (2 * math.pi)) - math.pi
+    ang_err  = _angle_diff(escape, heading)
+    ang_norm = float(np.clip(ang_err / math.pi, -1.0, 1.0))
+    mix  = ang_norm * nav_limit
+    base = float(np.clip(nav_limit * (1.0 - abs(ang_norm)), -nav_limit * 0.5, nav_limit))
+    left  = float(np.clip(base - mix, -nav_limit, nav_limit))
+    right = float(np.clip(base + mix, -nav_limit, nav_limit))
+    return left, right, bucket
+
 
 def _goal_zone_for_phase(arena: ArenaConfig, phase: str) -> Rect:
     if phase in ('to_excavation', 'digging'):
@@ -193,6 +255,10 @@ class NavDataset(Dataset):
         nav_limit = self.cfg['robot'].get('nav_speed_limit', 1.0)
         sim_dt    = self.cfg['training'].get('sim_dt', 0.10)
         wb        = self.cfg['robot']['wheel_base']
+        robot_hw    = float(self.cfg['robot'].get('robot_half_width', 0.375))
+        danger_dist = float(self.cfg['robot'].get('danger_distance',  0.55))
+        recover_min = int(  self.cfg['robot'].get('recovery_steps',   8))
+        recovery_cd = 0   # countdown: steps of recovery action remaining
 
         terrain_list = []
         heading_list = []
@@ -211,9 +277,20 @@ class NavDataset(Dataset):
             ).astype(np.float32)
             terrain_list.append(terrain_5ch)
 
-            action = plan_action(terrain_crop, goal_map, heading, self.cfg, phase=phase)
-            if action is None:
-                action = (0.0, 0.0, 0)
+            # Collision / proximity check: override A* with recovery action when
+            # the robot is inside or dangerously close to an obstacle or wall.
+            near_dist, near_obs, near_wall = _nearest_obstacle(rx, ry, arena)
+            if near_dist < robot_hw:
+                # Hard collision — commit to backing up for recover_min steps
+                recovery_cd = recover_min
+            if recovery_cd > 0 or near_dist < danger_dist:
+                action = _recovery_action(rx, ry, heading, near_obs, near_wall,
+                                          nav_limit, phase)
+                recovery_cd = max(0, recovery_cd - 1)
+            else:
+                action = plan_action(terrain_crop, goal_map, heading, self.cfg, phase=phase)
+                if action is None:
+                    action = (0.0, 0.0, _BUCKET_FOR_PHASE.get(phase, 0))
             left, right, bucket = action
             action_vec = np.array([left / nav_limit, right / nav_limit, float(bucket)],
                                    dtype=np.float32)

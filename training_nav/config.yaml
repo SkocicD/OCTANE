@@ -65,6 +65,10 @@ robot:
   digging_speed:  0.12    # motor command during excavation — slower than nav for precision
   digging_steps:  38      # sim steps with bucket=1 (~4.6 s at DT=0.12)
   dumping_steps:  27      # sim steps stopped at berm with bucket=2 (~3.2 s)
+  # Collision detection for training trajectory simulation
+  robot_half_width: 0.375  # half of 0.75 m body — collision edge threshold
+  danger_distance:  0.55   # metres to obstacle/wall edge that triggers recovery backing-up
+  recovery_steps:   8      # sim steps to continue backing up after entering danger zone
 
 model:
   cnn_channels: [32, 64, 128]
@@ -113,8 +117,8 @@ curriculum:
   # context as the task difficulty demands it, and early-stage training stays fast.
   seq_len_s0:   8     # stage 0 — 0.8 s of history (pure goal-seeking)
   seq_len_s1:  16     # stage 1 — 1.6 s (basic obstacle awareness)
-  seq_len_s2:  32     # stage 2 — 3.2 s (DART recovery needs drift context)
-  seq_len_s3:  32     # stage 3 — 3.2 s (same; increase if GPU allows)
+  seq_len_s2:  64     # stage 2 — 6.4 s (DART recovery + full avoidance manoeuvres)
+  seq_len_s3: 128     # stage 3 — 12.8 s (extended segments; reduce batch_size if OOM)
 
 checkpoints:
   dir: "checkpoints"
