@@ -85,10 +85,10 @@ training:
   scale_min: 0.80          # wider range covers real-world measurement variation
   scale_max: 1.05
   grad_clip: 1.0
-  early_stop_patience: 30
+  early_stop_patience: 60
   bucket_loss_weight:    0.50   # weight of CrossEntropy bucket loss vs Huber motor loss
-  speed_reg_weight:      0.08   # L1 penalty on |motor output| — enforces slow driving
-  proximity_reg_weight:  0.15   # penalise forward speed when obstacles visible in crop
+  speed_reg_weight:      0.01   # floor penalty — was 0.08, caused mode collapse toward zero
+  proximity_reg_weight:  0.03   # was 0.15, combined with speed_reg was dominating imitation
   arena_mix_ucf: 0.4            # fraction of training samples drawn from UCF layout
 
 # ── Curriculum ───────────────────────────────────────────────────────────────────
@@ -98,9 +98,9 @@ training:
 # Stage 2  — full obstacles + DART recovery perturbations.  Core training.
 # Stage 3  — full obstacles + heavier DART.  Hardening / fine-tune.
 curriculum:
-  stage0_end:  0.15   # epochs 0 – 15 %
-  stage1_end:  0.40   # epochs 15 – 40 %
-  stage2_end:  0.75   # epochs 40 – 75 %
+  stage0_end:  0.20   # epochs 0 – 20 %   (goal-seeking)
+  stage1_end:  0.45   # epochs 20 – 45 %  (basic avoidance)
+  stage2_end:  0.75   # epochs 45 – 75 %  (full obstacles + DART)
   # stage 3  = 75 – 100 %
   dart_prob_s2: 0.30  # probability of DART perturbation in stage 2
   dart_prob_s3: 0.50  # probability of DART perturbation in stage 3

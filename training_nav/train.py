@@ -331,16 +331,19 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
                optimizer, device: torch.device,
                train: bool, grad_clip: float,
                bucket_loss_weight:   float = 0.5,
-               speed_reg_weight:     float = 0.08,
-               proximity_reg_weight: float = 0.15) -> float:
+               speed_reg_weight:     float = 0.01,
+               proximity_reg_weight: float = 0.03) -> tuple[float, float]:
     """One training or validation pass.
 
+    Returns (mean_loss, mean_pred_magnitude).
+
     Loss = Huber(motors) + w_bucket·CE(bucket)
-         + w_speed·mean(|pred_motors|)              ← enforces slow driving
+         + w_speed·floor_penalty                   ← penalise going too slow when expert moves
          + w_prox·mean(max_obstacle · |pred_motors|) ← slow down near obstacles
     """
     model.train(train)
-    total = 0.0
+    total      = 0.0
+    total_pmag = 0.0
     desc  = 'train' if train else 'val  '
     with torch.set_grad_enabled(train):
         bar = tqdm(loader, desc=desc, leave=False,
@@ -358,19 +361,20 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
             motor_loss  = criterion(action_pred[:, :2], action_gt[:, :2])
             bucket_loss = F.cross_entropy(action_pred[:, 2:], action_gt[:, 2].long())
 
-            # Speed regularisation — penalise high absolute motor commands.
-            # Targets are normalised to [-1,1]; nav_limit maps to 1.0.
-            # This gently biases the policy toward the low-speed region.
-            speed_loss = action_pred[:, :2].abs().mean()
+            # Speed FLOOR: penalise being too slow when the expert is moving.
+            # This is the inverse of a speed penalty — it prevents mode collapse
+            # toward zero without fighting the expert's demonstrated speed.
+            # Only fires on samples where the expert commands meaningful motion.
+            with torch.no_grad():
+                moving_mask = (action_gt[:, :2].abs().mean(dim=1) > 0.15).float()
+            pred_mag   = action_pred[:, :2].abs().mean(dim=1)
+            speed_loss = (F.relu(0.30 - pred_mag) * moving_mask).mean()
 
             # Obstacle proximity penalty — terrain channels 1+2 are rocks+craters.
-            # Penalise high motor output whenever any obstacle is visible in the
-            # crop, proportional to the strongest obstacle signal.
-            # (terrain is (B, 5, gs, gs); channels: height, rocks, craters, walls, goal)
+            # Weight reduced (0.03) so it cannot override the imitation signal.
             with torch.no_grad():
                 max_obs = (terrain[:, 1] + terrain[:, 2]).flatten(1).max(dim=1).values
-            avg_spd    = action_pred[:, :2].abs().mean(dim=1)
-            prox_loss  = (max_obs * avg_spd).mean()
+            prox_loss  = (max_obs * pred_mag).mean()
 
             loss = (motor_loss
                     + bucket_loss_weight   * bucket_loss
@@ -384,11 +388,14 @@ def _run_epoch(loader: DataLoader, model: NavPolicy, criterion,
                     nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 optimizer.step()
 
-            lv = loss.item()
-            total += lv
-            bar.set_postfix_str(f'L={lv:.4f} spd={speed_loss.item():.3f}')
+            lv  = loss.item()
+            pm  = pred_mag.mean().item()
+            total      += lv
+            total_pmag += pm
+            bar.set_postfix_str(f'L={lv:.4f} mag={pm:.3f}')
 
-    return total / max(len(loader), 1)
+    n = max(len(loader), 1)
+    return total / n, total_pmag / n
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -509,22 +516,39 @@ def main():
     lrs:          list[float] = []
     t0 = time.time()
 
+    # Curriculum-guard: don't allow early stopping until all hard stages have
+    # been seen. Stage 2 ends at stage2_end fraction of config epochs.
+    _cc = cfg.get('curriculum', {})
+    curriculum_min_epoch = int(_cc.get('stage2_end', 0.75) * tc['epochs'])
+    prev_stage = -1
+
     for epoch in range(start_epoch, max_epochs + 1):
         train_ds.reshuffle(epoch)
         val_ds.epoch = epoch   # advance curriculum stage; seeds stay fixed for stable measurement
 
-        print(f'\n  [{epoch:04d}/{max_epochs}]', end='  ', flush=True)
+        # Reset no_improve counter at stage transitions so a harder stage
+        # doesn't immediately trigger early stopping.
+        cur_stage = train_ds._stage()
+        if cur_stage != prev_stage:
+            if prev_stage >= 0:
+                print(f'\n  ── Curriculum stage {prev_stage}→{cur_stage} ──')
+                no_improve = 0
+            prev_stage = cur_stage
 
-        train_loss = _run_epoch(train_loader, model, criterion, optimizer,
-                                device, train=True,  grad_clip=tc['grad_clip'],
-                                bucket_loss_weight=bucket_loss_weight,
-                                speed_reg_weight=speed_reg_weight,
-                                proximity_reg_weight=proximity_reg_weight)
-        val_loss   = _run_epoch(val_loader,   model, criterion, optimizer,
-                                device, train=False, grad_clip=0,
-                                bucket_loss_weight=bucket_loss_weight,
-                                speed_reg_weight=speed_reg_weight,
-                                proximity_reg_weight=proximity_reg_weight)
+        print(f'\n  [{epoch:04d}/{max_epochs}] stage={cur_stage}', end='  ', flush=True)
+
+        train_loss, train_pmag = _run_epoch(
+            train_loader, model, criterion, optimizer,
+            device, train=True,  grad_clip=tc['grad_clip'],
+            bucket_loss_weight=bucket_loss_weight,
+            speed_reg_weight=speed_reg_weight,
+            proximity_reg_weight=proximity_reg_weight)
+        val_loss, val_pmag = _run_epoch(
+            val_loader, model, criterion, optimizer,
+            device, train=False, grad_clip=0,
+            bucket_loss_weight=bucket_loss_weight,
+            speed_reg_weight=speed_reg_weight,
+            proximity_reg_weight=proximity_reg_weight)
         scheduler.step()
 
         lr = scheduler.get_last_lr()[0]
@@ -543,7 +567,8 @@ def main():
 
         elapsed = time.time() - t0
         print(f'train={train_loss:.4f}  val={val_loss:.4f}  '
-              f'lr={lr:.2e}  best={best_val:.4f}{marker}')
+              f'lr={lr:.2e}  best={best_val:.4f}  '
+              f'mag={val_pmag:.3f}{marker}')
 
         _update_state(
             epoch=epoch, train_loss=train_losses, val_loss=val_losses,
@@ -554,8 +579,9 @@ def main():
         _save(cc['dir'], epoch, model, optimizer, scheduler,
               val_loss, best_val, keep=keep)
 
-        if no_improve >= tc['early_stop_patience']:
-            print(f'\n  Early stop — no val improvement for {no_improve} epochs')
+        if epoch >= curriculum_min_epoch and no_improve >= tc['early_stop_patience']:
+            print(f'\n  Early stop — no val improvement for {no_improve} epochs '
+                  f'(after curriculum stage 2 complete at epoch {curriculum_min_epoch})')
             break
 
         gc.collect()

@@ -160,12 +160,12 @@ class NavDataset(Dataset):
         dart_prob, dart_std = self._dart_params(stage)
         if dart_prob > 0 and rng.random() < dart_prob:
             margin = 0.4
-            for _ in range(20):
+            for _ in range(50):
                 rx_p = rx + rng.gauss(0, dart_std)
                 ry_p = ry + rng.gauss(0, dart_std)
                 rx_p = float(np.clip(rx_p, margin, arena.width  - margin))
                 ry_p = float(np.clip(ry_p, margin, arena.length - margin))
-                clearance = 0.45
+                clearance = 0.35
                 if all(math.hypot(rx_p - o.x, ry_p - o.y) > o.diameter / 2 + clearance
                        for o in arena.obstacles):
                     rx, ry = rx_p, ry_p
