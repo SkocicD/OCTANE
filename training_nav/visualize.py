@@ -988,25 +988,32 @@ function drawCrop() {
   const W=canvas.width, H=canvas.height;
   const cW=W/GS, cH=H/GS;
   ctx.clearRect(0,0,W,H);
+  // Flip Y: crop row 0 = world south; render with row 0 at canvas bottom so north = top,
+  // matching the arena canvas convention used by projectArcGrid and drawRobotRect.
   const [hMin,hMax]=flatMinMax(state.crop_h);
   for (let r=0;r<GS;r++) for (let c=0;c<GS;c++) {
+    const cy=(GS-1-r)*cH;
     ctx.fillStyle=heatColor(state.crop_h[r][c],hMin,hMax);
-    ctx.fillRect(c*cW,r*cH,cW+.5,cH+.5);
+    ctx.fillRect(c*cW,cy,cW+.5,cH+.5);
   }
   for (let r=0;r<GS;r++) for (let c=0;c<GS;c++) {
+    const cy=(GS-1-r)*cH;
     const v=state.crop_r[r][c];
-    if(v>0.05){ctx.fillStyle=`rgba(120,120,135,${v*0.6})`;ctx.fillRect(c*cW,r*cH,cW+.5,cH+.5);}
+    if(v>0.05){ctx.fillStyle=`rgba(120,120,135,${v*0.6})`;ctx.fillRect(c*cW,cy,cW+.5,cH+.5);}
   }
   for (let r=0;r<GS;r++) for (let c=0;c<GS;c++) {
+    const cy=(GS-1-r)*cH;
     const v=state.crop_c[r][c];
-    if(v>0.05){ctx.fillStyle=`rgba(50,35,35,${v*0.7})`;ctx.fillRect(c*cW,r*cH,cW+.5,cH+.5);}
+    if(v>0.05){ctx.fillStyle=`rgba(50,35,35,${v*0.7})`;ctx.fillRect(c*cW,cy,cW+.5,cH+.5);}
   }
   for (let r=0;r<GS;r++) for (let c=0;c<GS;c++) {
-    if(state.crop_w[r][c]>0.5){ctx.fillStyle='rgba(50,50,60,0.9)';ctx.fillRect(c*cW,r*cH,cW+.5,cH+.5);}
+    const cy=(GS-1-r)*cH;
+    if(state.crop_w[r][c]>0.5){ctx.fillStyle='rgba(50,50,60,0.9)';ctx.fillRect(c*cW,cy,cW+.5,cH+.5);}
   }
   for (let r=0;r<GS;r++) for (let c=0;c<GS;c++) {
+    const cy=(GS-1-r)*cH;
     const v=state.goal_map[r][c];
-    if(v>0.02){ctx.fillStyle=`rgba(46,160,67,${v*0.45})`;ctx.fillRect(c*cW,r*cH,cW+.5,cH+.5);}
+    if(v>0.02){ctx.fillStyle=`rgba(46,160,67,${v*0.45})`;ctx.fillRect(c*cW,cy,cW+.5,cH+.5);}
   }
   const gridPts=projectArcGrid(state.heading,state.left,state.right);
   const cArcPts=gridPts.map(p=>({x:(p.col+0.5)*cW,y:(p.row+0.5)*cH}));
