@@ -9,6 +9,7 @@
 #   2. Serial    — removes brltty, udev symlinks, group permissions for Arduino + RS485
 #   3. CAN       — builds gs_usb.ko, udev auto-start rules, sudoers, octane-can-reset
 #   4. Cameras   — udev symlinks for all 5 Innomaker cams + Orbbec
+#   5. VS Code   — GNOME autostart entry (toggle VSCODE_AUTOSTART in setup_vscode.sh)
 #
 # After this completes, run build_system.sh to (re)build the ROS workspace.
 
@@ -31,10 +32,11 @@ run_step() {
     bash "${SCRIPT_DIR}/${script}"
 }
 
-run_step "1/4  mDNS (octane.local)"        setup_mdns.sh
-run_step "2/4  Serial (Arduino + RS485)"   setup_serial.sh
-run_step "3/4  CAN (gs_usb + CANable)"    setup_can.sh
-run_step "4/4  Cameras (udev symlinks)"    setup_cameras.sh
+run_step "1/5  mDNS (octane.local)"        setup_mdns.sh
+run_step "2/5  Serial (Arduino + RS485)"   setup_serial.sh
+run_step "3/5  CAN (gs_usb + CANable)"    setup_can.sh
+run_step "4/5  Cameras (udev symlinks)"    setup_cameras.sh
+run_step "5/5  VS Code autostart"          setup_vscode.sh
 
 echo ""
 echo "════════════════════════════════════════"
