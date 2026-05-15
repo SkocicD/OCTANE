@@ -473,8 +473,12 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=tc['learning_rate'],
                                   weight_decay=tc['weight_decay'])
+    # T_max is the *design* schedule length from config, not the user-entered epoch
+    # count, so the cosine decay completes over the intended window regardless of
+    # how many epochs the user requests.
+    lr_schedule_epochs = tc['epochs']
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max_epochs, eta_min=tc['learning_rate'] * 0.01
+        optimizer, T_max=lr_schedule_epochs, eta_min=tc['learning_rate'] * 0.01
     )
 
     start_epoch = 1
@@ -507,7 +511,7 @@ def main():
 
     for epoch in range(start_epoch, max_epochs + 1):
         train_ds.reshuffle(epoch)
-        val_ds.reshuffle(epoch + 10_000)
+        val_ds.epoch = epoch   # advance curriculum stage; seeds stay fixed for stable measurement
 
         print(f'\n  [{epoch:04d}/{max_epochs}]', end='  ', flush=True)
 
