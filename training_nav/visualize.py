@@ -799,8 +799,9 @@ function drawVehicleArc(ctx, pts, halfWidthPx) {
   }
   const n = pts.length;
   const grad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts[n-1].x, pts[n-1].y);
-  grad.addColorStop(0,    'rgba(20,140,232,0.85)');
-  grad.addColorStop(0.35, 'rgba(20,140,232,0.45)');
+  grad.addColorStop(0,    'rgba(20,140,232,0.80)');
+  grad.addColorStop(0.12, 'rgba(20,140,232,0.60)');
+  grad.addColorStop(0.45, 'rgba(20,140,232,0.22)');
   grad.addColorStop(1,    'rgba(20,140,232,0.00)');
   ctx.beginPath();
   ctx.moveTo(left[0].x, left[0].y);
@@ -811,9 +812,10 @@ function drawVehicleArc(ctx, pts, halfWidthPx) {
   ctx.fill();
 
   const cGrad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts[n-1].x, pts[n-1].y);
-  cGrad.addColorStop(0,   'rgba(88,166,255,0.95)');
-  cGrad.addColorStop(0.5, 'rgba(88,166,255,0.50)');
-  cGrad.addColorStop(1,   'rgba(88,166,255,0.00)');
+  cGrad.addColorStop(0,    'rgba(88,166,255,0.95)');
+  cGrad.addColorStop(0.12, 'rgba(88,166,255,0.75)');
+  cGrad.addColorStop(0.5,  'rgba(88,166,255,0.35)');
+  cGrad.addColorStop(1,    'rgba(88,166,255,0.00)');
   ctx.beginPath();
   pts.forEach((p, i) => i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
   ctx.strokeStyle = cGrad; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.stroke();
@@ -981,7 +983,7 @@ function drawArena() {
   // Tesla arc
   const arcPts=projectArc(state.rx,state.ry,state.heading,state.left,state.right);
   const cArcPts=arcPts.map(p=>w2c(p.x,p.y,W,H));
-  const halfWPx=(ROBOT_W/scene.arena_w)*W/2;
+  const halfWPx=(ROBOT_W/scene.arena_w)*W/4;
   drawVehicleArc(ctx,cArcPts,halfWPx);
 
   // Robot
@@ -1020,7 +1022,7 @@ function drawCrop() {
   }
   const gridPts=projectArcGrid(state.heading,state.left,state.right);
   const cArcPts=gridPts.map(p=>({x:(p.col+0.5)*cW,y:(p.row+0.5)*cH}));
-  const halfWPx=(GS/VIEW_W*ROBOT_W)/2*cW;
+  const halfWPx=(GS/VIEW_W*ROBOT_W)/4*cW;
   drawVehicleArc(ctx,cArcPts,halfWPx);
   const cx=(GS/2+0.5)*cW, cy=(GS/2+0.5)*cH;
   const lPx=(ROBOT_L/VIEW_L)*H, wPx=(ROBOT_W/VIEW_W)*W;

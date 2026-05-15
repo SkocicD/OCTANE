@@ -56,7 +56,7 @@ robot:
   diff_limit:      0.8     # max |left - right|; hardware limit
   robot_width:     0.75    # physical robot body width (m)
   robot_length:    1.5     # physical robot body length (m)
-  projection_time: 8.0     # seconds ahead to project the Tesla path arc
+  projection_time: 22.0    # seconds ahead to project the Tesla path arc
   nav_speed_limit: 0.20    # max motor command for navigation phases (~7 RPM, 20% of 35 RPM)
   # Bucket states: 0=UP(travel)  1=COLLECT(digging)  2=DUMP(at berm)
   digging_speed:  0.12    # motor command during excavation — slower than nav for precision
