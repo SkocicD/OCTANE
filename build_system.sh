@@ -138,7 +138,19 @@ elif [ ! -f /etc/nv_tegra_release ]; then
         echo "[OK] CUDA apt repository already configured (x86)"
     fi
 else
-    echo "[OK] Jetson — CUDA repo provided by JetPack"
+    # Jetson — JetPack provides most CUDA packages, but libcusparseLt is only
+    # in the NVIDIA CUDA sbsa (aarch64) apt repo, which JetPack does not include.
+    if ! apt-cache show libcusparselt0 &>/dev/null 2>&1; then
+        echo "[SETUP] Adding CUDA sbsa repo for libcusparseLt (Jetson)..."
+        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
+        wget -q "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/sbsa/${CUDA_KEYRING_DEB}" \
+            -O "/tmp/${CUDA_KEYRING_DEB}"
+        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
+        sudo apt-get update -qq
+        echo "[OK] CUDA sbsa repo added (Jetson)"
+    else
+        echo "[OK] CUDA sbsa repo already configured (Jetson)"
+    fi
 fi
 
 # ── 3. System apt dependencies ─────────────────────────────────────────────────
@@ -425,7 +437,7 @@ if [ ! -f "$CH341_KO" ]; then
 obj-m := ch341.o
 KDIR  := /lib/modules/$(shell uname -r)/build
 all:
-	make ARCH=arm64 -C $(KDIR) M=$(PWD) modules
+	make ARCH=arm64 -C $(KDIR) M=$(CURDIR) modules
 EOF
     make -C "$CH341_BUILD"
     sudo cp "${CH341_BUILD}/ch341.ko" "$CH341_KO"
