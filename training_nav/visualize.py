@@ -103,6 +103,7 @@ def _check_collision(rx: float, ry: float, heading: float,
                      robot_w: float, robot_l: float,
                      obstacles: list) -> bool:
     """Return True if the robot rectangle overlaps any obstacle circle."""
+    # (see _check_boundary for arena-wall collision)
     corners = _robot_corners(rx, ry, heading, robot_w, robot_l)
     for obs in obstacles:
         r = obs.diameter / 2
@@ -122,6 +123,16 @@ def _check_collision(rx: float, ry: float, heading: float,
         closest_y = max(-robot_w / 2, min(robot_w / 2, local_y))
         dist = math.hypot(local_x - closest_x, local_y - closest_y)
         if dist < r:
+            return True
+    return False
+
+
+def _check_boundary(rx: float, ry: float, heading: float,
+                    robot_w: float, robot_l: float,
+                    arena_w: float, arena_l: float) -> bool:
+    """Return True if any robot corner has crossed the arena boundary."""
+    for cx, cy in _robot_corners(rx, ry, heading, robot_w, robot_l):
+        if cx < 0 or cx > arena_w or cy < 0 or cy > arena_l:
             return True
     return False
 
@@ -273,8 +284,10 @@ def _sim_loop(cfg: dict, checkpoint_path: str, init_seed: int):
             new_hdg = (heading + omega * DT + math.pi) % (2 * math.pi) - math.pi
 
             # ── Collision check ───────────────────────────────────────────────
-            if _check_collision(new_rx, new_ry, new_hdg,
-                                robot_w, robot_l, arena.obstacles):
+            if (_check_collision(new_rx, new_ry, new_hdg,
+                                 robot_w, robot_l, arena.obstacles) or
+                    _check_boundary(new_rx, new_ry, new_hdg,
+                                    robot_w, robot_l, arena.width, arena.length)):
                 reset_arena = True
             else:
                 rx, ry, heading = new_rx, new_ry, new_hdg
@@ -350,13 +363,6 @@ def _sim_loop(cfg: dict, checkpoint_path: str, init_seed: int):
                               if phase not in ('digging', 'dumping') else [])
                 # Brief pause so UI can show the new phase label
                 time.sleep(0.4 / max(_timescale[0], 0.05))
-
-            # ── Out-of-bounds check ───────────────────────────────────────────
-            margin = 0.4
-            if (rx < -margin or rx > arena.width  + margin or
-                    ry < -margin or ry > arena.length + margin):
-                reset_arena = True
-                break
 
             # ── Stuck detection ───────────────────────────────────────────────
             if step % 20 == 0:
@@ -731,8 +737,10 @@ function lerp(a, b, t)    { return a + (b - a) * t; }
 // ── Kinematic projection ───────────────────────────────────────────────────────
 function projectArc(rx, ry, heading, left, right) {
   const DT = 0.06, steps = Math.round(PROJ_TIME / DT);
-  const pts = [{x: rx, y: ry}];
-  let x = rx, y = ry, h = heading;
+  const x0 = rx + (ROBOT_L / 2) * Math.cos(heading);
+  const y0 = ry + (ROBOT_L / 2) * Math.sin(heading);
+  const pts = [{x: x0, y: y0}];
+  let x = x0, y = y0, h = heading;
   for (let i = 0; i < steps; i++) {
     const vL = left * V_MAX, vR = right * V_MAX;
     const v  = (vL + vR) / 2, w = (vR - vL) / WHEEL_BASE;
@@ -748,8 +756,10 @@ function projectArcGrid(heading, left, right) {
   const CSX = VIEW_W / GS, CSY = VIEW_H / GS;
   const DT = 0.06, steps = Math.round(PROJ_TIME / DT);
   const half = GS / 2;
-  const pts = [{col: half, row: half}];
-  let col = half, row = half, h = heading;
+  const col0 = half + (ROBOT_L / 2) / CSX * Math.cos(heading);
+  const row0 = half - (ROBOT_L / 2) / CSY * Math.sin(heading);
+  const pts = [{col: col0, row: row0}];
+  let col = col0, row = row0, h = heading;
   for (let i = 0; i < steps; i++) {
     const vL = left * V_MAX, vR = right * V_MAX;
     const v  = (vL + vR) / 2, w = (vR - vL) / WHEEL_BASE;
@@ -1308,8 +1318,10 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
             new_ry  = ry + v * math.sin(heading) * DT
             new_hdg = (heading + omega * DT + math.pi) % (2 * math.pi) - math.pi
 
-            if _check_collision(new_rx, new_ry, new_hdg,
-                                robot_w, robot_l, arena.obstacles):
+            if (_check_collision(new_rx, new_ry, new_hdg,
+                                 robot_w, robot_l, arena.obstacles) or
+                    _check_boundary(new_rx, new_ry, new_hdg,
+                                    robot_w, robot_l, arena.width, arena.length)):
                 collided = True
             else:
                 rx, ry, heading = new_rx, new_ry, new_hdg
@@ -1374,11 +1386,6 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
                 path_full  = (astar(cost_full, _world_to_cell(rx, ry, cs), goal_rc) or []
                               if phase not in ('digging', 'dumping') else [])
                 time.sleep(max(0.0, 0.4 / ts))
-
-            margin = 0.4
-            if (rx < -margin or rx > arena.width + margin or
-                    ry < -margin or ry > arena.length + margin):
-                break
 
             if step % 20 == 0:
                 dist = math.hypot(rx - prev_rx, ry - prev_ry)
