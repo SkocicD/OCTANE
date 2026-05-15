@@ -109,6 +109,12 @@ curriculum:
   dart_prob_s3: 0.50  # probability of DART perturbation in stage 3
   dart_std_s2:  0.18  # metres of Gaussian noise on robot position in stage 2
   dart_std_s3:  0.32  # metres of Gaussian noise on robot position in stage 3
+  # Sequence length grows with curriculum so the LSTM sees more temporal
+  # context as the task difficulty demands it, and early-stage training stays fast.
+  seq_len_s0:   8     # stage 0 — 0.8 s of history (pure goal-seeking)
+  seq_len_s1:  16     # stage 1 — 1.6 s (basic obstacle awareness)
+  seq_len_s2:  32     # stage 2 — 3.2 s (DART recovery needs drift context)
+  seq_len_s3:  32     # stage 3 — 3.2 s (same; increase if GPU allows)
 
 checkpoints:
   dir: "checkpoints"

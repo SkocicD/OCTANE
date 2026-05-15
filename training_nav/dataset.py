@@ -125,6 +125,24 @@ class NavDataset(Dataset):
             return cc.get('dart_prob_s3', 0.50), cc.get('dart_std_s3', 0.32)
         return 0.0, 0.0
 
+    def _seq_len(self) -> int:
+        """Sequence length grows with curriculum stage.
+
+        Short sequences in early stages keep training fast and match task
+        complexity — goal-seeking doesn't need 3 s of history, but DART
+        recovery does.  Lengths are configurable via curriculum.seq_len_s*.
+        """
+        base = self.cfg['model'].get('seq_len', 32)
+        cc   = self._cc
+        stage = self._stage()
+        lengths = {
+            0: cc.get('seq_len_s0', max(4,  base // 4)),
+            1: cc.get('seq_len_s1', max(8,  base // 2)),
+            2: cc.get('seq_len_s2', base),
+            3: cc.get('seq_len_s3', base),
+        }
+        return lengths[stage]
+
     # ── Sample generation ─────────────────────────────────────────────────────
 
     def __getitem__(self, idx: int):
@@ -171,7 +189,7 @@ class NavDataset(Dataset):
                     rx, ry = rx_p, ry_p
                     break
 
-        seq_len   = self.cfg['model'].get('seq_len', 32)
+        seq_len   = self._seq_len()
         nav_limit = self.cfg['robot'].get('nav_speed_limit', 1.0)
         sim_dt    = self.cfg['training'].get('sim_dt', 0.10)
         wb        = self.cfg['robot']['wheel_base']
