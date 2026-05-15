@@ -125,7 +125,10 @@ class NavDataset(Dataset):
             action = (0.0, 0.0, 0)
 
         left, right, bucket = action
-        action_vec = np.array([left, right, float(bucket)], dtype=np.float32)
+        nav_limit = self.cfg['robot'].get('nav_speed_limit', 1.0)
+        # Normalise motors to [-1, 1] so model uses full tanh range
+        action_vec = np.array([left / nav_limit, right / nav_limit, float(bucket)],
+                               dtype=np.float32)
 
         return (
             torch.from_numpy(terrain_5ch),

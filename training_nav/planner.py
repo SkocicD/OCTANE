@@ -109,11 +109,12 @@ def extract_action(path: list, robot_heading: float,
     desired_heading = math.atan2(dy, dx)
     angular_error   = _angle_diff(desired_heading, robot_heading)
 
-    mix  = float(np.clip(angular_error / (math.pi / 2), -1.0, 1.0)) * (diff_limit / 2)
-    base = float(np.clip(1.0 - 0.6 * abs(mix) / (diff_limit / 2), 0.2, 1.0))
-
-    left   = float(np.clip((base - mix) * nav_limit, 0.0, 1.0))
-    right  = float(np.clip((base + mix) * nav_limit, 0.0, 1.0))
+    # angular_norm ∈ [-1, 1]; base goes negative for turns > 90° → reverse pivot
+    angular_norm = angular_error / math.pi
+    mix   = float(np.clip(angular_norm, -1.0, 1.0)) * nav_limit
+    base  = float(np.clip(nav_limit * (1.0 - abs(angular_norm)), -nav_limit * 0.5, nav_limit))
+    left  = float(np.clip(base - mix, -nav_limit, nav_limit))
+    right = float(np.clip(base + mix, -nav_limit, nav_limit))
     bucket = _BUCKET_FOR_PHASE.get(phase, 0)
     return left, right, bucket
 

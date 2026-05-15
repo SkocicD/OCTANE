@@ -78,7 +78,7 @@ class NavPolicy(nn.Module):
         a = self.arena_mlp(arena_type.unsqueeze(1).float())   # (B,) → (B,1) → (B, ae)
         x = torch.cat([x, h, a], dim=1)
         x = self.mlp(x)
-        motors        = torch.sigmoid(self.motor_head(x))   # (B, 2) in [0, 1]
+        motors        = torch.tanh(self.motor_head(x))      # (B, 2) in [-1, 1] (normalised by nav_speed_limit)
         bucket_logits = self.bucket_head(x)                 # (B, 3) raw logits
         return torch.cat([motors, bucket_logits], dim=1)    # (B, 5)
 

@@ -149,6 +149,7 @@ def _load_model(cfg: dict, checkpoint_path: str):
         model.load_state_dict(ckpt['model'])
         model.eval()
         model._device = device
+        model._cfg    = cfg
         print(f'[visualize] model loaded from {os.path.basename(checkpoint_path)}')
         return model
     except Exception as e:
@@ -168,8 +169,9 @@ def _infer(model, terrain_crop: np.ndarray, goal_map: np.ndarray,
         at = torch.tensor([arena_type_val], dtype=torch.float32).to(model._device)
         with torch.inference_mode():
             out = model(t, h, at).squeeze(0).cpu().numpy()
-        left   = float(out[0])
-        right  = float(out[1])
+        nav_limit = model._cfg['robot'].get('nav_speed_limit', 0.20)
+        left   = float(out[0]) * nav_limit   # tanh → [-1,1], scale back to motor range
+        right  = float(out[1]) * nav_limit
         bucket = int(np.argmax(out[2:]))
         return left, right, bucket
     except Exception:
