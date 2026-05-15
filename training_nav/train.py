@@ -480,12 +480,14 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=tc['learning_rate'],
                                   weight_decay=tc['weight_decay'])
-    # T_max is the *design* schedule length from config, not the user-entered epoch
-    # count, so the cosine decay completes over the intended window regardless of
-    # how many epochs the user requests.
+    # CosineAnnealingWarmRestarts with T_0 = design-epoch length (200).
+    # For a 200-epoch run this is identical to CosineAnnealingLR — one decay cycle.
+    # For thousands of epochs the LR restarts every 200 epochs indefinitely, so
+    # the model keeps exploring/exploiting without the LR freezing at eta_min.
     lr_schedule_epochs = tc['epochs']
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=lr_schedule_epochs, eta_min=tc['learning_rate'] * 0.01
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=lr_schedule_epochs, T_mult=1,
+        eta_min=tc['learning_rate'] * 0.01
     )
 
     start_epoch = 1
@@ -517,9 +519,16 @@ def main():
     t0 = time.time()
 
     # Curriculum-guard: don't allow early stopping until all hard stages have
-    # been seen. Stage 2 ends at stage2_end fraction of config epochs.
+    # been seen AND at least half the requested run has elapsed.
+    # - For a 200-epoch run:  max(150, 100) = 150
+    # - For a 9999-epoch run: max(150, 4999) = 4999
+    # Patience also scales so a multi-thousand-epoch run doesn't stop after 60 no-improve.
     _cc = cfg.get('curriculum', {})
-    curriculum_min_epoch = int(_cc.get('stage2_end', 0.75) * tc['epochs'])
+    curriculum_min_epoch = max(
+        int(_cc.get('stage2_end', 0.75) * tc['epochs']),
+        max_epochs // 2,
+    )
+    effective_patience = max(tc['early_stop_patience'], max_epochs // 50)
     prev_stage = -1
 
     for epoch in range(start_epoch, max_epochs + 1):
@@ -573,15 +582,15 @@ def main():
         _update_state(
             epoch=epoch, train_loss=train_losses, val_loss=val_losses,
             lr=lrs, best_val=best_val, no_improve=no_improve,
-            patience=tc['early_stop_patience'], elapsed_s=round(elapsed),
+            patience=effective_patience, elapsed_s=round(elapsed),
         )
 
         _save(cc['dir'], epoch, model, optimizer, scheduler,
               val_loss, best_val, keep=keep)
 
-        if epoch >= curriculum_min_epoch and no_improve >= tc['early_stop_patience']:
+        if epoch >= curriculum_min_epoch and no_improve >= effective_patience:
             print(f'\n  Early stop — no val improvement for {no_improve} epochs '
-                  f'(after curriculum stage 2 complete at epoch {curriculum_min_epoch})')
+                  f'(curriculum floor={curriculum_min_epoch}, patience={effective_patience})')
             break
 
         gc.collect()
