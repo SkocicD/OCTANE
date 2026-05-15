@@ -408,9 +408,11 @@ else
 fi
 
 # ── 7. gs-usb (CAN adapter Python library) ────────────────────────────────────
-if ! python3 -c "import gs_usb" &>/dev/null; then
+# Check the actual submodule, not just the package directory — an empty gs_usb/
+# directory is a valid Python 3 namespace package and fools `import gs_usb`.
+if ! python3 -c "from gs_usb.gs_usb import GsUsb" &>/dev/null; then
     echo "[SETUP] Installing gs-usb..."
-    pip3 install gs-usb
+    pip3 install --user gs-usb
     echo "[OK] gs-usb installed"
 else
     echo "[OK] gs-usb already installed"

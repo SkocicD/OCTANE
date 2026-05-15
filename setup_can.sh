@@ -6,6 +6,39 @@ set -e
 
 REAL_USER="${SUDO_USER:-$USER}"
 
+# ── 0. gs_usb kernel module ───────────────────────────────────────────────────
+# The Jetson kernel does not ship gs_usb.ko; build it from the v5.15 mainline
+# source against the installed kernel headers. Without this module the CANable
+# USB adapter (1d50:606f) is ignored — can0/can1 remain the native Tegra mttcan
+# controllers and the udev auto-start rule never fires.
+GS_USB_KO="/lib/modules/$(uname -r)/kernel/drivers/net/can/usb/gs_usb.ko"
+if [ ! -f "$GS_USB_KO" ]; then
+    echo "[SETUP] Building gs_usb kernel module for $(uname -r)..."
+    GS_USB_BUILD="$(mktemp -d)"
+    wget -q https://raw.githubusercontent.com/torvalds/linux/v5.15/drivers/net/can/usb/gs_usb.c \
+        -O "${GS_USB_BUILD}/gs_usb.c"
+    cat > "${GS_USB_BUILD}/Makefile" << 'EOF'
+obj-m := gs_usb.o
+KDIR  := /lib/modules/$(shell uname -r)/build
+all:
+	make ARCH=arm64 -C $(KDIR) M=$(CURDIR) modules
+EOF
+    make -C "$GS_USB_BUILD"
+    sudo mkdir -p "$(dirname "$GS_USB_KO")"
+    sudo cp "${GS_USB_BUILD}/gs_usb.ko" "$GS_USB_KO"
+    sudo depmod -a
+    sudo bash -c "echo 'gs_usb' > /etc/modules-load.d/gs_usb.conf"
+    sudo modprobe gs_usb
+    rm -rf "$GS_USB_BUILD"
+    echo "[OK] gs_usb module built and installed"
+else
+    echo "[OK] gs_usb module already present"
+    if ! lsmod | grep -q gs_usb; then
+        sudo modprobe gs_usb
+        echo "[OK] gs_usb module loaded"
+    fi
+fi
+
 # USB device permissions
 echo "Writing USB permissions rule..."
 echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", MODE="0666", GROUP="plugdev"' \
