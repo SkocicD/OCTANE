@@ -1,9 +1,10 @@
 """Navigation policy network.
 
 Input:
-  terrain:  (B, 5, grid_size, grid_size)
-              channels: height, rocks, craters, walls, goal_heatmap
-  heading:  (B, 2)  — [sin(yaw), cos(yaw)]
+  terrain:    (B, 5, grid_size, grid_size)
+                channels: height, rocks, craters, walls, goal_heatmap
+  heading:    (B, 2)  — [sin(yaw), cos(yaw)]
+  arena_type: (B,)    — 0.0 = UCF, 1.0 = KSC
 
 Output: (B, 5) tensor
   [0]   left_motor   — sigmoid [0, 1]
@@ -11,7 +12,7 @@ Output: (B, 5) tensor
   [2:5] bucket_logits — raw logits for CrossEntropy (classes: 0=UP 1=COLLECT 2=DUMP)
 
 Architecture: lightweight CNN encoder → global average pool →
-concat with heading embedding → MLP → two separate heads.
+concat with heading + arena_type embeddings → MLP → two separate heads.
 Small enough to run in real-time on Jetson Orin.
 """
 
@@ -28,6 +29,7 @@ class NavPolicy(nn.Module):
         ch = mc['cnn_channels']
         fc = mc['fc_dims']
         he = mc['heading_embed_dim']
+        ae = mc.get('arena_embed_dim', 4)
 
         # CNN: 5-channel terrain input
         layers = []
@@ -51,26 +53,34 @@ class NavPolicy(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        mlp_in = ch[-1] + he
+        # arena_type is a scalar [0=UCF, 1=KSC]; small embedding lets the network
+        # learn layout-specific navigation strategies
+        self.arena_mlp = nn.Sequential(
+            nn.Linear(1, ae),
+            nn.ReLU(inplace=True),
+        )
+
+        mlp_in = ch[-1] + he + ae
         mlp_layers = []
         for dim in fc:
             mlp_layers += [nn.Linear(mlp_in, dim), nn.ReLU(inplace=True), nn.Dropout(0.1)]
             mlp_in = dim
         self.mlp = nn.Sequential(*mlp_layers)
 
-        # Separate heads
-        self.motor_head  = nn.Linear(mlp_in, 2)   # left, right
-        self.bucket_head = nn.Linear(mlp_in, 3)   # logits for bucket classes 0/1/2
+        self.motor_head  = nn.Linear(mlp_in, 2)
+        self.bucket_head = nn.Linear(mlp_in, 3)
 
-    def forward(self, terrain: torch.Tensor, heading: torch.Tensor) -> torch.Tensor:
+    def forward(self, terrain: torch.Tensor, heading: torch.Tensor,
+                arena_type: torch.Tensor) -> torch.Tensor:
         x = self.cnn(terrain)
         x = self.gap(x).flatten(1)
         h = self.heading_mlp(heading)
-        x = torch.cat([x, h], dim=1)
+        a = self.arena_mlp(arena_type.unsqueeze(1).float())   # (B,) → (B,1) → (B, ae)
+        x = torch.cat([x, h, a], dim=1)
         x = self.mlp(x)
-        motors       = torch.sigmoid(self.motor_head(x))   # (B, 2) in [0, 1]
-        bucket_logits = self.bucket_head(x)                # (B, 3) raw logits
-        return torch.cat([motors, bucket_logits], dim=1)   # (B, 5)
+        motors        = torch.sigmoid(self.motor_head(x))   # (B, 2) in [0, 1]
+        bucket_logits = self.bucket_head(x)                 # (B, 3) raw logits
+        return torch.cat([motors, bucket_logits], dim=1)    # (B, 5)
 
     @staticmethod
     def decode(out: torch.Tensor):
