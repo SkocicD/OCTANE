@@ -137,8 +137,16 @@ def generate_arena(cfg: dict, rng: random.Random | None = None,
 
     # ── Obstacle placement + clear-path check (retry up to 8×) ────────────────
     last_arena = None
+    col_sz = ac.get('column_size', 0.0)
     for _attempt in range(8):
         obstacles: list[Obstacle] = []
+
+        # Column placed first so rocks/craters check against it
+        if col_sz > 0:
+            col_x = width  / 2 + rng.uniform(-width  * 0.04, width  * 0.04)
+            col_y = length / 2 + rng.uniform(-length * 0.04, length * 0.04)
+            obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
+
         for kind, n, diam in [('rock',   n_rocks,   ac['rock_diameter']),
                                ('crater', n_craters, ac['crater_diameter'])]:
             placed, attempts = 0, 0
@@ -159,13 +167,6 @@ def generate_arena(cfg: dict, rng: random.Random | None = None,
                 if not too_close:
                     obstacles.append(Obstacle(ox, oy, diam, kind))
                     placed += 1
-
-        col_sz = ac.get('column_size', 0.0)
-        if col_sz > 0:
-            # Column is centered in the full arena per KSC Artemis field spec
-            col_x = width  / 2 + rng.uniform(-width  * 0.04, width  * 0.04)
-            col_y = length / 2 + rng.uniform(-length * 0.04, length * 0.04)
-            obstacles.append(Obstacle(col_x, col_y, col_sz * math.sqrt(2), 'column'))
 
         candidate = ArenaConfig(
             width=width, length=length, scale=scale, arena_type=arena_type,
@@ -200,12 +201,15 @@ def _has_clear_corridors(arena: ArenaConfig, robot_clearance: float = 0.45) -> b
                         blocked[nr][nc] = True
 
     def can_reach(from_z: Rect, to_z: Rect) -> bool:
-        sx, sy = from_z.centre()
-        sc = (int(sy / cs), int(sx / cs))
-        if not (0 <= sc[0] < rows and 0 <= sc[1] < cols):
+        r0 = max(0, int(from_z.y / cs))
+        r1 = min(rows, int((from_z.y + from_z.h) / cs) + 1)
+        c0 = max(0, int(from_z.x / cs))
+        c1 = min(cols, int((from_z.x + from_z.w) / cs) + 1)
+        q = [(r, c) for r in range(r0, r1) for c in range(c0, c1)
+             if not blocked[r][c]]
+        if not q:
             return False
-        visited = {sc}
-        q = [sc]
+        visited = set(q)
         while q:
             nq = []
             for r, c in q:
