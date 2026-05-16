@@ -1,8 +1,8 @@
-"""Launch the terrain model inference node.
+"""Launch the Nexus terrain model inference node.
 
 Usage:
   ros2 launch octane terrain_inference.launch.py \\
-    model_path:=/path/to/best.pt \\
+    model_path:=workspace/models/octane_nexus/nexus.pt \\
     depth_stats_path:=/path/to/depth_stats.json \\
     inference_rate:=5.0
 
@@ -22,16 +22,17 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('model_path',       default_value='',    description='Path to terrain model .pt checkpoint'),
+        DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus.pt', description='Path to nexus.pt checkpoint'),
         DeclareLaunchArgument('depth_stats_path', default_value='',    description='Path to depth_stats.json'),
         DeclareLaunchArgument('inference_rate',   default_value='5.0', description='Inference Hz'),
         DeclareLaunchArgument('device',           default_value='auto', description='auto | cuda | cpu'),
         DeclareLaunchArgument('imu_topic',        default_value='sensors/imu/accel', description='IMU topic for roll/pitch'),
+        DeclareLaunchArgument('use_imu',          default_value='False',             description='Use IMU roll/pitch; set False to feed zeros'),
 
         Node(
             package='octane_mapping',
-            executable='terrain_inference_node',
-            name='terrain_inference_node',
+            executable='nexus_node',
+            name='nexus_node',
             output='screen',
             parameters=[{
                 'model_path':       LaunchConfiguration('model_path'),
@@ -39,6 +40,7 @@ def generate_launch_description():
                 'inference_rate':   LaunchConfiguration('inference_rate'),
                 'device':           LaunchConfiguration('device'),
                 'imu_topic':        LaunchConfiguration('imu_topic'),
+                'use_imu':          LaunchConfiguration('use_imu'),
             }],
         ),
     ])

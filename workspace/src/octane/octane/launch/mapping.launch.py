@@ -15,10 +15,11 @@ from launch_ros.descriptions import ComposableNode
 
 def generate_launch_description():
     nodes = [
-        DeclareLaunchArgument('model_path',       default_value='',     description='Path to terrain model .pt checkpoint'),
+        DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus.pt', description='Path to nexus.pt checkpoint'),
         DeclareLaunchArgument('depth_stats_path', default_value='',     description='Path to depth_stats.json'),
-        DeclareLaunchArgument('inference_rate',   default_value='5.0',  description='Terrain inference Hz'),
-        DeclareLaunchArgument('device',           default_value='auto', description='auto | cuda | cpu'),
+        DeclareLaunchArgument('inference_rate',   default_value='5.0',   description='Terrain inference Hz'),
+        DeclareLaunchArgument('device',           default_value='auto',  description='auto | cuda | cpu'),
+        DeclareLaunchArgument('use_imu',          default_value='False', description='Use IMU roll/pitch; set False to feed zeros'),
         LogInfo(msg='Starting mapping subsystem'),
         # Stub identity odom→base_link until octane_localization is ready
         # (April tags + IMU fusion).  Replace this node with the real source then.
@@ -155,14 +156,15 @@ def generate_launch_description():
     nodes.append(
         Node(
             package='octane_mapping',
-            executable='terrain_inference_node',
-            name='terrain_inference_node',
+            executable='nexus_node',
+            name='nexus_node',
             output='screen',
             parameters=[{
                 'model_path':       LaunchConfiguration('model_path'),
                 'depth_stats_path': LaunchConfiguration('depth_stats_path'),
                 'inference_rate':   LaunchConfiguration('inference_rate'),
                 'device':           LaunchConfiguration('device'),
+                'use_imu':          LaunchConfiguration('use_imu'),
             }],
         )
     )
