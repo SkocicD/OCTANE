@@ -27,13 +27,13 @@ import threading
 import cv2
 import numpy as np
 import rclpy
-import torch
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image, Imu
 
-from octane_mapping.terrain_model import TerrainModel
 from octane_msgs.msg import CameraFrame
+
+# torch and TerrainModel are imported lazily in __init__ when debug_terrain=False
 
 # Must match training/dataset.py exactly
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -121,19 +121,23 @@ class NexusNode(Node):
         if not model_path:
             raise RuntimeError('nexus_node: model_path parameter is required')
 
+        import torch
+        from octane_mapping.terrain_model import TerrainModel
+        self._torch = torch
+
         # Device
         if device_param == 'auto':
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            self.device = self._torch.device('cuda' if self._torch.cuda.is_available() else 'cpu')
         else:
-            self.device = torch.device(device_param)
+            self.device = self._torch.device(device_param)
 
         # Load model
         self.get_logger().info(f'Loading terrain model: {model_path}')
-        ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
+        ckpt = self._torch.load(model_path, map_location=self.device, weights_only=False)
         self.model = TerrainModel().to(self.device)
         self.model.load_state_dict(ckpt['model'])
         self.model.eval()
-        torch.backends.cudnn.benchmark = True
+        self._torch.backends.cudnn.benchmark = True
         self.get_logger().info(
             f'Terrain model loaded  epoch={ckpt.get("epoch", "?")}  device={self.device}'
         )
@@ -276,13 +280,13 @@ class NexusNode(Node):
             self.get_logger().error(f'Preprocessing error: {e}')
             return
 
-        rot = torch.tensor([
+        rot = self._torch.tensor([
             math.sin(roll),  math.cos(roll),
             math.sin(pitch), math.cos(pitch),
             math.sin(yaw),   math.cos(yaw),
-        ], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1, 6)
+        ], dtype=self._torch.float32, device=self.device).unsqueeze(0)  # (1, 6)
 
-        with torch.inference_mode():
+        with self._torch.inference_mode():
             preds = self.model(imgs, rot)
 
         stamp = frames[_ALL_TOPICS[0]].image.header.stamp
@@ -299,7 +303,7 @@ class NexusNode(Node):
 
     # ── Preprocessing ─────────────────────────────────────────────────────────
 
-    def _preprocess(self, frames: dict) -> torch.Tensor:
+    def _preprocess(self, frames: dict):
         tensors = []
         for i, topic in enumerate(_ALL_TOPICS):
             frame = frames[topic]
@@ -316,9 +320,9 @@ class NexusNode(Node):
                 mean   = np.array(self._depth_mean, dtype=np.float32)
                 std    = np.array(self._depth_std,  dtype=np.float32)
                 chw    = ((rgb - mean) / std).transpose(2, 0, 1)
-            tensors.append(torch.from_numpy(chw))
+            tensors.append(self._torch.from_numpy(chw))
 
-        return torch.stack(tensors).unsqueeze(0).to(self.device)  # (1, 12, 3, 224, 224)
+        return self._torch.stack(tensors).unsqueeze(0).to(self.device)  # (1, 12, 3, 224, 224)
 
     def _to_img(self, arr: np.ndarray, stamp) -> Image:
         msg = self.bridge.cv2_to_imgmsg(arr, encoding='32FC1')
