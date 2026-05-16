@@ -11,17 +11,17 @@
 #   (0° = +X / right wall, 90° = +Y / back wall, 45° = corner)
 
 apriltag_map:
-  - id: 1
+  - id: 2
     x: 0.0
     y: 0.0
     facing_deg: 45.0    # origin corner tag
 
-  - id: 2
+  - id: 3
     x: 2.0
     y: 0.0
     facing_deg: 0.0     # right wall tag
 
-  - id: 3
+  - id: 4
     x: 0.0
     y: 2.0
     facing_deg: 90.0    # back wall tag
