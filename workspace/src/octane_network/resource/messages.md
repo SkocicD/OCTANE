@@ -46,6 +46,21 @@ Quick reference for all message formats used in rover-ground communication.
 - Source: ADXL345 on `sensors/imu/accel`
 - Example: 0g idle → `I` + `\x00\x00\x00\x00` + `\x00\x00\x00\x00` + `\x1e\x85\x1c\x41` (z ≈ 9.81)
 
+**Localization Pose:**
+- Marker: `L` (0x4C)
+- Data: 12 bytes (3 × little-endian float32: x metres, y metres, theta radians)
+- Source: `localization/pose` (Pose2D) from `triangulator_node`
+- Only present when triangulator has a valid fix
+- Example: rover at (1.2, 0.8), heading 0.5 rad → `L` + float32LE(1.2) + float32LE(0.8) + float32LE(0.5)
+
+**AprilTag Observations:**
+- Marker: `G` (0x47)
+- Data: 1 byte count + count × 9 bytes, up to 3 tags
+- Per tag: `uint8 tag_id` + `float32LE dist_m` + `float32LE angle_deg`
+- Source: `localization/far_tags` (JSON) from `far_camera_receiver_node`; staleness window 2 s
+- Only present when at least one tag has been seen in the last 2 seconds
+- Example (2 tags): `G` + `\x02` + `\x01` + float32LE(1.5) + float32LE(10.2) + `\x02` + float32LE(2.1) + float32LE(-5.0)
+
 ### Examples
 
 **Minimal telemetry (state only):**
@@ -270,7 +285,7 @@ Decoded: (no keys), speed_modifier=50
 
 **Min message size:** 4 bytes (magic + type + length=0 + CRC)
 
-**Max practical size:** ~30 bytes (before fragmentation concerns)
+**Max practical size:** ~75 bytes (state + battery + fault + accel + pose + 3 tags)
 
 ---
 
@@ -289,6 +304,11 @@ Decoded: (no keys), speed_modifier=50
 | fault_char | uint8 | 1B | Fault type code (a-w) |
 | battery | float32 | 4B | Voltage in volts (little-endian) |
 | accel_x/y/z | float32 | 4B each | Acceleration in m/s² (little-endian) |
+| pose_x/y | float32 | 4B each | Triangulated position in metres (little-endian) |
+| pose_theta | float32 | 4B | Rover heading in radians (little-endian) |
+| tag_id | uint8 | 1B | AprilTag ID (0–255) |
+| tag_dist | float32 | 4B | Distance to tag in metres (little-endian) |
+| tag_angle_deg | float32 | 4B | Camera-relative angle to tag in degrees (little-endian) |
 
 ---
 
