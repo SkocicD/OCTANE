@@ -18,8 +18,10 @@ If both bits in a pair are set (which manual_actuator_node already prevents,
 but enforce here as well), the pair is forced to 0,0 — the receiver should
 never see both relays of one module energised.
 
-Default port is the stable by-id symlink to the OCTANE Arduino Uno R3 connected
-over USB. Override with `-p port:=...` if the Arduino is replaced.
+Default port is the udev symlink for the Arduino Nano, pinned by physical USB
+port (KERNELS=="1-4.2.1", external USB hub). The RS485 adapter is also CH340
+(1a86:7523) and is pinned to KERNELS=="1-4.3" (Jetson direct port) via
+99-rs485-drive.rules so the two never collide.
 """
 
 import rclpy
@@ -53,7 +55,7 @@ class SerialActuatorNode(Node):
 
         self.declare_parameter(
             'port',
-            '/dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_750313034313514022F1-if00',
+            '/dev/arduino_nano',
         )
         self.declare_parameter('baud', 9600)
         port = self.get_parameter('port').value

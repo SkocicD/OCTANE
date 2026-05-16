@@ -138,7 +138,19 @@ elif [ ! -f /etc/nv_tegra_release ]; then
         echo "[OK] CUDA apt repository already configured (x86)"
     fi
 else
-    echo "[OK] Jetson — CUDA repo provided by JetPack"
+    # Jetson — JetPack provides most CUDA packages, but libcusparseLt is only
+    # in the NVIDIA CUDA sbsa (aarch64) apt repo, which JetPack does not include.
+    if ! apt-cache show libcusparselt0 &>/dev/null 2>&1; then
+        echo "[SETUP] Adding CUDA sbsa repo for libcusparseLt (Jetson)..."
+        CUDA_KEYRING_DEB="cuda-keyring_1.1-1_all.deb"
+        wget -q "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/sbsa/${CUDA_KEYRING_DEB}" \
+            -O "/tmp/${CUDA_KEYRING_DEB}"
+        sudo dpkg -i "/tmp/${CUDA_KEYRING_DEB}"
+        sudo apt-get update -qq
+        echo "[OK] CUDA sbsa repo added (Jetson)"
+    else
+        echo "[OK] CUDA sbsa repo already configured (Jetson)"
+    fi
 fi
 
 # ── 3. System apt dependencies ─────────────────────────────────────────────────
@@ -396,12 +408,59 @@ else
 fi
 
 # ── 7. gs-usb (CAN adapter Python library) ────────────────────────────────────
-if ! python3 -c "import gs_usb" &>/dev/null; then
+# Check the actual submodule, not just the package directory — an empty gs_usb/
+# directory is a valid Python 3 namespace package and fools `import gs_usb`.
+if ! python3 -c "from gs_usb.gs_usb import GsUsb" &>/dev/null; then
     echo "[SETUP] Installing gs-usb..."
-    pip3 install gs-usb
+    pip3 install --user gs-usb
     echo "[OK] gs-usb installed"
 else
     echo "[OK] gs-usb already installed"
+fi
+
+# ── 7b. pyserial (RS485 drive node) ──────────────────────────────────────────
+if ! python3 -c "import serial" &>/dev/null; then
+    echo "[SETUP] Installing pyserial..."
+    pip3 install pyserial
+    echo "[OK] pyserial installed"
+else
+    echo "[OK] pyserial already installed"
+fi
+
+# ── 7c. CH340 USB-serial kernel module + udev rule (RS485 transceiver) ────────
+CH341_KO="/lib/modules/$(uname -r)/kernel/drivers/usb/serial/ch341.ko"
+if [ ! -f "$CH341_KO" ]; then
+    echo "[SETUP] Building ch341 kernel module for $(uname -r)..."
+    CH341_BUILD="${TMPDIR}/ch341_build"
+    mkdir -p "$CH341_BUILD"
+    wget -q https://raw.githubusercontent.com/torvalds/linux/v5.15/drivers/usb/serial/ch341.c \
+        -O "${CH341_BUILD}/ch341.c"
+    cat > "${CH341_BUILD}/Makefile" << 'EOF'
+obj-m := ch341.o
+KDIR  := /lib/modules/$(shell uname -r)/build
+all:
+	make ARCH=arm64 -C $(KDIR) M=$(CURDIR) modules
+EOF
+    make -C "$CH341_BUILD"
+    sudo cp "${CH341_BUILD}/ch341.ko" "$CH341_KO"
+    sudo depmod -a
+    sudo bash -c "echo 'ch341' > /etc/modules-load.d/ch341.conf"
+    sudo modprobe ch341 2>/dev/null || true
+    echo "[OK] ch341 module built and installed"
+else
+    echo "[OK] ch341 module already present"
+fi
+
+UDEV_RULE="/etc/udev/rules.d/99-rs485-drive.rules"
+if [ ! -f "$UDEV_RULE" ]; then
+    echo "[SETUP] Installing udev rule for RS485 adapter (CH340 VID 1a86:7523)..."
+    echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="rs485_drive"' \
+        | sudo tee "$UDEV_RULE" > /dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    echo "[OK] udev rule installed — RS485 adapter will appear as /dev/rs485_drive"
+else
+    echo "[OK] RS485 udev rule already installed"
 fi
 
 # ── 8. rosdep install for external packages ───────────────────────────────────
@@ -423,7 +482,7 @@ echo "[OK] rosdep install done"
 # ── 9. Stale cache check ───────────────────────────────────────────────────────
 if grep -qr "OCTANE_backup\|OCTANE_old" "${WORKSPACE_ROOT}/build" 2>/dev/null; then
     echo "[WARN] Stale build cache — wiping octane build artifacts..."
-    for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network; do
+    for pkg in octane octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_logging; do
         rm -rf "${WORKSPACE_ROOT}/build/${pkg}" "${WORKSPACE_ROOT}/install/${pkg}"
     done
 fi
@@ -431,7 +490,7 @@ fi
 # ── 10. Build ──────────────────────────────────────────────────────────────────
 cd "${WORKSPACE_ROOT}"
 
-OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane"
+OCTANE_PKGS="octane_msgs octane_perception octane_mapping octane_supervisor octane_network octane_manual_ctrl octane_serial octane_sensors octane_rs485 octane_logging octane"
 ORBBEC_PKGS="astra_camera astra_camera_msgs"
 
 COLCON_ARGS=(--event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF)

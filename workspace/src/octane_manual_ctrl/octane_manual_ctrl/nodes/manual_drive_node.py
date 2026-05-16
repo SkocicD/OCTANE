@@ -23,7 +23,7 @@ Topics:
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import UInt8, String
+from std_msgs.msg import UInt8, UInt16, String
 from octane_msgs.msg import DriveCommand
 
 # Bit positions matching GUI GetKeyBitfield
@@ -50,15 +50,20 @@ class ManualDriveNode(Node):
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
-        self.manual_active = False
+        self.manual_active   = False
+        self._speed_modifier = 100   # uint16, 0-500; default 100 = 1.0x
 
-        self.create_subscription(UInt8, '/manual_ctrl/key_state', self.on_key_state, qos)
-        self.create_subscription(String, '/supervisor/state', self.on_supervisor_state, qos)
+        self.create_subscription(UInt8,  '/manual_ctrl/key_state',     self.on_key_state,       qos)
+        self.create_subscription(UInt16, '/manual_ctrl/speed_modifier', self.on_speed_modifier,  qos)
+        self.create_subscription(String, '/supervisor/state',           self.on_supervisor_state, qos)
         self.pub = self.create_publisher(DriveCommand, '/drive/command', qos)
 
         self.get_logger().info(
             f'Manual drive node ready — throttle={self.throttle_scale}, '
             f'turn={self.turn_scale}')
+
+    def on_speed_modifier(self, msg: UInt16):
+        self._speed_modifier = max(0, min(500, msg.data))
 
     def on_supervisor_state(self, msg: String):
         was_active = self.manual_active
@@ -66,8 +71,9 @@ class ManualDriveNode(Node):
         self.get_logger().info(f'[STATE] got "{msg.data}" → manual_active={self.manual_active}')
         if was_active and not self.manual_active:
             stop = DriveCommand()
-            stop.left_velocity = 0.0
+            stop.left_velocity  = 0.0
             stop.right_velocity = 0.0
+            stop.speed_modifier = self._speed_modifier
             self.pub.publish(stop)
 
     def on_key_state(self, msg: UInt8):
@@ -100,8 +106,9 @@ class ManualDriveNode(Node):
         right_vel = max(-1.0, min(1.0, throttle + turn))
 
         cmd = DriveCommand()
-        cmd.left_velocity = float(left_vel)
+        cmd.left_velocity  = float(left_vel)
         cmd.right_velocity = float(right_vel)
+        cmd.speed_modifier = self._speed_modifier
         self.pub.publish(cmd)
 
 

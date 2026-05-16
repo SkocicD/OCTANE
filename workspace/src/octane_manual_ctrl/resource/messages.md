@@ -22,23 +22,44 @@ Multiple keys can be held simultaneously (bits OR'd together).
 
 ## DriveCommand (octane_msgs/DriveCommand)
 
-Published on `/drive/command`. Subscribed by `can_drive_node`.
+Published on `/drive/command`. Subscribed by `can_drive_node` and `rs485_drive_node`.
 
 ```
 float32 left_velocity    # -1.0 (full reverse) to 1.0 (full forward)
 float32 right_velocity   # -1.0 (full reverse) to 1.0 (full forward)
+uint16  speed_modifier   # GUI speed dial: 0–500 (percentage), default 100
 ```
 
-**Examples:**
-| Scenario       | left_velocity | right_velocity |
-|----------------|---------------|----------------|
-| Full forward   | 1.0           | 1.0            |
-| Full reverse   | -1.0          | -1.0           |
-| Spin left      | -0.6          | 0.6            |
-| Forward right  | 0.4           | 1.0            |
-| Stop           | 0.0           | 0.0            |
+**`speed_modifier` semantics:**
 
-The CAN hardware node is responsible for scaling these to actual motor units (RPM, PWM, etc.).
+An integer percentage applied on top of the hardware `speed_scale` config value (default 0.2).
+`100` = no change from baseline. Field defaults to `100` so keyboard-only operation is unaffected.
+
+```
+effective_speed = velocity × speed_scale × (speed_modifier / 100.0)
+                                                      clamped to [0.0, 1.0]
+```
+
+| `speed_modifier` | multiplier | effective max speed (speed_scale=0.2) |
+|-----------------|------------|---------------------------------------|
+| 0               | 0.0×       | motors stopped                        |
+| 50              | 0.5×       | 10% of full motor RPM                 |
+| 100             | 1.0×       | 20% of full motor RPM (normal)        |
+| 250             | 2.5×       | 50% of full motor RPM                 |
+| 500             | 5.0×       | 100% of full motor RPM (hard cap)     |
+
+GUI should keep `speed_modifier` in range `0–100` for safe operation. Values above 100 up to 500 are supported for testing or special use cases.
+
+**Drive command examples:**
+| Scenario       | left_velocity | right_velocity | speed_modifier |
+|----------------|---------------|----------------|----------------|
+| Full forward   | 1.0           | 1.0            | 100            |
+| Full reverse   | -1.0          | -1.0           | 100            |
+| Spin left      | -0.6          | 0.6            | 100            |
+| Half speed     | 1.0           | 1.0            | 50             |
+| Stop           | 0.0           | 0.0            | 100            |
+
+The hardware nodes scale velocity by `speed_scale × (speed_modifier / 100.0)` before sending to motor hardware.
 
 ---
 

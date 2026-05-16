@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'adxl345_node = octane_sensors.nodes.adxl345_node:main',
+            'imu_monitor_node = octane_sensors.nodes.imu_monitor_node:main',
         ],
     },
 )

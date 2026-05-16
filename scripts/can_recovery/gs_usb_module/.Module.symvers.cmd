@@ -1,0 +1,1 @@
+cmd_/media/csulunabotics/SSD2/OCTANE/gs_usb_module/Module.symvers := sed 's/\.ko$$/\.o/' /media/csulunabotics/SSD2/OCTANE/gs_usb_module/modules.order | scripts/mod/modpost -m   -o /media/csulunabotics/SSD2/OCTANE/gs_usb_module/Module.symvers -e -i Module.symvers   -T -

@@ -1,13 +1,20 @@
 NVIDIA Isaac/
 .cache/
 
+# Camera recordings
+cam_storage/
+
 # ROS 2 build artifacts
 workspace/build/
 workspace/install/
 workspace/log/
+
+# Model checkpoints (large binaries — store separately, not in git)
+workspace/models/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+build_system.sh

@@ -32,12 +32,15 @@ class CANDebugNode(Node):
         self._state      = '---'
         self._can_status = f'{DIM}waiting for can_drive_node...{RESET}'
         self._keys       = 0
-        self._left_vel   = 0.0
+        self._left_vel   = 0.0   # target  (from /drive/command)
         self._right_vel  = 0.0
+        self._sent_l     = 0.0   # actual sent (ramped, from TX log)
+        self._sent_r     = 0.0
+        self._speed_modifier = 100
         self._last_key_t = 0.0
         self._last_cmd_t = 0.0
-        self._log: deque = deque(maxlen=20)
-        self._tx_log: deque = deque(maxlen=8)
+        self._log: deque = deque(maxlen=10)
+        self._tx_log: deque = deque(maxlen=4)
 
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         status_qos = QoSProfile(
@@ -70,6 +73,14 @@ class CANDebugNode(Node):
             entry = f'{DIM}[{ts}]{RESET}  {RED}{msg.data}{RESET}'
         else:
             entry = f'{DIM}[{ts}]{RESET}  {GREEN}{msg.data}{RESET}'
+            for part in msg.data.split():
+                if '=' in part:
+                    k, v = part.split('=', 1)
+                    try:
+                        if k == 'L': self._sent_l = float(v)
+                        elif k == 'R': self._sent_r = float(v)
+                    except ValueError:
+                        pass
         self._tx_log.append(entry)
 
     def _on_keys(self, msg: UInt8):
@@ -77,12 +88,13 @@ class CANDebugNode(Node):
         self._last_key_t = time.time()
 
     def _on_drive(self, msg: DriveCommand):
-        self._left_vel  = msg.left_velocity
-        self._right_vel = msg.right_velocity
-        self._last_cmd_t = time.time()
+        self._left_vel       = msg.left_velocity
+        self._right_vel      = msg.right_velocity
+        self._speed_modifier = msg.speed_modifier
+        self._last_cmd_t     = time.time()
         self._log.append(
             f'{DIM}[{time.strftime("%H:%M:%S")}]{RESET}  '
-            f'L={self._left_vel:+.2f}  R={self._right_vel:+.2f}'
+            f'L={self._left_vel:+.2f}  R={self._right_vel:+.2f}  spd={self._speed_modifier}%'
         )
 
     def _vel_bar(self, v: float) -> str:
@@ -91,6 +103,12 @@ class CANDebugNode(Node):
         color  = GREEN if v > 0 else (RED if v < 0 else DIM)
         sign   = '+' if v >= 0 else '-'
         return f'{color}{sign}[{bar}]{RESET}'
+
+    def _speed_bar(self, pct: int) -> str:
+        filled = min(10, pct // 50)
+        bar    = ('█' * filled).ljust(10)
+        color  = GREEN if pct <= 100 else (YELLOW if pct <= 300 else RED)
+        return f'{color}[{bar}]{RESET}  {pct}%'
 
     def _render(self):
         held      = [KEY_NAMES[i] for i in range(8) if self._keys & (1 << i)]
@@ -108,8 +126,9 @@ class CANDebugNode(Node):
         print()
         print(f'  Keys held   : {key_str}  {DIM}({key_age}){RESET}')
         print()
-        print(f'  Left  vel   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}')
-        print(f'  Right vel   : {self._vel_bar(self._right_vel)}  {self._right_vel:+.3f}')
+        print(f'  Target  L   : {self._vel_bar(self._left_vel)}  {self._left_vel:+.3f}   R : {self._vel_bar(self._right_vel)}  {self._right_vel:+.3f}')
+        print(f'  Sent    L   : {self._vel_bar(self._sent_l)}  {self._sent_l:+.3f}   R : {self._vel_bar(self._sent_r)}  {self._sent_r:+.3f}')
+        print(f'  Speed mod   : {self._speed_bar(self._speed_modifier)}')
         print(f'  {DIM}Last /drive/command: {cmd_age}{RESET}')
         print()
         print(f'{BOLD}  DRIVE COMMAND LOG{RESET}')

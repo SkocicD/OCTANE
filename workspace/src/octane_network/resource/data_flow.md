@@ -121,6 +121,56 @@ Complete message flow from ROS2 topics to network transmission.
 
 ---
 
+---
+
+## Ground Station → Rover (Manual Control Tick)
+
+Sent on every GUI manual control timer tick (~50ms) while in Manual mode.
+
+```
+┌─────────────────┐
+│ Ground Station  │
+│ GUI tick        │
+│ W+D held, dial=80%                                    │
+│ GetKeyBitfield() → 0x09                               │
+│ speed_modifier  → 80                                  │
+└──────────────────────┬────────────────────────────────┘
+                       │  M frame [O][M][3][0x09][0x00][0x50][crc]
+                       │  (magic=O, type=M, len=3, bitfield=0x09,
+                       │   speed_hi=0x00, speed_lo=0x50=80, crc)
+                       │  TCP → octane.local:5000
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  network_comm_node.py                                   │
+│  decode_message() → {type:'manipulator',                │
+│                      bitfield:0x09, speed_modifier:80}  │
+│  Publishes:                                             │
+│    /manual_ctrl/key_state     (UInt8:  0x09)            │
+│    /manual_ctrl/speed_modifier (UInt16: 80)             │
+└──────────────────────┬────────────────────────────────┘
+                       │
+          ┌────────────┴────────────┐
+          ▼                         ▼
+┌──────────────────────┐  ┌──────────────────────────────┐
+│ manual_drive_node    │  │ manual_actuator_node         │
+│ on_key_state(0x09)   │  │ on_key_state(0x09)           │
+│ on_speed_modifier(80)│  │ (bits 4-7 are 0 → no action) │
+│ → left_vel=0.4       │  └──────────────────────────────┘
+│   right_vel=1.0      │
+│   speed_modifier=80  │
+│ Publishes DriveCommand│
+└──────────┬───────────┘
+           ▼
+┌─────────────────────────────────────────────────────────┐
+│ /drive/command: left=0.4, right=1.0, speed_modifier=80  │
+│                                                         │
+│ Effective: 0.4 × 0.2 × 0.80 = 6.4% motor RPM (left)   │
+│            1.0 × 0.2 × 0.80 = 16%  motor RPM (right)  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Key Design Principles
 
 1. **ROS2 topics are local only**: 

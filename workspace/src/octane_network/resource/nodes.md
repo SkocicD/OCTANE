@@ -21,6 +21,8 @@ TCP server bridging ROS2 topics to ground station communication.
 |-------|------|-------------|
 | `/supervisor/mode_command` | std_msgs/String | Mode command from ground station |
 | `/supervisor/fault_reset` | std_msgs/Empty | Fault reset command from ground station |
+| `/manual_ctrl/key_state` | std_msgs/UInt8 | Key bitfield from M frame (bits 0-7) |
+| `/manual_ctrl/speed_modifier` | std_msgs/UInt16 | Speed dial from M frame (0-500, default 100) |
 | `/network/client_ip` | std_msgs/String | GUI IP on connect, empty string on disconnect |
 | `/network/stream_request` | std_msgs/String | Video request forwarded to video_stream_node |
 

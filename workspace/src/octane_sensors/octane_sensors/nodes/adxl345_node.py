@@ -109,8 +109,9 @@ class KlipperMCU:
         self._lock = threading.Lock()
         self._handlers: dict[int, queue.Queue] = {}
         self._raw_q: queue.Queue | None = None
-        self.cmds: dict[str, int] = {}
+        self.cmds:  dict[str, int] = {}
         self.resps: dict[str, int] = {}
+        self.enums: dict[str, int] = {}  # flattened enumerations from identify
 
     def connect(self, timeout: float = 15.0):
         self._ser = serial.Serial(self._port, 250000, timeout=0.1)
@@ -188,48 +189,48 @@ class KlipperMCU:
                 self._handlers.pop(resp_id, None)
 
     def _identify(self, timeout: float):
+        # identify command = ID 1 (not 0 — 0 is get_uptime on Klipper MCU)
+        # identify_response format: resp_id=0, offset=%u, data=%*s (NO total field)
+        # Terminate when MCU returns empty data (offset past end of dict)
         CHUNK = 40
-        total_size: int | None = None
         chunks: dict[int, bytes] = {}
         raw_q: queue.Queue = queue.Queue()
         self._raw_q = raw_q
         deadline = time.time() + timeout
-        seq = 0
+        _seq = [self._seq]
 
         try:
             offset = 0
             while time.time() < deadline:
-                identify_pl = _enc_vlq(0) + _enc_vlq(offset) + _enc_vlq(CHUNK)
-                self._ser.write(_frame(identify_pl, seq))
-                seq = (seq + 1) & _MSG_SEQ
+                pl = _enc_vlq(1) + _enc_vlq(offset) + _enc_vlq(CHUNK)
+                self._ser.write(_frame(pl, _seq[0]))
+                _seq[0] = (_seq[0] + 1) & _MSG_SEQ
 
                 try:
-                    pl = raw_q.get(timeout=2.0)
+                    pl = raw_q.get(timeout=0.5)
                 except queue.Empty:
-                    continue
+                    continue  # retry same offset
 
                 try:
                     pos = 0
-                    _resp_id, pos = _dec_vlq(pl, pos)
+                    resp_id, pos = _dec_vlq(pl, pos)
+                    if resp_id != 0:
+                        continue  # not identify_response (e.g. uptime frame)
                     resp_off, pos = _dec_vlq(pl, pos)
-                    resp_tot, pos = _dec_vlq(pl, pos)
                     data_len = pl[pos]; pos += 1
                     data = pl[pos:pos + data_len]
                 except Exception:
                     continue
 
-                if total_size is None:
-                    total_size = resp_tot
-                if data:
-                    chunks[resp_off] = data
-                next_off = resp_off + len(data)
-                if total_size and next_off >= total_size:
-                    break
-                offset = next_off
+                if not data:
+                    break  # MCU signals end of dict with empty payload
+                chunks[resp_off] = data
+                offset = resp_off + data_len
         finally:
             self._raw_q = None
+            self._seq = _seq[0]
 
-        if not chunks or total_size is None:
+        if not chunks:
             raise RuntimeError('Klipper identify timed out')
 
         compressed = b''.join(chunks[k] for k in sorted(chunks))
@@ -238,8 +239,24 @@ class KlipperMCU:
         except Exception as e:
             raise RuntimeError(f'Klipper identify dict decompress failed: {e}')
 
-        self.cmds  = d.get('commands',  {})
-        self.resps = {v: k for k, v in d.get('responses', {}).items()}
+        self.cmds  = d.get('commands',  {})   # {name: id}
+        self.resps = d.get('responses', {})   # {name: id}
+        for group in d.get('enumerations', {}).values():
+            if isinstance(group, dict):
+                for k, v in group.items():
+                    if isinstance(v, list) and len(v) == 2:
+                        # Range encoding: [start_value, count] → expand
+                        # e.g. "gpio0": [0, 30] → gpio0=0, gpio1=1, ..., gpio29=29
+                        start_val, count = v
+                        m = re.match(r'^(.*?)(\d+)$', k)
+                        if m:
+                            base, start_idx = m.group(1), int(m.group(2))
+                            for i in range(count):
+                                self.enums[f'{base}{start_idx + i}'] = start_val + i
+                        else:
+                            self.enums[k] = start_val
+                    else:
+                        self.enums[k] = v
 
     def disconnect(self):
         self._running = False
@@ -308,7 +325,7 @@ class Adxl345Node(Node):
         self.get_logger().info(f'[ADXL345] Connecting to {port}')
 
         self._mcu = KlipperMCU(port)
-        self._mcu.connect(timeout=15.0)
+        self._mcu.connect(timeout=30.0)
         self.get_logger().info('[ADXL345] Klipper identify OK — configuring sensor')
 
         self._configure()
@@ -320,57 +337,55 @@ class Adxl345Node(Node):
     def _configure(self):
         mcu = self._mcu
 
+        # BTT ADXL345 V2.0: RP2040 hardware SPI1a
+        # GPIO9=CS, GPIO8=MISO(RX), GPIO10=SCLK, GPIO11=MOSI(TX)
+        CS_PIN  = 9
+        SPI_BUS = mcu.enums.get('spi1a', 4)  # spi1a = SPI1 on GPIO8/10/11
+        self.get_logger().info(f'[ADXL345] SPI bus={SPI_BUS} CS=GPIO{CS_PIN}')
+
         # 1. Allocate 2 OIDs: 0=SPI, 1=ADXL345
         mcu.send_cmd('allocate_oids count=%c', 2)
         time.sleep(0.05)
 
-        # 2. Configure SPI peripheral
-        mcu.send_cmd(
-            'config_spi oid=%c bus=%u pin=%u mode=%u rate=%u shutdown_msg=%*s',
-            0, _SPI_BUS, _SPI_PIN, _SPI_MODE, _SPI_RATE, b'',
-        )
+        # 2. Configure CS pin for SPI OID 0
+        mcu.send_cmd('config_spi oid=%c pin=%u cs_active_high=%c', 0, CS_PIN, 0)
         time.sleep(0.05)
 
-        # 3. Configure ADXL345 OID
-        cmd_name = next(
-            (k for k in mcu.cmds if k.startswith('config_adxl345')), None
-        )
-        if cmd_name is None:
-            raise RuntimeError('[ADXL345] config_adxl345 not found in firmware')
-        # Handle both 'config_adxl345 oid=%c spi_oid=%c' and
-        # 'config_adxl345 oid=%c spi_oid=%c axes_data=%u'
-        axes_data = 0x00
-        if 'axes_data' in cmd_name:
-            mcu.send_cmd(cmd_name, 1, 0, axes_data)
-        else:
-            mcu.send_cmd(cmd_name, 1, 0)
+        # 3. Configure hardware SPI1 bus on OID 0
+        mcu.send_cmd('spi_set_bus oid=%c spi_bus=%u mode=%u rate=%u', 0, SPI_BUS, _SPI_MODE, _SPI_RATE)
         time.sleep(0.05)
 
-        # 4. Finalize config (required by some Klipper versions)
+        # 4. Configure ADXL345 OID 1 linked to SPI OID 0
+        mcu.send_cmd('config_adxl345 oid=%c spi_oid=%c', 1, 0)
+        time.sleep(0.05)
+
+        # 5. Finalize config
         if 'finalize_config crc=%u' in mcu.cmds:
             mcu.send_cmd('finalize_config crc=%u', 0)
             time.sleep(0.05)
 
-        # 5. Start bulk query
+        # 6. Register adxl345_data response handler
+        data_resp = next(
+            (k for k in mcu.resps if 'adxl345_data' in k or 'sensor_bulk_data' in k),
+            None,
+        )
+        if data_resp is None:
+            raise RuntimeError('[ADXL345] No bulk data response found in firmware dict')
+        self.get_logger().info(f'[ADXL345] Using response: {data_resp}')
+        self._data_q = mcu.register_resp(data_resp)
+        threading.Thread(target=self._data_loop, daemon=True).start()
+
+        # 7. Start bulk query — rest_ticks MUST be non-zero (0 = stop!)
+        # 500000 ticks @ 125 MHz ≈ 4 ms = ~250 Hz sample rate
         query_name = next(
             (k for k in mcu.cmds if k.startswith('query_adxl345')), None
         )
         if query_name is None:
             raise RuntimeError('[ADXL345] query_adxl345 not found in firmware')
-
-        # Register data response handler
-        data_resp = next(
-            (k for k in mcu.resps.values() if 'adxl345_data' in k), None
-        )
-        if data_resp:
-            self._data_q = mcu.register_resp(data_resp)
-            threading.Thread(target=self._data_loop, daemon=True).start()
-
-        # rest_ticks=0 means run continuously
-        if 'time=%u' in query_name:
-            mcu.send_cmd(query_name, 1, 0, 0)
+        if 'clock=%u' in query_name:
+            mcu.send_cmd(query_name, 1, 0, 500000)
         else:
-            mcu.send_cmd(query_name, 1, 0)
+            mcu.send_cmd(query_name, 1, 500000)
 
     def _data_loop(self):
         """Drain adxl345_data responses and cache latest sample."""
