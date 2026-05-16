@@ -18,7 +18,7 @@ def generate_launch_description():
         DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus_v0.1.pt', description='Path to nexus.pt checkpoint'),
         DeclareLaunchArgument('depth_stats_path', default_value='',     description='Path to depth_stats.json'),
         DeclareLaunchArgument('inference_rate',   default_value='5.0',   description='Terrain inference Hz'),
-        DeclareLaunchArgument('device',           default_value='auto',  description='auto | cuda | cpu'),
+        DeclareLaunchArgument('device',           default_value='cpu',   description='auto | cuda | cpu — cpu avoids GPU conflict with depth estimation'),
         DeclareLaunchArgument('use_imu',          default_value='False', description='Use IMU roll/pitch; set False to feed zeros'),
         LogInfo(msg='Starting mapping subsystem'),
         # Stub identity odom→base_link until octane_localization is ready

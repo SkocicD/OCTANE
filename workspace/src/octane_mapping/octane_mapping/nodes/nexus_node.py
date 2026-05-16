@@ -203,6 +203,11 @@ class NexusNode(Node):
         self._inferring = True
         try:
             self._do_inference()
+        except Exception as e:
+            import traceback
+            self.get_logger().error(
+                f'Inference error: {e}\n{traceback.format_exc()}'
+            )
         finally:
             self._inferring = False
 
