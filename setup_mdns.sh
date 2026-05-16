@@ -28,20 +28,27 @@ echo "[CONFIG] Interfaces : ${OCTANE_INTERFACES:-all}"
 echo ""
 
 # ── 1. Hostname ───────────────────────────────────────────────────────────────
-echo "[1/4] Setting hostname to '${OCTANE_HOSTNAME}'..."
+echo "[1/5] Setting hostname to '${OCTANE_HOSTNAME}'..."
 hostnamectl set-hostname "${OCTANE_HOSTNAME}"
 echo "      $(hostname)"
 
-# ── 2. Install avahi ──────────────────────────────────────────────────────────
-echo "[2/4] Ensuring avahi-daemon is installed..."
+# ── 2. /etc/hosts ─────────────────────────────────────────────────────────────
+echo "[2/5] Updating /etc/hosts for local hostname resolution..."
+# Remove any existing 127.0.1.1 line and re-add with current hostname
+sed -i '/^127\.0\.1\.1/d' /etc/hosts
+echo "127.0.1.1	${OCTANE_HOSTNAME}" >> /etc/hosts
+echo "      done"
+
+# ── 3. Install avahi ──────────────────────────────────────────────────────────
+echo "[3/5] Ensuring avahi-daemon is installed..."
 if ! dpkg -s avahi-daemon &>/dev/null; then
     apt-get install -y avahi-daemon avahi-utils
 else
     echo "      already installed"
 fi
 
-# ── 3. Configure avahi-daemon.conf ────────────────────────────────────────────
-echo "[3/4] Writing /etc/avahi/avahi-daemon.conf..."
+# ── 4. Configure avahi-daemon.conf ────────────────────────────────────────────
+echo "[4/5] Writing /etc/avahi/avahi-daemon.conf..."
 
 # Build allow-interfaces line only if specific interfaces are set
 if [ -n "${OCTANE_INTERFACES}" ]; then
@@ -80,8 +87,8 @@ rlimit-stack=4194304
 rlimit-nproc=3
 EOF
 
-# ── 4. Register OCTANE TCP service ────────────────────────────────────────────
-echo "[4/4] Writing /etc/avahi/services/octane.service..."
+# ── 5. Register OCTANE TCP service ────────────────────────────────────────────
+echo "[5/5] Writing /etc/avahi/services/octane.service..."
 mkdir -p /etc/avahi/services
 
 cat > /etc/avahi/services/octane.service << EOF
@@ -96,7 +103,36 @@ cat > /etc/avahi/services/octane.service << EOF
 </service-group>
 EOF
 
-# ── Enable and restart ────────────────────────────────────────────────────────
+# ── Install boot-time hosts-fix service ───────────────────────────────────────
+cat > /usr/local/bin/octane-fix-hosts.sh << 'FIXEOF'
+#!/bin/bash
+# Ensure the current hostname is resolvable locally via /etc/hosts.
+HOSTNAME="$(hostname)"
+sed -i '/^127\.0\.1\.1/d' /etc/hosts
+echo "127.0.1.1	${HOSTNAME}" >> /etc/hosts
+FIXEOF
+chmod +x /usr/local/bin/octane-fix-hosts.sh
+
+cat > /etc/systemd/system/octane-fix-hosts.service << 'SVCEOF'
+[Unit]
+Description=Fix /etc/hosts local hostname entry
+DefaultDependencies=no
+Before=network-pre.target avahi-daemon.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/octane-fix-hosts.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable octane-fix-hosts.service
+
+# ── Enable and restart avahi ──────────────────────────────────────────────────
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon
 
