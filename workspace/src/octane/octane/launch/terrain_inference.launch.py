@@ -2,7 +2,7 @@
 
 Usage:
   ros2 launch octane terrain_inference.launch.py \\
-    model_path:=workspace/models/octane_nexus/nexus.pt \\
+    model_path:=workspace/models/octane_nexus/nexus_v0.1.pt \\
     depth_stats_path:=/path/to/depth_stats.json \\
     inference_rate:=5.0
 
@@ -22,7 +22,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus.pt', description='Path to nexus.pt checkpoint'),
+        DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus_v0.1.pt', description='Path to nexus.pt checkpoint'),
         DeclareLaunchArgument('depth_stats_path', default_value='',    description='Path to depth_stats.json'),
         DeclareLaunchArgument('inference_rate',   default_value='5.0', description='Inference Hz'),
         DeclareLaunchArgument('device',           default_value='auto', description='auto | cuda | cpu'),

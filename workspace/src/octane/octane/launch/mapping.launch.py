@@ -15,7 +15,7 @@ from launch_ros.descriptions import ComposableNode
 
 def generate_launch_description():
     nodes = [
-        DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus.pt', description='Path to nexus.pt checkpoint'),
+        DeclareLaunchArgument('model_path',       default_value='/media/csulunabotics/SSD2/OCTANE/workspace/models/octane_nexus/nexus_v0.1.pt', description='Path to nexus.pt checkpoint'),
         DeclareLaunchArgument('depth_stats_path', default_value='',     description='Path to depth_stats.json'),
         DeclareLaunchArgument('inference_rate',   default_value='5.0',   description='Terrain inference Hz'),
         DeclareLaunchArgument('device',           default_value='auto',  description='auto | cuda | cpu'),
