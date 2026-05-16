@@ -93,7 +93,7 @@ class NexusNode(Node):
         self.declare_parameter('device',           'auto')
         self.declare_parameter('imu_topic',        'sensors/imu/accel')
         self.declare_parameter('use_imu',          False)
-        self.declare_parameter('debug_terrain',    False)
+        self.declare_parameter('debug_terrain',    True)
 
         model_path       = self.get_parameter('model_path').value
         depth_stats_path = self.get_parameter('depth_stats_path').value
