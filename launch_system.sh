@@ -10,6 +10,7 @@
 #   ./launch_system.sh perception       - Launch perception only
 #   ./launch_system.sh mapping          - Launch mapping only
 #   ./launch_system.sh network          - Launch network only
+#   ./launch_system.sh localization     - Launch far cameras + AprilTag triangulator
 #   ./launch_system.sh logging          - Launch camera recorder only
 #
 # Flags (combinable with any subsystem or 'all'):
@@ -212,6 +213,9 @@ case "$SUBSYSTEM" in
         ros2 launch "$LAUNCH_PKG" network.launch.py \
             tcp_port:="${OCTANE_TCP_PORT}"
         ;;
+    localization)
+        run_launch localization
+        ;;
     logging)
         run_launch logging
         ;;
@@ -230,6 +234,8 @@ case "$SUBSYSTEM" in
         ros2 launch "$LAUNCH_PKG" mapping.launch.py &
         PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" manual_ctrl.launch.py &
+        PIDS+=($!)
+        ros2 launch "$LAUNCH_PKG" localization.launch.py &
         PIDS+=($!)
         ros2 launch "$LAUNCH_PKG" network.launch.py \
             tcp_port:="${OCTANE_TCP_PORT}" &
