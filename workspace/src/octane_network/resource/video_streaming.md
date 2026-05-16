@@ -26,7 +26,7 @@ Wire format: `[O][V][4][source_id][variant][scale][fps][CRC]` — always **8 byt
 
 | Field | Size | Values |
 |---|---|---|
-| `source_id` | 1B | 0–5 = individual camera, 6 = mosaic, 7 = terrain map, 255 = stop all |
+| `source_id` | 1B | 0–5 = individual camera, 6 = mosaic, 7 = terrain map, 8–11 = far ESP32 cameras, 255 = stop all |
 | `variant` | 1B | `R` (0x52) = RGB, `D` (0x44) = depth heatmap, `T` (0x54) = terrain raw |
 | `scale` | 1B | 1–100 (% of native resolution); **0 = use server default** (ignored for terrain) |
 | `fps` | 1B | 1–30 (target frame rate; 1 Hz recommended for terrain) |
@@ -49,9 +49,14 @@ Sending `source_id=255` stops all active streams immediately.
 | 5 | near_rgb_back_rear | 480×360 |
 | 6 | mosaic (all 6 tiled 3×2) | 480×240 |
 | 7 | terrain map (nexus model output) | 200×200 grid, raw binary |
+| 8 | far_front (ESP32, localization) | varies (JPEG from Pi) |
+| 9 | far_right (ESP32, localization) | varies (JPEG from Pi) |
+| 10 | far_back (ESP32, localization) | varies (JPEG from Pi) |
+| 11 | far_left (ESP32, localization) | varies (JPEG from Pi) |
 | 255 | stop all | — |
 
-IDs match declaration order in `octane/config/cameras.yaml`.
+IDs 0–5 match declaration order in `octane/config/cameras.yaml`.
+IDs 8–11 subscribe to `perception/camera/far/{front,right,back,left}/frame` published by `octane_localization/far_camera_receiver_node`. **RGB only** — depth variant is not supported for far cameras.
 
 ---
 

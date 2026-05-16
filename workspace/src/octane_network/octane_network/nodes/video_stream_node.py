@@ -16,6 +16,10 @@ source_id values:
     5 = near_rgb_back_rear
     6 = mosaic  (all 6 tiled 3×2)
     7 = terrain map (raw binary, variant T)
+    8 = far_front  (ESP32 camera, RGB only)
+    9 = far_right  (ESP32 camera, RGB only)
+    10 = far_back  (ESP32 camera, RGB only)
+    11 = far_left  (ESP32 camera, RGB only)
     255 = stop all
 
 variant:  R = RGB,  D = depth heatmap (COLORMAP_INFERNO)
@@ -51,9 +55,20 @@ from std_msgs.msg import String
 
 from octane_msgs.msg import CameraFrame
 
-SOURCE_MOSAIC = 6
-SOURCE_MAP    = 7
-SOURCE_STOP   = 255
+SOURCE_MOSAIC    = 6
+SOURCE_MAP       = 7
+SOURCE_FAR_FRONT = 8
+SOURCE_FAR_RIGHT = 9
+SOURCE_FAR_BACK  = 10
+SOURCE_FAR_LEFT  = 11
+SOURCE_STOP      = 255
+
+_FAR_CAM_SOURCES = {
+    SOURCE_FAR_FRONT: {'name': 'far_front', 'topic': 'perception/camera/far/front/frame'},
+    SOURCE_FAR_RIGHT: {'name': 'far_right',  'topic': 'perception/camera/far/right/frame'},
+    SOURCE_FAR_BACK:  {'name': 'far_back',   'topic': 'perception/camera/far/back/frame'},
+    SOURCE_FAR_LEFT:  {'name': 'far_left',   'topic': 'perception/camera/far/left/frame'},
+}
 
 VARIANT_RGB     = ord('R')
 VARIANT_DEPTH   = ord('D')
@@ -148,6 +163,10 @@ class VideoStreamNode(Node):
         self._terrain_subs:   list = []
         self._terrain_frames: Dict[str, Optional[Image]] = {}
 
+        # Far cameras (ESP32, localization package, sensor_msgs/Image, RGB only)
+        self._far_subs:  list = []
+        self._far_frame: Optional[Image] = None
+
         self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         latched_qos = QoSProfile(
@@ -206,12 +225,17 @@ class VideoStreamNode(Node):
             self._subscribe_terrain()
         elif source_id == SOURCE_MOSAIC:
             self._subscribe_mosaic(variant)
+        elif source_id in _FAR_CAM_SOURCES:
+            self._subscribe_far(source_id)
         else:
             self._subscribe_single(source_id, variant)
 
         self._stream_timer = self.create_timer(1.0 / fps, self._on_timer)
 
-        name  = self._source_map.get(source_id, {}).get('name', f'src_{source_id}')
+        name = (
+            _FAR_CAM_SOURCES.get(source_id, {}).get('name')
+            or self._source_map.get(source_id, {}).get('name', f'src_{source_id}')
+        )
         vname = {VARIANT_RGB: 'RGB', VARIANT_DEPTH: 'depth', VARIANT_TERRAIN: 'terrain'}.get(variant, '?')
         self.get_logger().info(
             f'Streaming {name} {vname}  quality={quality}  '
@@ -233,6 +257,10 @@ class VideoStreamNode(Node):
             self.destroy_subscription(sub)
         self._terrain_subs.clear()
         self._terrain_frames.clear()
+        for sub in self._far_subs:
+            self.destroy_subscription(sub)
+        self._far_subs.clear()
+        self._far_frame     = None
         self._latest_frame  = None
         self._active_source = None
 
@@ -266,6 +294,14 @@ class VideoStreamNode(Node):
             )
             self._terrain_subs.append(sub)
 
+    def _subscribe_far(self, source_id: int):
+        src = _FAR_CAM_SOURCES.get(source_id)
+        if src is None:
+            self.get_logger().error(f'Unknown far camera source_id {source_id}')
+            return
+        sub = self.create_subscription(Image, src['topic'], self._far_cb, 10)
+        self._far_subs.append(sub)
+
     # ── Frame callbacks ────────────────────────────────────────────────────────
 
     def _single_cb(self, msg: CameraFrame):
@@ -279,6 +315,10 @@ class VideoStreamNode(Node):
     def _terrain_cb(self, key: str, msg: Image):
         with self._lock:
             self._terrain_frames[key] = msg
+
+    def _far_cb(self, msg: Image):
+        with self._lock:
+            self._far_frame = msg
 
     # ── Timer: encode + send ───────────────────────────────────────────────────
 
@@ -296,6 +336,16 @@ class VideoStreamNode(Node):
 
         if source_id == SOURCE_MOSAIC:
             bgr = self._build_mosaic(variant)
+        elif source_id in _FAR_CAM_SOURCES:
+            with self._lock:
+                frame = self._far_frame
+            if frame is None:
+                return
+            try:
+                bgr = self.bridge.imgmsg_to_cv2(frame, desired_encoding='bgr8')
+            except Exception as e:
+                self.get_logger().error(f'Far camera decode error: {e}')
+                return
         else:
             with self._lock:
                 frame = self._latest_frame
