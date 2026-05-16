@@ -8,9 +8,13 @@ Protocol: workspace/src/octane_network/resource/messages.md
 Implementation: workspace/src/octane_network/octane_network/protocol.py
 """
 
+import json
+import time
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from geometry_msgs.msg import Pose2D
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String, Empty, UInt8, UInt16
 import socket
@@ -63,6 +67,8 @@ class NetworkCommNode(Node):
             Imu, 'sensors/imu/accel', self._imu_cb,
             QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT),
         )
+        self.create_subscription(Pose2D, 'localization/pose',     self._pose_cb,     qos)
+        self.create_subscription(String, 'localization/far_tags', self._far_tags_cb, qos)
 
         # ROS2 publishers
         self.mode_command_pub    = self.create_publisher(String, '/supervisor/mode_command',  qos)
@@ -77,6 +83,9 @@ class NetworkCommNode(Node):
         self.current_state = 'STANDBY'
         self.current_fault = None
         self._latest_accel: tuple | None = None
+        self._latest_pose:  tuple | None = None   # (x, y, theta)
+        self._tag_obs:      dict  = {}            # tag_id → {id, dist, angle_deg, ts}
+        self._tag_timeout   = 2.0                 # seconds before a tag obs goes stale
         self.client_socket = None
         self.connected = False
         self.running = False
@@ -328,16 +337,44 @@ class NetworkCommNode(Node):
         a = msg.linear_acceleration
         self._latest_accel = (a.x, a.y, a.z)
 
+    def _pose_cb(self, msg: Pose2D):
+        self._latest_pose = (msg.x, msg.y, msg.theta)
+
+    def _far_tags_cb(self, msg: String):
+        try:
+            data = json.loads(msg.data)
+            now = time.monotonic()
+            for t in data.get('tags', []):
+                tid = int(t['id'])
+                self._tag_obs[tid] = {
+                    'id': tid,
+                    'dist': float(t['dist']),
+                    'angle_deg': float(t['angle_deg']),
+                    'ts': now,
+                }
+        except Exception:
+            pass
+
     def send_telemetry(self):
         """Send periodic telemetry to GUI using binary protocol."""
         if not self.connected or not self.client_socket:
             return
+
+        # Collect fresh tag observations (drop stale)
+        now = time.monotonic()
+        fresh_tags = [
+            v for v in self._tag_obs.values()
+            if now - v['ts'] < self._tag_timeout
+        ]
+        self._tag_obs = {v['id']: v for v in fresh_tags}
 
         try:
             telemetry_frame = encode_telemetry(
                 self.current_state,
                 fault=self.current_fault,
                 accel=self._latest_accel,
+                pose=self._latest_pose,
+                tags=fresh_tags if fresh_tags else None,
             )
             self.client_socket.sendall(telemetry_frame)
 

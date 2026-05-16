@@ -59,6 +59,10 @@ VIDEO_SRC_RIGHT_FRONT  = 4
 VIDEO_SRC_BACK_REAR    = 5
 VIDEO_SRC_MOSAIC       = 6   # all 6 cameras tiled
 VIDEO_SRC_MAP          = 7   # nvblox ESDF slice
+VIDEO_SRC_FAR_FRONT    = 8   # ESP32 localization camera
+VIDEO_SRC_FAR_RIGHT    = 9
+VIDEO_SRC_FAR_BACK     = 10
+VIDEO_SRC_FAR_LEFT     = 11
 VIDEO_SRC_STOP         = 0xFF
 
 # Video variant codes
@@ -92,15 +96,20 @@ def crc8(data: bytes) -> int:
 
 def encode_telemetry(state: str, fault: Optional[str] = None,
                      battery: Optional[float] = None,
-                     accel: Optional[tuple] = None) -> bytes:
+                     accel: Optional[tuple] = None,
+                     pose: Optional[tuple] = None,
+                     tags: Optional[list] = None) -> bytes:
     """Encode telemetry: T + state_char + optional fields.
 
     Wire format: [O][T][n][state][optional fields][crc]
 
     Optional field markers:
-      B + float32LE  — battery voltage (volts)
-      F + char       — active fault code
-      I + 3×float32LE — accelerometer x, y, z (m/s²)
+      B + float32LE        — battery voltage (volts)
+      F + char             — active fault code
+      I + 3×float32LE     — accelerometer x, y, z (m/s²)
+      L + 3×float32LE     — localization pose: x (m), y (m), theta (rad)
+      G + count + count×(uint8 tag_id + 2×float32LE dist_m, angle_deg)
+                           — AprilTag observations (up to 3)
     """
     state_map = {'STANDBY': b'0', 'MANUAL': b'1',
                  'AUTONOMOUS': b'2', 'FAULT': b'3'}
@@ -114,6 +123,14 @@ def encode_telemetry(state: str, fault: Optional[str] = None,
     if accel is not None:
         ax, ay, az = accel
         payload += b'I' + struct.pack('<fff', ax, ay, az)
+    if pose is not None:
+        x, y, theta = pose
+        payload += b'L' + struct.pack('<fff', x, y, theta)
+    if tags:
+        capped = tags[:3]
+        payload += b'G' + bytes([len(capped)])
+        for t in capped:
+            payload += struct.pack('<Bff', t['id'] & 0xFF, t['dist'], t['angle_deg'])
 
     header = struct.pack('!BBB', MAGIC, TYPE_TELEMETRY, len(payload))
     frame = header + payload
@@ -283,6 +300,23 @@ def decode_message(data: bytes) -> Optional[Dict[str, Any]]:
                 ax, ay, az = struct.unpack('<fff', payload[idx+1:idx+13])
                 result['accel'] = (ax, ay, az)
                 idx += 13
+            elif marker == b'L' and idx + 13 <= len(payload):
+                x, y, theta = struct.unpack('<fff', payload[idx+1:idx+13])
+                result['pose'] = (x, y, theta)
+                idx += 13
+            elif marker == b'G' and idx + 1 <= len(payload):
+                count = payload[idx+1]
+                needed = idx + 2 + count * 9
+                if needed <= len(payload):
+                    obs = []
+                    for i in range(count):
+                        base = idx + 2 + i * 9
+                        tag_id, dist, angle_deg = struct.unpack('<Bff', payload[base:base+9])
+                        obs.append({'id': tag_id, 'dist': dist, 'angle_deg': angle_deg})
+                    result['tags'] = obs
+                    idx = needed
+                else:
+                    idx += 1
             else:
                 idx += 1
 
