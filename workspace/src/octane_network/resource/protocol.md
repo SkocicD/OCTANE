@@ -32,7 +32,7 @@ Every message on the wire has this structure:
 - `A` (0x41) = **ACK** - Rover confirms command received
 - `F` (0x46) = **Fault Alert** - Rover immediately reports critical fault
 - `M` (0x4D) = **Manipulator** - Ground sends key state + speed dial (manual control tick)
-- `V` (0x56) = **Video Request** - Ground requests camera/map stream (see `video_streaming.md`)
+- `V` (0x56) = **Video Request** - Ground requests camera or terrain map stream (see `video_streaming.md`)
 
 ---
 

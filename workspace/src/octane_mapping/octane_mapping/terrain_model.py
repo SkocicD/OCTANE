@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 
-from octane_mapping.terrain_cameras import POSE_TENSOR
+from octane_mapping.terrain_cameras import POSE_TENSOR, compute_ray_maps
 
 
 class PoseEmbedding(nn.Module):
@@ -85,6 +85,12 @@ class TerrainModel(nn.Module):
         self.pose_to_s2 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S2, 1)
         self.pose_to_s1 = nn.Conv2d(self.POSE_EMBED, self.PROJ_S1, 1)
 
+        self.register_buffer('ray_maps', torch.from_numpy(compute_ray_maps(224)))
+        self.ray_to_s4 = nn.Conv2d(3, self.PROJ_S4, 1, bias=False)
+        self.ray_to_s3 = nn.Conv2d(3, self.PROJ_S3, 1, bias=False)
+        self.ray_to_s2 = nn.Conv2d(3, self.PROJ_S2, 1, bias=False)
+        self.ray_to_s1 = nn.Conv2d(3, self.PROJ_S1, 1, bias=False)
+
         self.rot_mlp = nn.Sequential(
             nn.Linear(6, 64), nn.ReLU(inplace=True),
             nn.Linear(64, self.ROT_EMBED),
@@ -143,6 +149,12 @@ class TerrainModel(nn.Module):
         s3 = s3 + self.pose_to_s3(pe)
         s2 = s2 + self.pose_to_s2(pe)
         s1 = s1 + self.pose_to_s1(pe)
+
+        ray = self.ray_maps.unsqueeze(0).expand(B, -1, -1, -1, -1).reshape(B * 12, 3, 224, 224)
+        s4 = s4 + self.ray_to_s4(F.interpolate(ray, (56, 56), mode='bilinear', align_corners=False))
+        s3 = s3 + self.ray_to_s3(F.interpolate(ray, (28, 28), mode='bilinear', align_corners=False))
+        s2 = s2 + self.ray_to_s2(F.interpolate(ray, (14, 14), mode='bilinear', align_corners=False))
+        s1 = s1 + self.ray_to_s1(F.interpolate(ray,  (7,  7), mode='bilinear', align_corners=False))
 
         s4 = s4.view(B, 12, self.PROJ_S4, 56, 56).mean(1)
         s3 = s3.view(B, 12, self.PROJ_S3, 28, 28).mean(1)
