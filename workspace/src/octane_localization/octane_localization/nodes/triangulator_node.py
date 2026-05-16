@@ -79,7 +79,7 @@ class TriangulatorNode(Node):
 
         self.declare_parameter('config_file',  '')
         self.declare_parameter('publish_rate', 10.0)
-        self.declare_parameter('obs_timeout',  _DEFAULT_TIMEOUT)
+        self.declare_parameter('obs_timeout',  5.0)
         self.declare_parameter('min_tags',     2)
 
         config_file  = self.get_parameter('config_file').value
@@ -118,7 +118,7 @@ class TriangulatorNode(Node):
     def _tag_cb(self, msg: String):
         data = json.loads(msg.data)
         cam  = data.get('cam', '')
-        ts   = data.get('ts', self.get_clock().now().nanoseconds / 1e9)
+        now  = self.get_clock().now().nanoseconds / 1e9  # use arrival time, not Pi ts
         with self._lock:
             for t in data.get('tags', []):
                 tid = int(t['id'])
@@ -127,7 +127,7 @@ class TriangulatorNode(Node):
                         float(t['dist']),
                         cam,
                         math.radians(float(t['angle_deg'])),
-                        ts,
+                        now,
                     )
 
     def _run(self):

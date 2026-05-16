@@ -8,7 +8,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('port',         default_value='5051',  description='TCP port the Pi connects to'),
         DeclareLaunchArgument('publish_rate', default_value='10.0',  description='Triangulator output Hz'),
-        DeclareLaunchArgument('obs_timeout',  default_value='2.0',   description='Seconds before a tag detection is considered stale'),
+        DeclareLaunchArgument('obs_timeout',  default_value='5.0',   description='Seconds before a tag detection is considered stale'),
         DeclareLaunchArgument('min_tags',     default_value='2',     description='Minimum distinct tags required to publish a pose'),
 
         LogInfo(msg='Starting localization subsystem'),
