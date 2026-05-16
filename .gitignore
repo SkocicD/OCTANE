@@ -9,6 +9,9 @@ workspace/build/
 workspace/install/
 workspace/log/
 
+# Model checkpoints (large binaries — store separately, not in git)
+workspace/models/
+
 # Python
 __pycache__/
 *.pyc
