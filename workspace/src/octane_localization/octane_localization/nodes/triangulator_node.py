@@ -139,6 +139,10 @@ class TriangulatorNode(Node):
             }
 
         if len(obs) < self._min_tags:
+            self.get_logger().warn(
+                f'triangulator: only {len(obs)}/{self._min_tags} fresh tag obs — skipping',
+                throttle_duration_sec=5.0,
+            )
             return
 
         tag_ids = list(obs.keys())
@@ -157,6 +161,11 @@ class TriangulatorNode(Node):
                         pass
 
         if not candidates:
+            self.get_logger().warn(
+                f'triangulator: all {len(tag_ids)} tag pairs failed triangle inequality — '
+                f'check distances vs tag positions in apriltags.yaml',
+                throttle_duration_sec=5.0,
+            )
             return
 
         # Median position across all candidates (robust to one bad solution)

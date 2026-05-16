@@ -9,6 +9,7 @@ Implementation: workspace/src/octane_network/octane_network/protocol.py
 """
 
 import json
+import math
 import time
 
 import rclpy
@@ -339,6 +340,10 @@ class NetworkCommNode(Node):
 
     def _pose_cb(self, msg: Pose2D):
         self._latest_pose = (msg.x, msg.y, msg.theta)
+        self.get_logger().info(
+            f'pose received: ({msg.x:.3f}, {msg.y:.3f}) heading {math.degrees(msg.theta):.1f}°',
+            throttle_duration_sec=2.0,
+        )
 
     def _far_tags_cb(self, msg: String):
         try:
