@@ -88,7 +88,7 @@ class TriangulatorNode(Node):
         self._min_tags = int(self.get_parameter('min_tags').value)
 
         if not config_file:
-            pkg = get_package_share_directory('octane_localization')
+            pkg = get_package_share_directory('octane')
             config_file = os.path.join(pkg, 'config', 'apriltags.yaml')
 
         with open(config_file) as f:
