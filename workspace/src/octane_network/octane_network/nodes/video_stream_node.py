@@ -15,7 +15,7 @@ source_id values:
     4 = near_rgb_right_front
     5 = near_rgb_back_rear
     6 = mosaic  (all 6 tiled 3×2)
-    7 = nvblox ESDF map slice
+    7 = terrain map (raw binary, variant T)
     255 = stop all
 
 variant:  R = RGB,  D = depth heatmap (COLORMAP_INFERNO)
@@ -33,7 +33,9 @@ UDP frame format (rover → GUI, port udp_port):
 
 import os
 import socket
+import struct
 import threading
+import zlib
 from typing import Dict, Optional
 
 import cv2
@@ -44,6 +46,7 @@ from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 from octane_msgs.msg import CameraFrame
@@ -52,8 +55,32 @@ SOURCE_MOSAIC = 6
 SOURCE_MAP    = 7
 SOURCE_STOP   = 255
 
-VARIANT_RGB   = ord('R')
-VARIANT_DEPTH = ord('D')
+VARIANT_RGB     = ord('R')
+VARIANT_DEPTH   = ord('D')
+VARIANT_TERRAIN = ord('T')
+
+# Terrain payload layout (assembled before zlib compression):
+#   [0]   version   uint8   = 1
+#   [1]   flags     uint8   bit0=has_terrain  bit1=has_pose  bit2=has_nav  bit7=zlib_compressed
+#   [2-3] reserved  uint16  = 0
+#   ── terrain section (flags & 0x01) ──────────────────────────────
+#   [4]   width     uint32  = 200
+#   [8]   height    uint32  = 200
+#   [12]  cell_m    float32 = 0.05  (metres per grid cell)
+#   [16]  height    float32[200*200]  metres, row-major
+#   [+]   rocks     uint8[200*200]   0-255
+#   [+]   craters   uint8[200*200]   0-255
+#   [+]   walls     uint8[200*200]   0-255
+#   ── pose section (flags & 0x02, future) ─────────────────────────
+#   pos_x/y/z float32×3 (metres), roll/pitch/yaw float32×3 (radians)
+#   ── nav section (flags & 0x04, future) ──────────────────────────
+#   left_motor float32, right_motor float32, bucket uint8, _pad uint8×3
+_TERRAIN_TOPICS = {
+    'height':  'mapping/terrain/height',
+    'rocks':   'mapping/terrain/rocks',
+    'craters': 'mapping/terrain/craters',
+    'walls':   'mapping/terrain/walls',
+}
 
 _UDP_HEADER   = 8     # bytes
 _CHUNK_SIZE   = 1392  # 1400 MTU - 8 header
@@ -117,6 +144,10 @@ class VideoStreamNode(Node):
         self._mosaic_subs:   list = []
         self._mosaic_frames: Dict[int, Optional[CameraFrame]] = {}
 
+        # Terrain map: one sub per nexus output topic
+        self._terrain_subs:   list = []
+        self._terrain_frames: Dict[str, Optional[Image]] = {}
+
         self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         latched_qos = QoSProfile(
@@ -172,7 +203,7 @@ class VideoStreamNode(Node):
         self._active_quality = quality
 
         if source_id == SOURCE_MAP:
-            self._subscribe_map()
+            self._subscribe_terrain()
         elif source_id == SOURCE_MOSAIC:
             self._subscribe_mosaic(variant)
         else:
@@ -181,7 +212,7 @@ class VideoStreamNode(Node):
         self._stream_timer = self.create_timer(1.0 / fps, self._on_timer)
 
         name  = self._source_map.get(source_id, {}).get('name', f'src_{source_id}')
-        vname = 'RGB' if variant == VARIANT_RGB else 'depth'
+        vname = {VARIANT_RGB: 'RGB', VARIANT_DEPTH: 'depth', VARIANT_TERRAIN: 'terrain'}.get(variant, '?')
         self.get_logger().info(
             f'Streaming {name} {vname}  quality={quality}  '
             f'scale={self._stream_scale}%  {fps}fps'
@@ -198,6 +229,10 @@ class VideoStreamNode(Node):
             self.destroy_subscription(sub)
         self._mosaic_subs.clear()
         self._mosaic_frames.clear()
+        for sub in self._terrain_subs:
+            self.destroy_subscription(sub)
+        self._terrain_subs.clear()
+        self._terrain_frames.clear()
         self._latest_frame  = None
         self._active_source = None
 
@@ -223,14 +258,13 @@ class VideoStreamNode(Node):
             self._mosaic_subs.append(sub)
             self._mosaic_frames[idx] = None
 
-    def _subscribe_map(self):
-        try:
-            from nvblox_msgs.msg import DistanceMapSlice
-            self._active_sub = self.create_subscription(
-                DistanceMapSlice, '/nvblox_node/static_map_slice', self._map_cb, 10
+    def _subscribe_terrain(self):
+        for key, topic in _TERRAIN_TOPICS.items():
+            sub = self.create_subscription(
+                Image, topic,
+                lambda msg, k=key: self._terrain_cb(k, msg), 10
             )
-        except ImportError:
-            self.get_logger().warn('nvblox_msgs unavailable — map stream not supported')
+            self._terrain_subs.append(sub)
 
     # ── Frame callbacks ────────────────────────────────────────────────────────
 
@@ -242,9 +276,9 @@ class VideoStreamNode(Node):
         with self._lock:
             self._mosaic_frames[idx] = msg
 
-    def _map_cb(self, msg):
+    def _terrain_cb(self, key: str, msg: Image):
         with self._lock:
-            self._latest_frame = msg
+            self._terrain_frames[key] = msg
 
     # ── Timer: encode + send ───────────────────────────────────────────────────
 
@@ -256,10 +290,12 @@ class VideoStreamNode(Node):
         variant   = self._active_variant
         quality   = self._active_quality
 
+        if source_id == SOURCE_MAP:
+            self._build_and_send_terrain()
+            return
+
         if source_id == SOURCE_MOSAIC:
             bgr = self._build_mosaic(variant)
-        elif source_id == SOURCE_MAP:
-            bgr = self._build_map()
         else:
             with self._lock:
                 frame = self._latest_frame
@@ -325,20 +361,62 @@ class VideoStreamNode(Node):
 
         return np.vstack([np.hstack(cells[0:3]), np.hstack(cells[3:6])])
 
-    def _build_map(self):
+    def _build_and_send_terrain(self):
         with self._lock:
-            msg = self._latest_frame
-        if msg is None:
-            return None
+            frames = dict(self._terrain_frames)
+
+        if 'height' not in frames:
+            return
+
         try:
-            data = np.array(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
-            data = np.clip(data, 0.0, 2.0) / 2.0
-            return cv2.applyColorMap((data * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
+            buf = bytearray()
+
+            # Header: version=1, flags=bit0(terrain)|bit7(zlib_compressed)
+            buf += struct.pack('<BBH', 1, 0x81, 0)  # version, flags, reserved
+
+            # Terrain section
+            buf += struct.pack('<IIf', 200, 200, 0.05)
+
+            h_arr = self.bridge.imgmsg_to_cv2(frames['height'],  '32FC1')
+            r_arr = self.bridge.imgmsg_to_cv2(frames.get('rocks',   frames['height']), '32FC1')
+            c_arr = self.bridge.imgmsg_to_cv2(frames.get('craters', frames['height']), '32FC1')
+            w_arr = self.bridge.imgmsg_to_cv2(frames.get('walls',   frames['height']), '32FC1')
+
+            buf += h_arr.astype(np.float32).tobytes()
+            buf += (np.clip(r_arr, 0.0, 1.0) * 255).astype(np.uint8).tobytes()
+            buf += (np.clip(c_arr, 0.0, 1.0) * 255).astype(np.uint8).tobytes()
+            buf += (np.clip(w_arr, 0.0, 1.0) * 255).astype(np.uint8).tobytes()
+
+            # pose and nav sections not yet available — flags bits 1 and 2 stay 0
+
+            compressed = zlib.compress(bytes(buf), level=6)
+            self._send_raw_udp(compressed, SOURCE_MAP, VARIANT_TERRAIN)
+
         except Exception as e:
-            self.get_logger().error(f'Map render error: {e}')
-            return None
+            self.get_logger().error(f'Terrain send error: {e}')
 
     # ── UDP ────────────────────────────────────────────────────────────────────
+
+    def _send_raw_udp(self, data: bytes, source_id: int, variant: int):
+        """Send pre-built binary data in chunks — no JPEG encoding."""
+        chunks = [data[i:i + _CHUNK_SIZE] for i in range(0, len(data), _CHUNK_SIZE)]
+        total  = len(chunks)
+        seq    = self._seq
+        self._seq = (self._seq + 1) % 65536
+
+        for idx, chunk in enumerate(chunks):
+            pkt = bytes([
+                0x4F, ord('V'),
+                source_id & 0xFF,
+                variant   & 0xFF,
+                (seq >> 8) & 0xFF, seq & 0xFF,
+                idx, total,
+            ]) + chunk
+            try:
+                self._udp_sock.sendto(pkt, (self._gui_ip, self._udp_port))
+            except Exception as e:
+                self.get_logger().error(f'UDP send error: {e}')
+                return
 
     def _send_udp(self, bgr: np.ndarray, source_id: int, variant: int, quality: int):
         _, jpeg = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
