@@ -133,14 +133,19 @@ class NexusNode(Node):
 
         # Load model
         self.get_logger().info(f'Loading terrain model: {model_path}')
-        ckpt = self._torch.load(model_path, map_location=self.device, weights_only=False)
-        self.model = TerrainModel().to(self.device)
-        self.model.load_state_dict(ckpt['model'])
-        self.model.eval()
-        self._torch.backends.cudnn.benchmark = True
-        self.get_logger().info(
-            f'Terrain model loaded  epoch={ckpt.get("epoch", "?")}  device={self.device}'
-        )
+        try:
+            ckpt = self._torch.load(model_path, map_location=self.device, weights_only=False)
+            self.model = TerrainModel().to(self.device)
+            self.model.load_state_dict(ckpt['model'])
+            self.model.eval()
+            self._torch.backends.cudnn.benchmark = True
+            self.get_logger().info(
+                f'Terrain model loaded  epoch={ckpt.get("epoch", "?")}  device={self.device}'
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f'nexus_node: failed to load terrain model from {model_path}: {e}'
+            ) from e
 
         # Depth stats (normalisation must match training)
         if depth_stats_path:
