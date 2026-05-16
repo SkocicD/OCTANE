@@ -20,6 +20,7 @@ def generate_launch_description():
         DeclareLaunchArgument('inference_rate',   default_value='5.0',   description='Terrain inference Hz'),
         DeclareLaunchArgument('device',           default_value='auto',  description='auto | cuda | cpu'),
         DeclareLaunchArgument('use_imu',          default_value='False', description='Use IMU roll/pitch; set False to feed zeros'),
+        DeclareLaunchArgument('debug_terrain',    default_value='False', description='Publish synthetic terrain instead of running the model'),
         LogInfo(msg='Starting mapping subsystem'),
         # Stub identity odom→base_link until octane_localization is ready
         # (April tags + IMU fusion).  Replace this node with the real source then.
@@ -165,6 +166,7 @@ def generate_launch_description():
                 'inference_rate':   LaunchConfiguration('inference_rate'),
                 'device':           LaunchConfiguration('device'),
                 'use_imu':          LaunchConfiguration('use_imu'),
+                'debug_terrain':    LaunchConfiguration('debug_terrain'),
             }],
         )
     )

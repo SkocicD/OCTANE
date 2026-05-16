@@ -93,6 +93,7 @@ class NexusNode(Node):
         self.declare_parameter('device',           'auto')
         self.declare_parameter('imu_topic',        'sensors/imu/accel')
         self.declare_parameter('use_imu',          False)
+        self.declare_parameter('debug_terrain',    False)
 
         model_path       = self.get_parameter('model_path').value
         depth_stats_path = self.get_parameter('depth_stats_path').value
@@ -100,6 +101,22 @@ class NexusNode(Node):
         device_param     = self.get_parameter('device').value
         imu_topic        = self.get_parameter('imu_topic').value
         self._use_imu    = self.get_parameter('use_imu').value
+        debug_terrain    = self.get_parameter('debug_terrain').value
+
+        self.bridge = CvBridge()
+
+        # Publishers (created regardless of mode)
+        self._pub_height  = self.create_publisher(Image, 'mapping/terrain/height',  10)
+        self._pub_rocks   = self.create_publisher(Image, 'mapping/terrain/rocks',   10)
+        self._pub_craters = self.create_publisher(Image, 'mapping/terrain/craters', 10)
+        self._pub_walls   = self.create_publisher(Image, 'mapping/terrain/walls',   10)
+
+        if debug_terrain:
+            self.get_logger().info(
+                f'debug_terrain=True — publishing synthetic terrain at {inference_rate} Hz'
+            )
+            self.create_timer(1.0 / inference_rate, self._run_debug)
+            return
 
         if not model_path:
             raise RuntimeError('nexus_node: model_path parameter is required')
@@ -138,8 +155,6 @@ class NexusNode(Node):
             self._depth_mean = [0.5, 0.5, 0.5]
             self._depth_std  = [0.25, 0.25, 0.25]
 
-        self.bridge = CvBridge()
-
         # Frame buffer: latest CameraFrame per topic
         self._frames: dict[str, CameraFrame] = {}
         self._lock = threading.Lock()
@@ -163,16 +178,58 @@ class NexusNode(Node):
         else:
             self.get_logger().info('use_imu=False — roll/pitch fixed at 0')
 
-        # Publishers
-        self._pub_height  = self.create_publisher(Image, 'mapping/terrain/height',  10)
-        self._pub_rocks   = self.create_publisher(Image, 'mapping/terrain/rocks',   10)
-        self._pub_craters = self.create_publisher(Image, 'mapping/terrain/craters', 10)
-        self._pub_walls   = self.create_publisher(Image, 'mapping/terrain/walls',   10)
-
         self.create_timer(1.0 / inference_rate, self._run_inference)
         self.get_logger().info(
             f'Nexus node ready  ({inference_rate} Hz, {len(_ALL_TOPICS)} camera topics, imu={self._use_imu})'
         )
+
+    # ── Debug mode ────────────────────────────────────────────────────────────
+
+    def _run_debug(self):
+        stamp = self.get_clock().now().to_msg()
+        N = 200
+
+        # Smooth height field: sum of random Gaussian bumps
+        height = np.zeros((N, N), dtype=np.float32)
+        for _ in range(8):
+            cx, cy   = np.random.randint(20, N - 20, 2)
+            amp      = np.random.uniform(-0.4, 0.6)
+            sigma    = np.random.uniform(10, 45)
+            y, x     = np.ogrid[:N, :N]
+            height  += amp * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
+
+        # Rocks: scattered tight Gaussian peaks
+        rocks = np.zeros((N, N), dtype=np.float32)
+        for _ in range(np.random.randint(5, 20)):
+            cx, cy  = np.random.randint(0, N, 2)
+            sigma   = np.random.uniform(2, 7)
+            y, x    = np.ogrid[:N, :N]
+            rocks  += np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
+        rocks = np.clip(rocks, 0.0, 1.0).astype(np.float32)
+
+        # Craters: wider, lower peaks
+        craters = np.zeros((N, N), dtype=np.float32)
+        for _ in range(np.random.randint(2, 8)):
+            cx, cy    = np.random.randint(10, N - 10, 2)
+            sigma     = np.random.uniform(6, 18)
+            y, x      = np.ogrid[:N, :N]
+            craters  += np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
+        craters = np.clip(craters, 0.0, 1.0).astype(np.float32)
+
+        # Walls: 1-3 random line segments rendered as Gaussian ridges
+        walls = np.zeros((N, N), dtype=np.float32)
+        y, x  = np.ogrid[:N, :N]
+        for _ in range(np.random.randint(1, 4)):
+            theta  = np.random.uniform(0, np.pi)
+            rho    = np.random.uniform(30, N - 30)
+            dist   = np.abs(x * np.cos(theta) + y * np.sin(theta) - rho)
+            walls += np.exp(-dist ** 2 / (2 * 3 ** 2))
+        walls = np.clip(walls, 0.0, 1.0).astype(np.float32)
+
+        self._pub_height.publish(self._to_img(height,  stamp))
+        self._pub_rocks.publish(self._to_img(rocks,    stamp))
+        self._pub_craters.publish(self._to_img(craters, stamp))
+        self._pub_walls.publish(self._to_img(walls,    stamp))
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 

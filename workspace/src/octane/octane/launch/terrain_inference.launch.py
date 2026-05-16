@@ -28,6 +28,7 @@ def generate_launch_description():
         DeclareLaunchArgument('device',           default_value='auto', description='auto | cuda | cpu'),
         DeclareLaunchArgument('imu_topic',        default_value='sensors/imu/accel', description='IMU topic for roll/pitch'),
         DeclareLaunchArgument('use_imu',          default_value='False',             description='Use IMU roll/pitch; set False to feed zeros'),
+        DeclareLaunchArgument('debug_terrain',    default_value='False',             description='Publish synthetic terrain instead of running the model'),
 
         Node(
             package='octane_mapping',
@@ -41,6 +42,7 @@ def generate_launch_description():
                 'device':           LaunchConfiguration('device'),
                 'imu_topic':        LaunchConfiguration('imu_topic'),
                 'use_imu':          LaunchConfiguration('use_imu'),
+                'debug_terrain':    LaunchConfiguration('debug_terrain'),
             }],
         ),
     ])
