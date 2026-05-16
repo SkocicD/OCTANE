@@ -9,6 +9,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config', ['config/apriltags.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -19,6 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'far_camera_receiver_node = octane_localization.nodes.far_camera_receiver_node:main',
+            'triangulator_node        = octane_localization.nodes.triangulator_node:main',
         ],
     },
 )
