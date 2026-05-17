@@ -94,7 +94,8 @@ def extract_action(path: list, robot_heading: float,
     rc         = cfg.get('robot', {})
     lookahead  = cfg['planner']['lookahead']
     diff_limit = rc.get('diff_limit', 0.8)
-    nav_limit  = float(rc.get('nav_speed_limit', 1.0))
+    # Use nominal cruising speed; recovery code in dataset.py uses nav_speed_limit for escapes
+    nav_limit  = float(rc.get('nav_speed_nominal', rc.get('nav_speed_limit', 1.0)))
 
     if len(path) < 2:
         return None
@@ -172,7 +173,8 @@ def plan_action(terrain_maps: np.ndarray, goal_heatmap: np.ndarray,
     slow_r    = float(pc.get('slow_radius', 1.0))
     slow_min  = float(pc.get('slow_min',    0.35))
     n_look    = max(1, int(slow_r / cs))
-    nav_limit = float(cfg.get('robot', {}).get('nav_speed_limit', 1.0))
+    nav_limit = float(cfg.get('robot', {}).get('nav_speed_nominal',
+                      cfg.get('robot', {}).get('nav_speed_limit', 1.0)))
 
     for pr, pc_ in path[1 : n_look + 1]:
         obs = float(terrain_maps[1][pr, pc_] + terrain_maps[2][pr, pc_])

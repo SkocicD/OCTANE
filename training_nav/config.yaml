@@ -60,7 +60,8 @@ robot:
   robot_width:     0.75    # physical robot body width (m)
   robot_length:    1.5     # physical robot body length (m)
   projection_time: 22.0    # seconds ahead to project the Tesla path arc
-  nav_speed_limit: 0.40    # max motor command for navigation phases (~14 RPM, 40% of 35 RPM)
+  nav_speed_limit:   0.40   # hardware cap — used for recovery/escape and normalization
+  nav_speed_nominal: 0.28   # expert's cruising speed on clear paths (~10 RPM, ~0.18 m/s)
   # Bucket states: 0=UP(travel)  1=COLLECT(digging)  2=DUMP(at berm)
   digging_speed:  0.12    # motor command during excavation — slower than nav for precision
   digging_steps:  38      # sim steps with bucket=1 (~4.6 s at DT=0.12)
