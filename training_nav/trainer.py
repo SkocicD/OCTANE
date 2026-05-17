@@ -10,6 +10,7 @@ import time
 
 import torch
 import torch.nn as nn
+from torch.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from training_nav import checkpoints, curriculum, dashboard
@@ -23,7 +24,8 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
               bucket_loss_weight: float,
               speed_reg_weight: float,
               proximity_reg_weight: float,
-              idle_reg_weight: float = 0.003):
+              idle_reg_weight: float = 0.003,
+              scaler: GradScaler | None = None):
     """One training or validation pass.
 
     Returns:
@@ -33,6 +35,7 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
     total_loss = 0.0
     total_pmag = 0.0
     desc = 'train' if train else 'val  '
+    use_amp = scaler is not None and device.type == 'cuda'
 
     with torch.set_grad_enabled(train):
         bar = tqdm(loader, desc=desc, leave=False,
@@ -47,22 +50,31 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
             phase_idx  = phase_idx.to(device, non_blocking=True)
             action_gt  = action_gt.to(device, non_blocking=True)
 
-            action_pred_seq, _ = model(
-                terrain, heading, zone_idx, arena_type, phase_idx, hidden=None)
-            motor_pred  = action_pred_seq[:, :, :2]   # (B, T, 2)
-            bucket_pred = action_pred_seq[:, :, 2:]   # (B, T, 3)
+            with autocast('cuda', enabled=use_amp):
+                action_pred_seq, _ = model(
+                    terrain, heading, zone_idx, arena_type, phase_idx, hidden=None)
+                motor_pred  = action_pred_seq[:, :, :2]   # (B, T, 2)
+                bucket_pred = action_pred_seq[:, :, 2:]   # (B, T, 3)
 
-            loss, pred_mag = compute_loss(
-                motor_pred, bucket_pred, action_gt, terrain, criterion,
-                bucket_loss_weight, speed_reg_weight, proximity_reg_weight,
-                idle_reg_weight)
+                loss, pred_mag = compute_loss(
+                    motor_pred, bucket_pred, action_gt, terrain, criterion,
+                    bucket_loss_weight, speed_reg_weight, proximity_reg_weight,
+                    idle_reg_weight)
 
             if train:
                 optimizer.zero_grad()
-                loss.backward()
-                if grad_clip > 0:
-                    nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                optimizer.step()
+                if use_amp:
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    if grad_clip > 0:
+                        nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if grad_clip > 0:
+                        nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                    optimizer.step()
 
             lv = loss.item()
             pm = pred_mag.mean().item()
@@ -96,6 +108,8 @@ def run_training(cfg, model, optimizer, scheduler,
     proximity_reg_weight = tc.get('proximity_reg_weight',  0.15)
     idle_reg_weight      = tc.get('idle_reg_weight',       0.003)
     display_scale        = tc.get('loss_display_scale',    100.0)
+
+    scaler = GradScaler('cuda') if device.type == 'cuda' else None
 
     floor    = curriculum.floor_epoch(cc)
     patience = max(tc['early_stop_patience'], max_epochs // 50)
@@ -134,7 +148,8 @@ def run_training(cfg, model, optimizer, scheduler,
             bucket_loss_weight=bucket_loss_weight,
             speed_reg_weight=speed_reg_weight,
             proximity_reg_weight=proximity_reg_weight,
-            idle_reg_weight=idle_reg_weight)
+            idle_reg_weight=idle_reg_weight,
+            scaler=scaler)
 
         val_loss, val_pmag = run_epoch(
             val_loader, model, criterion, optimizer, device,

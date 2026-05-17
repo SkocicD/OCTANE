@@ -80,10 +80,13 @@ def main():
     train_ds = NavDataset(cfg, n_train, seed=tc['seed'])
     val_ds   = NavDataset(cfg, n_val,   seed=tc['seed'] + 1)
 
+    persist = nw > 0
     train_loader = DataLoader(train_ds, batch_size=tc['batch_size'],
-                              shuffle=True,  num_workers=nw, pin_memory=pin)
+                              shuffle=True,  num_workers=nw, pin_memory=pin,
+                              persistent_workers=persist)
     val_loader   = DataLoader(val_ds,   batch_size=tc['batch_size'],
-                              shuffle=False, num_workers=nw, pin_memory=pin)
+                              shuffle=False, num_workers=nw, pin_memory=pin,
+                              persistent_workers=persist)
 
     print(f'  Train  : {n_train} samples/epoch')
     print(f'  Val    : {n_val} samples/epoch')
