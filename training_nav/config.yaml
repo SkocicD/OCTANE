@@ -122,8 +122,8 @@ curriculum:
   dart_std_s3:  0.32  # metres of Gaussian noise on robot position in stage 3
   # Sequence length grows with curriculum so the LSTM sees more temporal
   # context as the task difficulty demands it, and early-stage training stays fast.
-  seq_len_s0:   8     # stage 0 — 0.8 s of history (pure goal-seeking)
-  seq_len_s1:  16     # stage 1 — 1.6 s (basic obstacle awareness)
+  seq_len_s0:   8     # stage 0 — 0.8 s  (pure goal-seeking, no obstacles)
+  seq_len_s1:  48     # stage 1 — 4.8 s  (robot must travel ~0.96 m, enough to encounter + avoid obstacles)
   seq_len_s2: 128     # stage 2 — 12.8 s (DART recovery + full avoidance manoeuvres)
   seq_len_s3: 256     # stage 3 — 25.6 s (covers ~1/3 of a full 15 m+ traverse at 0.20 m/s)
 

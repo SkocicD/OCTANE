@@ -133,24 +133,36 @@ def _start_zones_for_phase(arena: ArenaConfig, phase: str) -> list[Rect]:
 
 
 def _sample_robot_pose(arena: ArenaConfig, phase: str,
-                       rng: random.Random) -> tuple[float, float, float]:
-    """Sample a valid robot start position (clear of obstacles) for the given phase."""
-    margin    = 0.4
-    clearance = 0.55
+                       rng: random.Random,
+                       margin: float = 0.65) -> tuple[float, float, float]:
+    """Sample a valid robot start position (clear of obstacles and walls) for the given phase.
+
+    margin must be > danger_dist so the robot never spawns already inside the
+    recovery trigger zone — otherwise recovery fires on step 0 and the episode
+    immediately looks like a wall collision.
+    """
+    clearance = 0.35
     candidates = _start_zones_for_phase(arena, phase)
 
-    for _ in range(100):
+    for _ in range(200):
         zone = rng.choice(candidates)
         if zone.w <= 2 * margin or zone.h <= 2 * margin:
             continue
         x = rng.uniform(zone.x + margin, zone.x + zone.w - margin)
         y = rng.uniform(zone.y + margin, zone.y + zone.h - margin)
-        if all(math.hypot(x - o.x, y - o.y) > o.diameter / 2 + clearance
-               for o in arena.obstacles):
+        # Keep clear of all obstacles and arena walls
+        wall_ok = (x >= margin and x <= arena.width  - margin and
+                   y >= margin and y <= arena.length - margin)
+        obs_ok  = all(math.hypot(x - o.x, y - o.y) > o.diameter / 2 + clearance
+                      for o in arena.obstacles)
+        if wall_ok and obs_ok:
             return x, y, rng.uniform(-math.pi, math.pi)
 
-    z = candidates[0]
-    return z.x + z.w / 2, z.y + z.h / 2, 0.0
+    # Fallback: zone centre, clamped away from walls
+    z  = candidates[0]
+    cx = float(np.clip(z.x + z.w / 2, margin, arena.width  - margin))
+    cy = float(np.clip(z.y + z.h / 2, margin, arena.length - margin))
+    return cx, cy, 0.0
 
 
 class NavDataset(Dataset):
@@ -230,9 +242,11 @@ class NavDataset(Dataset):
 
         terrain = build_terrain_maps(arena, self.cfg, np_rng)
 
-        phase     = rng.choice(_PHASES)
-        goal_zone = _goal_zone_for_phase(arena, phase)
-        rx, ry, heading = _sample_robot_pose(arena, phase, rng)
+        phase       = rng.choice(_PHASES)
+        goal_zone   = _goal_zone_for_phase(arena, phase)
+        danger_dist = float(self.cfg['robot'].get('danger_distance', 0.55))
+        spawn_margin = danger_dist + 0.1   # always spawn outside the recovery trigger zone
+        rx, ry, heading = _sample_robot_pose(arena, phase, rng, margin=spawn_margin)
 
         # ── DART: perturb position to create recovery training states ─────────
         dart_prob, dart_std = self._dart_params(stage)
