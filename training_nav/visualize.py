@@ -47,6 +47,13 @@ from training_nav.dataset import _goal_zone_for_phase, _sample_robot_pose, _PHAS
 from training_nav.planner import _build_cost_map, astar, plan_action
 
 
+def _find_latest_ckpt(ckpt_dir: str):
+    """Return the most recent epoch_XXXX.pt path in ckpt_dir, or None."""
+    import glob as _glob
+    paths = sorted(_glob.glob(os.path.join(ckpt_dir, 'epoch_*.pt')))
+    return paths[-1] if paths else None
+
+
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 def _load_cfg(path: str) -> dict:
@@ -446,6 +453,7 @@ header {
 .badge-expert { background: rgba(255,200,0,.10); color: #d4a820; border: 1px solid rgba(255,200,0,.3); }
 .badge-ksc    { background: rgba(46,204,64,.12); color: #2ecc40; border: 1px solid rgba(46,204,64,.35); }
 .badge-ucf    { background: rgba(255,140,0,.12); color: #ff9800; border: 1px solid rgba(255,140,0,.35); }
+.badge-epoch  { background: rgba(100,160,255,.10); color: #7ab4ff; border: 1px solid rgba(100,160,255,.3); }
 #statusDot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #2ecc40; box-shadow: 0 0 5px #2ecc40;
@@ -568,6 +576,7 @@ button:hover { background: #1e1e1e; border-color: #2ecc40; color: #2ecc40; }
   <div class="logo">OCTANE</div>
   <span style="color:#333;font-size:10px;letter-spacing:.1em;text-transform:uppercase">Navigation Policy</span>
   <span class="badge badge-expert" id="modeBadge">A* EXPERT</span>
+  <span class="badge badge-epoch" id="epochBadge" style="display:none"></span>
   <span class="badge badge-ksc" id="arenaBadge">KSC</span>
   <div id="statusDot"></div>
   <div class="header-right">
@@ -1063,6 +1072,10 @@ function updateUI() {
   if (state.using_model) { badge.textContent='MODEL'; badge.className='badge badge-model'; }
   else                   { badge.textContent='A* EXPERT'; badge.className='badge badge-expert'; }
 
+  const ep = document.getElementById('epochBadge');
+  if (state.model_epoch) { ep.textContent=state.model_epoch; ep.style.display=''; }
+  else                   { ep.style.display='none'; }
+
   // Bucket pips
   const bucket = state.bucket ?? 0;
   for (let i=0; i<3; i++) {
@@ -1250,13 +1263,37 @@ def _sim_loop_with_reset(cfg: dict, checkpoint_path: str, init_seed: int,
     dump_steps = rc.get('dumping_steps',  27)
     mix_ucf    = cfg['training'].get('arena_mix_ucf', 0.4)
 
-    model = (_load_model(cfg, checkpoint_path)
-             if checkpoint_path and os.path.exists(checkpoint_path) else None)
+    ckpt_dir      = os.path.dirname(os.path.abspath(checkpoint_path))
+    current_ckpt  = None
+    model         = None
+
+    # Load initial checkpoint if one exists
+    initial = _find_latest_ckpt(ckpt_dir)
+    if initial:
+        model        = _load_model(cfg, initial)
+        current_ckpt = initial
+        epoch_label  = os.path.basename(initial).replace('epoch_', 'ep').replace('.pt', '')
+        with _sim_lock:
+            _sim_state['model_epoch'] = epoch_label
+
     scene_id = 0
     seed     = init_seed
 
     while True:
         _reset_req[0] = False
+
+        # Hot-reload: pick up the newest epoch checkpoint written by trainer
+        latest = _find_latest_ckpt(ckpt_dir)
+        if latest and latest != current_ckpt:
+            new_model = _load_model(cfg, latest)
+            if new_model is not None:
+                model        = new_model
+                current_ckpt = latest
+                epoch_label  = os.path.basename(latest).replace('epoch_', 'ep').replace('.pt', '')
+                print(f'[visualize] reloaded → {epoch_label}')
+                with _sim_lock:
+                    _sim_state['model_epoch'] = epoch_label
+
         scene_id += 1
         rng    = random.Random(seed)
         np_rng = np.random.default_rng(seed)
