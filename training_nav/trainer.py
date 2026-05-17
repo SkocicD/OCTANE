@@ -25,6 +25,8 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
               speed_reg_weight: float,
               proximity_reg_weight: float,
               idle_reg_weight: float = 0.003,
+              smooth_reg_weight: float = 0.02,
+              diff_reg_weight: float = 0.01,
               scaler: GradScaler | None = None):
     """One training or validation pass.
 
@@ -59,7 +61,7 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
                 loss, pred_mag = compute_loss(
                     motor_pred, bucket_pred, action_gt, terrain, criterion,
                     bucket_loss_weight, speed_reg_weight, proximity_reg_weight,
-                    idle_reg_weight)
+                    idle_reg_weight, smooth_reg_weight, diff_reg_weight)
 
             if train:
                 optimizer.zero_grad()
@@ -104,9 +106,11 @@ def run_training(cfg, model, optimizer, scheduler,
 
     criterion            = nn.HuberLoss(delta=0.1)
     bucket_loss_weight   = tc.get('bucket_loss_weight',    0.5)
-    speed_reg_weight     = tc.get('speed_reg_weight',      0.08)
-    proximity_reg_weight = tc.get('proximity_reg_weight',  0.15)
+    speed_reg_weight     = tc.get('speed_reg_weight',      0.05)
+    proximity_reg_weight = tc.get('proximity_reg_weight',  0.03)
     idle_reg_weight      = tc.get('idle_reg_weight',       0.003)
+    smooth_reg_weight    = tc.get('smooth_reg_weight',     0.02)
+    diff_reg_weight      = tc.get('diff_reg_weight',       0.01)
     display_scale        = tc.get('loss_display_scale',    100.0)
 
     scaler = GradScaler('cuda') if device.type == 'cuda' else None
@@ -149,6 +153,8 @@ def run_training(cfg, model, optimizer, scheduler,
             speed_reg_weight=speed_reg_weight,
             proximity_reg_weight=proximity_reg_weight,
             idle_reg_weight=idle_reg_weight,
+            smooth_reg_weight=smooth_reg_weight,
+            diff_reg_weight=diff_reg_weight,
             scaler=scaler)
 
         val_loss, val_pmag = run_epoch(
@@ -157,7 +163,9 @@ def run_training(cfg, model, optimizer, scheduler,
             bucket_loss_weight=bucket_loss_weight,
             speed_reg_weight=speed_reg_weight,
             proximity_reg_weight=proximity_reg_weight,
-            idle_reg_weight=idle_reg_weight)
+            idle_reg_weight=idle_reg_weight,
+            smooth_reg_weight=smooth_reg_weight,
+            diff_reg_weight=diff_reg_weight)
 
         scheduler.step()
         lr = scheduler.get_last_lr()[0]

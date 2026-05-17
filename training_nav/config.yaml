@@ -100,6 +100,8 @@ training:
   speed_reg_weight:      0.05   # floor penalty (proximity now 0.03 so 0.05 is safe)
   proximity_reg_weight:  0.03   # rocks + craters + walls proximity (ch1+ch2+ch3)
   idle_reg_weight:       0.003  # tiny penalty for near-zero motor predictions (< 0.05 magnitude)
+  smooth_reg_weight:     0.02   # penalise large motor delta between consecutive steps (no jerky motion)
+  diff_reg_weight:       0.01   # penalise high |left-right| during forward travel (no spinning while driving)
   loss_display_scale:    100    # multiply printed losses for readability — does NOT affect training
   arena_mix_ucf: 0.5            # 50/50 KSC / UCF split
   sim_dt: 0.10              # seconds per simulation step for sequence generation
