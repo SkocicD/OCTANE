@@ -83,7 +83,7 @@ model:
   seq_len: 32              # base (overridden per curriculum stage)
 
 training:
-  epochs: 200           # hard ceiling; early stop usually fires well before this
+  epochs: 300           # hard ceiling; early stop usually fires well before this
   batch_size: 64             # B×T ≈ 16 K frames; reduce further if OOM with stage-3 seqs
   learning_rate: 3.0e-4
   weight_decay: 1.0e-4
@@ -95,7 +95,7 @@ training:
   scale_min: 1.0           # fixed competition dimensions — no scale variation
   scale_max: 1.0
   grad_clip: 1.0
-  early_stop_patience: 20
+  early_stop_patience: 30
   bucket_loss_weight:    0.50   # weight of CrossEntropy bucket loss vs Huber motor loss
   speed_reg_weight:      0.01   # floor penalty — was 0.08, caused mode collapse toward zero
   proximity_reg_weight:  0.03   # rocks + craters + walls proximity (ch1+ch2+ch3)
@@ -110,14 +110,14 @@ training:
 # advance at the right time — stage 0 ends at epoch 40 regardless of how
 # long the total run is.
 #
-# Stage 0  — empty arena, goal-seeking only (no obstacles).       epochs  1–9
-# Stage 1  — 1–2 obstacles, all phases.  Robot learns basic avoidance. 10–24
-# Stage 2  — full obstacles + DART recovery perturbations.  Core.  25–54
-# Stage 3  — full obstacles + heavier DART.  Hardening / fine-tune. 55+
+# Stage 0  — empty arena, goal-seeking only (no obstacles).       epochs   1–15
+# Stage 1  — 1–2 obstacles, all phases.  Robot learns basic avoidance. 16–50
+# Stage 2  — full obstacles + DART recovery perturbations.  Core.  51–115
+# Stage 3  — full obstacles + heavier DART.  Hardening / fine-tune. 116+
 curriculum:
-  stage0_end_epoch:  10   # epochs  1 –  9   (goal-seeking, no obstacles)
-  stage1_end_epoch:  25   # epochs 10 – 24   (basic avoidance)
-  stage2_end_epoch:  55   # epochs 25 – 54   (full obstacles + DART)
+  stage0_end_epoch:  16   # epochs  1 – 15   (goal-seeking, no obstacles)
+  stage1_end_epoch:  51   # epochs 16 – 50   (basic avoidance)
+  stage2_end_epoch: 116   # epochs 51 – 115  (full obstacles + DART)
   # stage 3 = epoch 150+  (hardening, runs until early stop)
   dart_prob_s2: 0.30  # probability of DART perturbation in stage 2
   dart_prob_s3: 0.50  # probability of DART perturbation in stage 3
