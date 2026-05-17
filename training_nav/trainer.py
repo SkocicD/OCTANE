@@ -27,6 +27,7 @@ _WEIGHT_KEYS = [
     'diff_reg_weight',
     'forward_reg_weight',
     'stillness_reg_weight',
+    'recovery_reg_weight',
 ]
 
 _WEIGHT_DEFAULTS = {
@@ -37,6 +38,7 @@ _WEIGHT_DEFAULTS = {
     'diff_reg_weight':      0.01,
     'forward_reg_weight':   0.02,
     'stillness_reg_weight': 0.05,
+    'recovery_reg_weight':  0.05,
 }
 
 
@@ -173,7 +175,8 @@ def run_training(cfg, model, optimizer, scheduler,
                       f'smt={weights["smooth_reg_weight"]:.3f}  '
                       f'dif={weights["diff_reg_weight"]:.3f}  '
                       f'fwd={weights["forward_reg_weight"]:.3f}  '
-                      f'stn={weights["stillness_reg_weight"]:.3f}')
+                      f'stn={weights["stillness_reg_weight"]:.3f}  '
+                      f'rec={weights["recovery_reg_weight"]:.3f}')
                 print(f'  └──────────────────────────────────────────────────────────────────')
                 no_improve = 0
             prev_stage = cur_stage

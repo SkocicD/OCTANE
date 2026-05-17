@@ -23,7 +23,8 @@ def compute_loss(motor_pred, bucket_pred, action_gt, terrain, criterion,
                  smooth_reg_weight: float      = 0.02,
                  diff_reg_weight: float        = 0.01,
                  forward_reg_weight: float     = 0.02,
-                 stillness_reg_weight: float   = 0.05):
+                 stillness_reg_weight: float   = 0.05,
+                 recovery_reg_weight: float    = 0.05):
     """Compute combined imitation + regularisation loss.
 
     Args:
@@ -56,11 +57,14 @@ def compute_loss(motor_pred, bucket_pred, action_gt, terrain, criterion,
     moving_mask = (action_gt[:, :, :2].abs().mean(dim=-1) > 0.15).float().detach()
     speed_loss  = (F.relu(0.30 - pred_mag) * moving_mask).mean()
 
-    # Proximity: penalise speed proportional to obstacle/wall presence.
-    obs_map  = torch.clamp(terrain[:, :, 1] + terrain[:, :, 2], 0.0, 1.0)
-    wall_map = terrain[:, :, 3]
-    max_obs  = torch.max(obs_map, wall_map).flatten(2).max(dim=-1).values   # (B, T)
-    prox_loss = (max_obs * pred_mag).mean()
+    # Proximity: penalise speed near obstacles/walls, but exempt steps where the
+    # expert is already in recovery (backing up).  Penalising backup speed near
+    # obstacles would teach the model to stop instead of escaping.
+    obs_map      = torch.clamp(terrain[:, :, 1] + terrain[:, :, 2], 0.0, 1.0)
+    wall_map     = terrain[:, :, 3]
+    max_obs      = torch.max(obs_map, wall_map).flatten(2).max(dim=-1).values  # (B, T)
+    not_recovery = (action_gt[:, :, :2].mean(dim=-1) >= -0.05).float().detach()
+    prox_loss    = (max_obs * pred_mag * not_recovery).mean()
 
     # Idle: tiny pressure against near-zero predictions on all steps.
     idle_loss = F.relu(0.05 - pred_mag).mean()
@@ -78,16 +82,26 @@ def compute_loss(motor_pred, bucket_pred, action_gt, terrain, criterion,
     diff_penalty  = (motor_pred[:, :, 0] - motor_pred[:, :, 1]).abs()    # (B, T)
     diff_loss     = (diff_penalty * forward_speed).mean()
 
-    # Forward bias: penalise reverse travel during navigation phases (bucket_gt=0).
-    # bucket_gt=0 covers to_excavation and to_deposit — both should move forward.
-    nav_mask      = (action_gt[:, :, 2] == 0).float().detach()
-    avg_motor     = motor_pred.mean(dim=-1)                               # (B, T)
-    forward_loss  = (F.relu(-avg_motor) * nav_mask).mean()
+    # Forward bias: penalise reverse travel during navigation phases (bucket_gt=0),
+    # BUT only when the expert is also going forward.  When the expert backs up
+    # (recovery from a wall/obstacle), we must NOT fight that signal — the model
+    # needs to learn backup behaviour from those samples.
+    nav_mask        = (action_gt[:, :, 2] == 0).float().detach()
+    gt_fwd_mask     = (action_gt[:, :, :2].mean(dim=-1) > 0.05).float().detach()
+    avg_motor       = motor_pred.mean(dim=-1)                             # (B, T)
+    forward_loss    = (F.relu(-avg_motor) * nav_mask * gt_fwd_mask).mean()
 
     # Stillness: penalise any motor output during dumping (bucket_gt=2).
     # Robot must be completely stopped at the berm while depositing.
     dump_mask      = (action_gt[:, :, 2] == 2).float().detach()
     stillness_loss = (pred_mag * dump_mask).mean()
+
+    # Recovery encouragement: when the expert backs up (GT avg motor < -0.05)
+    # near an obstacle, reward the model for also outputting negative motors.
+    # This gives a direct gradient signal for escape behaviour.
+    expert_backing = (action_gt[:, :, :2].mean(dim=-1) < -0.05).float().detach()
+    near_obs       = (max_obs > 0.3).float().detach()
+    recovery_loss  = (F.relu(avg_motor) * expert_backing * near_obs).mean()
 
     total = (motor_loss
              + bucket_loss_weight    * bucket_loss
@@ -97,6 +111,7 @@ def compute_loss(motor_pred, bucket_pred, action_gt, terrain, criterion,
              + smooth_reg_weight     * smooth_loss
              + diff_reg_weight       * diff_loss
              + forward_reg_weight    * forward_loss
-             + stillness_reg_weight  * stillness_loss)
+             + stillness_reg_weight  * stillness_loss
+             + recovery_reg_weight   * recovery_loss)
 
     return total, pred_mag

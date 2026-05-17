@@ -104,6 +104,7 @@ training:
   diff_reg_weight:       0.01   # penalise high |left-right| during forward travel (no spinning while driving)
   forward_reg_weight:    0.02   # penalise backward travel during nav phases (bucket=0)
   stillness_reg_weight:  0.05   # penalise any motor output during dumping phase (bucket=2)
+  recovery_reg_weight:   0.05   # reward backing up when expert backs up near obstacle/wall
   loss_display_scale:    100    # multiply printed losses for readability — does NOT affect training
   arena_mix_ucf: 0.5            # 50/50 KSC / UCF split
   sim_dt: 0.10              # seconds per simulation step for sequence generation
