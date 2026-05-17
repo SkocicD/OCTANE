@@ -35,10 +35,10 @@ arenas:
     obstacle_spread: 1.6
 
 terrain:
-  grid_size: 60          # cells — model always receives grid_size × grid_size
-  cell_size:  0.1        # metres per cell in the full-arena terrain map
-  view_width: 4.0        # metres the robot can see left/right  (calibrate to sensor)
-  view_height: 4.0       # metres the robot can see forward/back
+  grid_size: 80          # cells — must match deployment crop from terrain model (4.0m / 0.05m = 80)
+  cell_size:  0.05       # metres per cell — matches ml/terrain_model CELL_SIZE=0.05
+  view_width: 4.0        # metres visible left/right  (80 cells × 0.05m = 4.0m exactly)
+  view_height: 4.0       # metres visible forward/back
   height_noise_std: 0.04
   height_scale: 0.5
 

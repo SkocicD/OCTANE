@@ -360,8 +360,12 @@ def crop_robot_view(terrain: dict, robot_x: float, robot_y: float,
     channels = []
     for key in ('height', 'rocks', 'craters', 'walls'):
         patch = terrain[key][np.ix_(ri_safe, ci_safe)]
-        fill  = 1.0 if key == 'walls' else 0.0
-        channels.append(np.where(valid, patch, fill).astype(np.float32))
+        # Out-of-bounds fill = 0.0 for all channels, matching the terrain model's
+        # behaviour (no sensor return outside the arena → no signal).
+        # Arena boundary walls are explicitly drawn as 1.0 inside the arena grid,
+        # so the robot still sees the wall before it exits — the fill only affects
+        # the area beyond the physical boundary.
+        channels.append(np.where(valid, patch, 0.0).astype(np.float32))
 
     return np.stack(channels, axis=0)   # (4, gs, gs)
 
