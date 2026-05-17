@@ -22,7 +22,8 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
               train: bool, grad_clip: float,
               bucket_loss_weight: float,
               speed_reg_weight: float,
-              proximity_reg_weight: float):
+              proximity_reg_weight: float,
+              idle_reg_weight: float = 0.003):
     """One training or validation pass.
 
     Returns:
@@ -53,7 +54,8 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
 
             loss, pred_mag = compute_loss(
                 motor_pred, bucket_pred, action_gt, terrain, criterion,
-                bucket_loss_weight, speed_reg_weight, proximity_reg_weight)
+                bucket_loss_weight, speed_reg_weight, proximity_reg_weight,
+                idle_reg_weight)
 
             if train:
                 optimizer.zero_grad()
@@ -92,6 +94,8 @@ def run_training(cfg, model, optimizer, scheduler,
     bucket_loss_weight   = tc.get('bucket_loss_weight',    0.5)
     speed_reg_weight     = tc.get('speed_reg_weight',      0.08)
     proximity_reg_weight = tc.get('proximity_reg_weight',  0.15)
+    idle_reg_weight      = tc.get('idle_reg_weight',       0.003)
+    display_scale        = tc.get('loss_display_scale',    100.0)
 
     floor    = curriculum.floor_epoch(cc)
     patience = max(tc['early_stop_patience'], max_epochs // 50)
@@ -129,14 +133,16 @@ def run_training(cfg, model, optimizer, scheduler,
             train=True, grad_clip=tc['grad_clip'],
             bucket_loss_weight=bucket_loss_weight,
             speed_reg_weight=speed_reg_weight,
-            proximity_reg_weight=proximity_reg_weight)
+            proximity_reg_weight=proximity_reg_weight,
+            idle_reg_weight=idle_reg_weight)
 
         val_loss, val_pmag = run_epoch(
             val_loader, model, criterion, optimizer, device,
             train=False, grad_clip=0,
             bucket_loss_weight=bucket_loss_weight,
             speed_reg_weight=speed_reg_weight,
-            proximity_reg_weight=proximity_reg_weight)
+            proximity_reg_weight=proximity_reg_weight,
+            idle_reg_weight=idle_reg_weight)
 
         scheduler.step()
         lr = scheduler.get_last_lr()[0]
@@ -159,7 +165,8 @@ def run_training(cfg, model, optimizer, scheduler,
         elapsed = time.time() - t0
         _print_epoch(epoch, max_epochs, cur_stage, stage_name, next_label,
                      train_loss, val_loss, delta_val, train_pmag, val_pmag,
-                     best_val, no_improve, patience, lr, elapsed, improved)
+                     best_val, no_improve, patience, lr, elapsed, improved,
+                     display_scale=display_scale)
 
         dashboard.update(
             epoch=epoch, epochs=max_epochs,
@@ -187,21 +194,24 @@ def run_training(cfg, model, optimizer, scheduler,
 
 def _print_epoch(epoch, max_epochs, stage, stage_name, next_label,
                  train_loss, val_loss, delta_val, train_pmag, val_pmag,
-                 best_val, no_improve, patience, lr, elapsed, improved):
+                 best_val, no_improve, patience, lr, elapsed, improved,
+                 display_scale: float = 100.0):
     def _t(s):
         if s < 60:    return f'{int(s)}s'
         if s < 3600:  return f'{int(s)//60}m {int(s)%60:02d}s'
         return f'{int(s)//3600}h {(int(s)%3600)//60:02d}m'
 
+    sc     = display_scale
     arrow  = '↓' if delta_val < 0 else ('↑' if delta_val > 0 else '─')
     marker = '  * new best' if improved else ''
+    slabel = f'(×{int(sc)})' if sc != 1.0 else ''
 
     print(_SEP)
     print(f'  Epoch {epoch:05d} / {max_epochs}   │   Stage {stage} — {stage_name}  ({next_label})')
     print(_SEP)
-    print(f'  train mean : {train_loss:.4f}      val mean   : {val_loss:.4f} {arrow}   '
-          f'Δval  : {delta_val:+.4f}{marker}')
-    print(f'  best val   : {best_val:.4f}      no-improve : {no_improve} / {patience}    '
+    print(f'  train mean : {train_loss*sc:.2f} {slabel}   val mean   : {val_loss*sc:.2f} {arrow}   '
+          f'Δval  : {delta_val*sc:+.2f}{marker}')
+    print(f'  best val   : {best_val*sc:.2f}        no-improve : {no_improve} / {patience}    '
           f'lr    : {lr:.2e}')
-    print(f'  train mag  : {train_pmag:.3f}       val mag    : {val_pmag:.3f}        '
+    print(f'  train mag  : {train_pmag:.3f}          val mag    : {val_pmag:.3f}        '
           f'time  : {_t(elapsed)}')

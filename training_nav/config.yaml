@@ -97,7 +97,9 @@ training:
   early_stop_patience: 60
   bucket_loss_weight:    0.50   # weight of CrossEntropy bucket loss vs Huber motor loss
   speed_reg_weight:      0.01   # floor penalty — was 0.08, caused mode collapse toward zero
-  proximity_reg_weight:  0.03   # was 0.15, combined with speed_reg was dominating imitation
+  proximity_reg_weight:  0.03   # rocks + craters + walls proximity (ch1+ch2+ch3)
+  idle_reg_weight:       0.003  # tiny penalty for near-zero motor predictions (< 0.05 magnitude)
+  loss_display_scale:    100    # multiply printed losses for readability — does NOT affect training
   arena_mix_ucf: 0.5            # 50/50 KSC / UCF split
   sim_dt: 0.10              # seconds per simulation step for sequence generation
 
