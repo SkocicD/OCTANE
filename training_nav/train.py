@@ -94,11 +94,10 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=tc['learning_rate'],
                                   weight_decay=tc['weight_decay'])
-    # CosineAnnealingWarmRestarts: T_0 = design-epoch length (from config).
-    # Restarts the LR every T_0 epochs so it keeps exploring indefinitely
-    # even when max_epochs >> T_0 (e.g. epochs=99999).
+    # Single cosine decay over the full training window so LR actually reaches
+    # eta_min by the time training ends.  T_0 = max_epochs, not the config ceiling.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=tc['epochs'], T_mult=1,
+        optimizer, T_0=max_epochs, T_mult=1,
         eta_min=tc['learning_rate'] * 0.01)
 
     start_epoch = 1
