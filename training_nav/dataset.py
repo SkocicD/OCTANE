@@ -35,6 +35,7 @@ from training_nav.arena import (
     ArenaConfig, Rect, build_goal_heatmap, build_terrain_maps,
     crop_robot_view, current_zone, generate_arena,
 )
+from training_nav.curriculum import get_stage
 from training_nav.planner import plan_action
 
 
@@ -160,14 +161,13 @@ class NavDataset(Dataset):
     """
 
     def __init__(self, cfg: dict, n_samples: int, seed: int = 0):
-        self.cfg       = cfg
-        self.n         = n_samples
-        self.epoch     = 0
-        self.max_epochs = cfg['training'].get('epochs', 200)
-        self._cc       = cfg.get('curriculum', {})
-        self.base_rng  = random.Random(seed)
-        self.np_rng    = np.random.default_rng(seed)
-        self._seeds    = [self.base_rng.randint(0, 2**31) for _ in range(n_samples)]
+        self.cfg      = cfg
+        self.n        = n_samples
+        self.epoch    = 0
+        self._cc      = cfg.get('curriculum', {})
+        self.base_rng = random.Random(seed)
+        self.np_rng   = np.random.default_rng(seed)
+        self._seeds   = [self.base_rng.randint(0, 2**31) for _ in range(n_samples)]
 
     def __len__(self):
         return self.n
@@ -175,12 +175,7 @@ class NavDataset(Dataset):
     # ── Curriculum helpers ────────────────────────────────────────────────────
 
     def _stage(self) -> int:
-        prog = self.epoch / max(self.max_epochs, 1)
-        cc   = self._cc
-        if prog < cc.get('stage0_end', 0.15): return 0
-        if prog < cc.get('stage1_end', 0.40): return 1
-        if prog < cc.get('stage2_end', 0.75): return 2
-        return 3
+        return get_stage(self.epoch, self._cc)
 
     def _dart_params(self, stage: int) -> tuple[float, float]:
         cc = self._cc

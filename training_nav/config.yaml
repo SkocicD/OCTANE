@@ -102,16 +102,20 @@ training:
   sim_dt: 0.10              # seconds per simulation step for sequence generation
 
 # ── Curriculum ───────────────────────────────────────────────────────────────────
-# Staged difficulty (fraction of max_epochs at which each stage begins/ends).
+# Staged difficulty using ABSOLUTE epoch numbers (independent of max_epochs).
+# This means you can set epochs=99999 to run indefinitely and stages still
+# advance at the right time — stage 0 ends at epoch 40 regardless of how
+# long the total run is.
+#
 # Stage 0  — empty arena, goal-seeking only (no obstacles).
 # Stage 1  — 1–2 obstacles, all phases.  Robot learns basic avoidance.
 # Stage 2  — full obstacles + DART recovery perturbations.  Core training.
 # Stage 3  — full obstacles + heavier DART.  Hardening / fine-tune.
 curriculum:
-  stage0_end:  0.20   # epochs 0 – 20 %   (goal-seeking)
-  stage1_end:  0.45   # epochs 20 – 45 %  (basic avoidance)
-  stage2_end:  0.75   # epochs 45 – 75 %  (full obstacles + DART)
-  # stage 3  = 75 – 100 %
+  stage0_end_epoch:  40   # epochs  1 – 39   (goal-seeking, no obstacles)
+  stage1_end_epoch:  90   # epochs 40 – 89   (basic avoidance)
+  stage2_end_epoch: 150   # epochs 90 – 149  (full obstacles + DART)
+  # stage 3 = epoch 150+  (hardening, runs until early stop)
   dart_prob_s2: 0.30  # probability of DART perturbation in stage 2
   dart_prob_s3: 0.50  # probability of DART perturbation in stage 3
   dart_std_s2:  0.18  # metres of Gaussian noise on robot position in stage 2
