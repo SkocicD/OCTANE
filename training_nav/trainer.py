@@ -18,15 +18,44 @@ from training_nav.losses import compute_loss
 
 _SEP = '  ' + '─' * 63
 
+# Keys that can be overridden per curriculum stage
+_WEIGHT_KEYS = [
+    'speed_reg_weight',
+    'proximity_reg_weight',
+    'idle_reg_weight',
+    'smooth_reg_weight',
+    'diff_reg_weight',
+    'forward_reg_weight',
+    'stillness_reg_weight',
+]
+
+_WEIGHT_DEFAULTS = {
+    'speed_reg_weight':     0.05,
+    'proximity_reg_weight': 0.03,
+    'idle_reg_weight':      0.003,
+    'smooth_reg_weight':    0.02,
+    'diff_reg_weight':      0.01,
+    'forward_reg_weight':   0.02,
+    'stillness_reg_weight': 0.05,
+}
+
+
+def _stage_weights(stage: int, cc: dict, tc: dict) -> dict:
+    """Return effective loss weights for the given curriculum stage.
+
+    Starts from training-section defaults, then applies any per-stage
+    overrides from curriculum.stage_weights.s{stage}.
+    """
+    base = {k: tc.get(k, _WEIGHT_DEFAULTS[k]) for k in _WEIGHT_KEYS}
+    overrides = cc.get('stage_weights', {}).get(f's{stage}', {}) or {}
+    base.update({k: v for k, v in overrides.items() if k in _WEIGHT_KEYS})
+    return base
+
 
 def run_epoch(loader, model, criterion, optimizer, device, *,
               train: bool, grad_clip: float,
               bucket_loss_weight: float,
-              speed_reg_weight: float,
-              proximity_reg_weight: float,
-              idle_reg_weight: float = 0.003,
-              smooth_reg_weight: float = 0.02,
-              diff_reg_weight: float = 0.01,
+              weights: dict,
               scaler: GradScaler | None = None):
     """One training or validation pass.
 
@@ -60,8 +89,8 @@ def run_epoch(loader, model, criterion, optimizer, device, *,
 
                 loss, pred_mag = compute_loss(
                     motor_pred, bucket_pred, action_gt, terrain, criterion,
-                    bucket_loss_weight, speed_reg_weight, proximity_reg_weight,
-                    idle_reg_weight, smooth_reg_weight, diff_reg_weight)
+                    bucket_loss_weight,
+                    **weights)
 
             if train:
                 optimizer.zero_grad()
@@ -95,27 +124,21 @@ def run_training(cfg, model, optimizer, scheduler,
     """Run the full training loop.
 
     Handles:
-      - Curriculum stage transitions (using absolute epoch thresholds)
+      - Curriculum stage transitions with per-stage loss weight overrides
       - Per-epoch rich console logging
       - Live dashboard state updates
       - Checkpoint saving
-      - Early stopping (only after all hard curriculum stages are seen)
+      - Stale detection (non-stopping)
     """
     tc = cfg['training']
     cc = cfg.get('curriculum', {})
 
-    criterion            = nn.HuberLoss(delta=0.1)
-    bucket_loss_weight   = tc.get('bucket_loss_weight',    0.5)
-    speed_reg_weight     = tc.get('speed_reg_weight',      0.05)
-    proximity_reg_weight = tc.get('proximity_reg_weight',  0.03)
-    idle_reg_weight      = tc.get('idle_reg_weight',       0.003)
-    smooth_reg_weight    = tc.get('smooth_reg_weight',     0.02)
-    diff_reg_weight      = tc.get('diff_reg_weight',       0.01)
-    display_scale        = tc.get('loss_display_scale',    100.0)
+    criterion          = nn.HuberLoss(delta=0.1)
+    bucket_loss_weight = tc.get('bucket_loss_weight', 0.5)
+    display_scale      = tc.get('loss_display_scale', 100.0)
 
-    scaler = GradScaler('cuda') if device.type == 'cuda' else None
-
-    floor    = curriculum.floor_epoch(cc)
+    scaler  = GradScaler('cuda') if device.type == 'cuda' else None
+    floor   = curriculum.floor_epoch(cc)
     patience = max(tc['early_stop_patience'], max_epochs // 50)
 
     train_losses: list[float] = []
@@ -128,6 +151,7 @@ def run_training(cfg, model, optimizer, scheduler,
     prev_stage = -1
     prev_val   = float('inf')
     t0         = time.time()
+    weights    = _stage_weights(0, cc, tc)   # initialise for stage 0
 
     for epoch in range(start_epoch, max_epochs + 1):
         train_ds.reshuffle(epoch)
@@ -139,9 +163,17 @@ def run_training(cfg, model, optimizer, scheduler,
         next_label = f'→ stage {cur_stage + 1} at epoch {next_ep}' if next_ep else 'final stage'
 
         if cur_stage != prev_stage:
+            weights = _stage_weights(cur_stage, cc, tc)
             if prev_stage >= 0:
                 print(f'\n  ┌─ Curriculum advance: stage {prev_stage} → {cur_stage} ──────────────────────')
-                print(f'  │  Now training: {stage_name}')
+                print(f'  │  Now training : {stage_name}')
+                print(f'  │  Loss weights : '
+                      f'spd={weights["speed_reg_weight"]:.3f}  '
+                      f'prx={weights["proximity_reg_weight"]:.3f}  '
+                      f'smt={weights["smooth_reg_weight"]:.3f}  '
+                      f'dif={weights["diff_reg_weight"]:.3f}  '
+                      f'fwd={weights["forward_reg_weight"]:.3f}  '
+                      f'stn={weights["stillness_reg_weight"]:.3f}')
                 print(f'  └──────────────────────────────────────────────────────────────────')
                 no_improve = 0
             prev_stage = cur_stage
@@ -150,22 +182,13 @@ def run_training(cfg, model, optimizer, scheduler,
             train_loader, model, criterion, optimizer, device,
             train=True, grad_clip=tc['grad_clip'],
             bucket_loss_weight=bucket_loss_weight,
-            speed_reg_weight=speed_reg_weight,
-            proximity_reg_weight=proximity_reg_weight,
-            idle_reg_weight=idle_reg_weight,
-            smooth_reg_weight=smooth_reg_weight,
-            diff_reg_weight=diff_reg_weight,
-            scaler=scaler)
+            weights=weights, scaler=scaler)
 
         val_loss, val_pmag = run_epoch(
             val_loader, model, criterion, optimizer, device,
             train=False, grad_clip=0,
             bucket_loss_weight=bucket_loss_weight,
-            speed_reg_weight=speed_reg_weight,
-            proximity_reg_weight=proximity_reg_weight,
-            idle_reg_weight=idle_reg_weight,
-            smooth_reg_weight=smooth_reg_weight,
-            diff_reg_weight=diff_reg_weight)
+            weights=weights)
 
         scheduler.step()
         lr = scheduler.get_last_lr()[0]

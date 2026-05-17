@@ -102,6 +102,8 @@ training:
   idle_reg_weight:       0.003  # tiny penalty for near-zero motor predictions (< 0.05 magnitude)
   smooth_reg_weight:     0.02   # penalise large motor delta between consecutive steps (no jerky motion)
   diff_reg_weight:       0.01   # penalise high |left-right| during forward travel (no spinning while driving)
+  forward_reg_weight:    0.02   # penalise backward travel during nav phases (bucket=0)
+  stillness_reg_weight:  0.05   # penalise any motor output during dumping phase (bucket=2)
   loss_display_scale:    100    # multiply printed losses for readability — does NOT affect training
   arena_mix_ucf: 0.5            # 50/50 KSC / UCF split
   sim_dt: 0.10              # seconds per simulation step for sequence generation
@@ -131,6 +133,33 @@ curriculum:
   seq_len_s1:  48     # stage 1 — 4.8 s  (robot must travel ~0.96 m, enough to encounter + avoid obstacles)
   seq_len_s2: 128     # stage 2 — 12.8 s (DART recovery + full avoidance manoeuvres)
   seq_len_s3: 256     # stage 3 — 25.6 s (covers ~1/3 of a full 15 m+ traverse at 0.20 m/s)
+
+  # Per-stage loss weight overrides.
+  # Keys missing from a stage block fall back to the training: section defaults.
+  stage_weights:
+    s0:   # goal-seeking — force movement, no obstacles, loosen smoothness
+      speed_reg_weight:     0.08   # push hard to escape zero-speed collapse
+      proximity_reg_weight: 0.00   # no obstacles in stage 0
+      smooth_reg_weight:    0.01   # less smoothness so the model freely explores motion
+      diff_reg_weight:      0.00   # don't constrain turning yet
+      forward_reg_weight:   0.05   # strong forward bias — primary training signal
+      stillness_reg_weight: 0.02   # light; dumping is rare in stage 0
+
+    s1:   # basic avoidance — introduce proximity, tighten gradually
+      speed_reg_weight:     0.05
+      proximity_reg_weight: 0.01   # obstacles present but sparse
+      smooth_reg_weight:    0.015
+      diff_reg_weight:      0.005
+      forward_reg_weight:   0.03
+
+    s2:   # full obstacles + DART — use training section defaults for everything
+      {}
+
+    s3:   # hardening — tighten smoothness and stability for competition-ready behaviour
+      smooth_reg_weight:    0.04
+      diff_reg_weight:      0.02
+      forward_reg_weight:   0.01   # model knows to go forward by now
+      stillness_reg_weight: 0.08   # tighter dumping constraint
 
 checkpoints:
   dir: "checkpoints"
