@@ -182,9 +182,7 @@ def run_training(cfg, model, optimizer, scheduler,
                          val_loss, best_val, keep=keep)
 
         if epoch >= floor and no_improve >= patience:
-            print(f'\n  Early stop — no improvement for {no_improve} epochs '
-                  f'(floor={floor}, patience={patience})')
-            break
+            print(f'  [ stale: no improvement for {no_improve} epochs — continuing ]')
 
         gc.collect()
 
